@@ -47,7 +47,7 @@ def model(*answers, tools=False):
 
 def test_recall_before_answer_and_save_user_only(memory):
     llm = model()
-    def respond(messages, tools):
+    def respond(messages, tools, timeout=None):
         memory.recall.assert_called_once()
         memory.process_input.assert_not_called()
         assert "偏好中文" in str(messages)
@@ -63,7 +63,7 @@ def test_recall_before_answer_and_save_user_only(memory):
 
 def test_ablation_skips_memory_and_write(memory):
     llm = model()
-    def respond(messages, tools):
+    def respond(messages, tools, timeout=None):
         blob = str(messages)
         assert "偏好中文" not in blob
         assert "没有参考记忆" in blob
@@ -208,7 +208,7 @@ def test_retries_without_proxy_on_connect_error(monkeypatch):
     class APIConnectionError(Exception):
         pass
 
-    def fake(self, messages, tools, proxy):
+    def fake(self, messages, tools, proxy, timeout=None):
         calls.append(proxy)
         if proxy:
             raise APIConnectionError("proxy ssl failed")
@@ -223,7 +223,7 @@ def test_agent_api_uses_existing_orchestrator(monkeypatch, memory):
     from fastapi.testclient import TestClient
     import api.server as server
     monkeypatch.setattr(server, "orchestrator", memory)
-    monkeypatch.setattr(ChatModel, "complete", lambda *args: {"content": "按中文偏好回答"})
+    monkeypatch.setattr(ChatModel, "complete", lambda *args, **kwargs: {"content": "按中文偏好回答"})
     result = TestClient(server.app).post("/agent/chat", json={"user_id": "alice", "message": "给我建议"})
     assert result.status_code == 200
     assert result.json()["memories"][0]["id"] == "m1"
@@ -302,11 +302,12 @@ def test_exec_tool_disabled_by_default(memory, monkeypatch):
 
 def test_exec_tool_registered_and_executes(memory, monkeypatch):
     monkeypatch.setenv("AGENT_ENABLE_EXEC_TOOL", "1")
+    monkeypatch.setenv("AGENT_EXEC_ALLOWED_COMMANDS", json.dumps([_py("print(7)")]))
     call = {"id": "t1", "type": "function",
             "function": {"name": "exec_terminal", "arguments": json.dumps({"command": _py("print(7)")})}}
     seen = []
 
-    def respond(messages, tools):
+    def respond(messages, tools, timeout=None):
         seen.append(str(messages))
         return {"tool_calls": [call]} if len(seen) == 1 else {"content": "已执行"}
 
@@ -324,14 +325,16 @@ def test_exec_tool_rejected_when_not_enabled(memory, monkeypatch):
             "function": {"name": "exec_terminal", "arguments": json.dumps({"command": _py("print(1)")})}}
     seen = []
 
-    def respond(messages, tools):
+    def respond(messages, tools, timeout=None):
         seen.append(str(messages))
         return {"tool_calls": [call]} if len(seen) == 1 else {"content": "无法执行"}
 
     llm = model(tools=True)
     llm.complete.side_effect = respond
     result = MemoryAgent(memory, llm).chat(ChatRequest(user_id="alice", message="帮我执行", save_memory=False))
-    assert result["answer"] == "无法执行"
+    assert result["workflow"]["status"] == "partial"
+    assert result["workflow"]["steps"][0]["error_code"] == "tool_unavailable"
+    assert "任务尚未全部完成" in result["answer"]
     assert "不支持的工具" in seen[1]
 
 
@@ -341,14 +344,16 @@ def test_unknown_tool_returns_error(memory, monkeypatch):
             "function": {"name": "delete_everything", "arguments": json.dumps({"target": "/"})}}
     seen = []
 
-    def respond(messages, tools):
+    def respond(messages, tools, timeout=None):
         seen.append(str(messages))
         return {"tool_calls": [call]} if len(seen) == 1 else {"content": "无此工具"}
 
     llm = model(tools=True)
     llm.complete.side_effect = respond
     result = MemoryAgent(memory, llm).chat(ChatRequest(user_id="alice", message="帮我", save_memory=False))
-    assert result["answer"] == "无此工具"
+    assert result["workflow"]["status"] == "partial"
+    assert result["workflow"]["steps"][0]["error_code"] == "tool_unavailable"
+    assert "任务尚未全部完成" in result["answer"]
     assert "不支持的工具" in seen[1]
 
 
@@ -358,14 +363,16 @@ def test_exec_terminal_invalid_arguments_rejected(memory, monkeypatch):
             "function": {"name": "exec_terminal", "arguments": json.dumps({"command": "  "})}}
     seen = []
 
-    def respond(messages, tools):
+    def respond(messages, tools, timeout=None):
         seen.append(str(messages))
         return {"tool_calls": [call]} if len(seen) == 1 else {"content": "参数无效"}
 
     llm = model(tools=True)
     llm.complete.side_effect = respond
     result = MemoryAgent(memory, llm).chat(ChatRequest(user_id="alice", message="执行", save_memory=False))
-    assert result["answer"] == "参数无效"
+    assert result["workflow"]["status"] == "partial"
+    assert result["workflow"]["steps"][0]["error_code"] == "invalid_arguments"
+    assert "任务尚未全部完成" in result["answer"]
     assert "工具参数无效" in seen[1]
 
 
@@ -422,7 +429,7 @@ def test_basic_tools_registered_and_run(memory):
             "function": {"name": "read_file", "arguments": json.dumps({"path": ".env.example"})}}
     seen = []
 
-    def respond(messages, tools):
+    def respond(messages, tools, timeout=None):
         seen.append(str(messages))
         return {"tool_calls": [call]} if len(seen) == 1 else {"content": "已读取"}
 
@@ -440,14 +447,16 @@ def test_web_tool_rejected_when_not_enabled(memory, monkeypatch):
             "function": {"name": "web_fetch", "arguments": json.dumps({"url": "https://example.com"})}}
     seen = []
 
-    def respond(messages, tools):
+    def respond(messages, tools, timeout=None):
         seen.append(str(messages))
         return {"tool_calls": [call]} if len(seen) == 1 else {"content": "无法抓取"}
 
     llm = model(tools=True)
     llm.complete.side_effect = respond
     result = MemoryAgent(memory, llm).chat(ChatRequest(user_id="alice", message="抓网页", save_memory=False))
-    assert result["answer"] == "无法抓取"
+    assert result["workflow"]["status"] == "partial"
+    assert result["workflow"]["steps"][0]["error_code"] == "tool_unavailable"
+    assert "任务尚未全部完成" in result["answer"]
     assert "不支持的工具" in seen[1]
 
 
@@ -511,7 +520,7 @@ def test_new_basic_tools_registered_and_run(memory):
                          "arguments": json.dumps({"pattern": "src/**/*.py"})}}
     seen = []
 
-    def respond(messages, tools):
+    def respond(messages, tools, timeout=None):
         seen.append(str(messages))
         names = {t["function"]["name"] for t in (tools or [])}
         return {"tool_calls": [call]} if len(seen) == 1 else {"content": "已搜索"}
@@ -531,11 +540,12 @@ def test_chat_stream_emits_tool_and_token_events(memory):
     """流式端点应实时产出 token、工具开始/结果、最终 done 事件。"""
     class StreamModel:
         tools_enabled = True
+        timeout = 60.0
 
         def __init__(self):
             self.n = 0
 
-        def complete_stream(self, messages, tools):
+        def complete_stream(self, messages, tools, timeout=None):
             # 真实模型每次 complete_stream 调用只产出一条最终消息；
             # 用调用次数模拟「第一轮规划工具、第二轮给出答案」。
             self.n += 1

@@ -219,3 +219,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .stat-grid > div:first-child { grid-column: 1 / -1; }
   .layer-row { grid-template-columns: 76px 1fr 48px; }
 }
+
+.run-status { color: #bfcac0; font-size: 13px; margin: 8px 0; }
+.run-failure { color: #efb3b3; font-size: 14px; white-space: pre-wrap; }
+.workflow-phases { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-left: 18px; color: #a6aaa3; font-size: 12px; }

@@ -1,9 +1,10 @@
-import { computed, createApp, nextTick, onMounted, ref } from 'vue'
+import { computed, createApp, nextTick, onMounted, ref, reactive } from 'vue'
 import './style.css'
 import IngestionPanel from './IngestionPanel.js'
 import { authHeaders, requestApi } from './ingestion.js'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { streamChat, applyChatEvent } from './chat-stream.js'
 
 // 把模型 markdown 文本安全渲染为 HTML（DOMPurify 消毒防 XSS）。流式场景下由 scheduleRender
 // 节流调用，避免每个 token 都对整篇重解析（O(n^2) 卡顿）。
@@ -258,46 +259,11 @@ createApp({
       }
     }
 
-    const streamChat = async (payload, handlers, timeout = 240000) => {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), timeout)
-      try {
-        const response = await fetch('/api/agent/chat/stream', {
-          method: 'POST',
-          headers: authHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        })
-        if (!response.ok) {
-          let detail = ''
-          try { detail = (await response.json()).detail } catch {}
-          throw new Error(typeof detail === 'string' && detail ? detail : `请求失败（${response.status}）`)
-        }
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder('utf-8')
-        let buffer = ''
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buffer += decoder.decode(value, { stream: true })
-          let sep
-          while ((sep = buffer.indexOf('\n\n')) !== -1) {
-            const raw = buffer.slice(0, sep)
-            buffer = buffer.slice(sep + 2)
-            const dataLine = raw.split('\n').find((l) => l.startsWith('data:'))
-            if (!dataLine) continue
-            const data = dataLine.slice(5).trim()
-            if (!data) continue
-            let event
-            try { event = JSON.parse(data) } catch { continue }
-            handlers(event)
-          }
-        }
-      } catch (error) {
-        if (error.name === 'AbortError') throw new Error(`请求超过 ${Math.ceil(timeout / 1000)} 秒，后端可能仍在处理。`)
-        throw error
-      } finally { clearTimeout(timer) }
-    }
+    let activeController = null
+    const stopMessage = () => { activeController?.abort() }
+    const runLabels = { running: '执行中', completed: '已完成', partial: '部分完成', failed: '执行失败',
+      cancelled: '已停止', timed_out: '执行超时', needs_clarification: '需要补充说明', cancel_requested: '已请求停止' }
+    const stageLabels = { route: '识别请求', recall: '准备记忆', model: '生成回答', tool: '执行工具', verify: '核验结果', save: '处理记忆' }
 
     const sendMessage = async () => {
       if (!user.value.trim()) return tell('请先填写用户 ID')
@@ -321,7 +287,9 @@ createApp({
         return
       }
 
-      const assistantMsg = { id: Date.now() + 1, role: 'assistant', content: '', steps: [], time: now() }
+      const assistantMsg = reactive({ id: Date.now() + 1, role: 'assistant', content: '', steps: [], phases: [], status: 'running', time: now() })
+      const requestSession = sessionKey.value
+      activeController = new AbortController()
       let pushed = false
       const ensureMsg = () => { if (!pushed) { messages.value.push(assistantMsg); pushed = true } }
       const slowTimer = window.setTimeout(() => { modelSlow.value = true }, 2500)
@@ -331,24 +299,16 @@ createApp({
           history: agentHistory.value.slice(-20),
           use_memory: useMemory.value, save_memory: saveMemory.value,
         }, (event) => {
+          if (requestSession !== sessionKey.value) return
+          ensureMsg()
+          applyChatEvent(assistantMsg, event)
           if (event.type === 'token') {
-            ensureMsg()
-            assistantMsg.content += event.text
             scheduleRender(assistantMsg)
-          } else if (event.type === 'tool_start') {
-            ensureMsg(); assistantMsg.steps.push({ name: event.name, args: event.args || {}, status: 'running', result: '' })
-            scrollToBottom()
-          } else if (event.type === 'tool_result') {
-            const step = assistantMsg.steps.find((s) => s.name === event.name && s.status === 'running')
-              || assistantMsg.steps[assistantMsg.steps.length - 1]
-            if (step) { step.status = event.ok ? 'done' : 'failed'; step.result = event.content || '' }
-            scrollToBottom()
           } else if (event.type === 'done') {
             ensureMsg()
-            if (event.answer) assistantMsg.content = assistantMsg.content || event.answer
             memories.value = (event.memories || []).map(mapMemory)
             latency.value = `${Math.round(event.recall_ms)} ms`
-            pushEvent('recall', '完成智能体回答', `${(event.memories || []).length} 条记忆 · 总耗时 ${Math.round(event.latency_ms)} ms`)
+            pushEvent('recall', runLabels[assistantMsg.status] || '收到执行结果', `${(event.memories || []).length} 条记忆 · 总耗时 ${Math.round(event.latency_ms)} ms`)
             const write = event.memory_write
             if (write && write.status === 'accepted') pushEvent('memory', '本轮内容已接收', write.memory_id || '已进入记忆处理流程')
             if (write && write.status === 'rejected') pushEvent('memory', '本轮内容未写入', write.reasons?.join('；') || '未通过记忆策略')
@@ -356,25 +316,31 @@ createApp({
             if (event.reset_history) pushEvent('forget', '遗忘已处理，聊天上下文已清空', `${(event.deleted_ids || []).length} 条记忆已删除`)
             agentHistory.value = event.reset_history
               ? []
-              : [...agentHistory.value, { role: 'user', content: text }, { role: 'assistant', content: assistantMsg.content }].slice(-20)
+              : assistantMsg.status === 'completed' ? [...agentHistory.value, { role: 'user', content: text }, { role: 'assistant', content: assistantMsg.content }].slice(-20) : agentHistory.value
             if (event.reset_history) messages.value = []
             renderNow(assistantMsg)
             scrollToBottom()
           } else if (event.type === 'error') {
             ensureMsg()
-            assistantMsg.content = assistantMsg.content || `智能体调用失败：${event.message}`
+            assistantMsg.failure = event.message || '智能体执行失败'
             pushEvent('error', '智能体调用失败', event.message)
             renderNow(assistantMsg)
             scrollToBottom()
           }
-        })
+        }, { headers: authHeaders(), signal: activeController.signal })
         await loadDashboard({ quiet: true })
       } catch (error) {
         ensureMsg()
-        assistantMsg.content = assistantMsg.content || `智能体调用失败：${error.message}`
+        assistantMsg.status = error.name === 'AbortError' ? 'cancel_requested' : error.name === 'TimeoutError' ? 'timed_out' : 'failed'
+        assistantMsg.failure = error.message
+        for (const step of assistantMsg.steps) if (step.status === 'running') step.status = 'interrupted'
+        for (const phase of assistantMsg.phases) if (phase.phase !== 'end') phase.phase = 'interrupted'
+        renderNow(assistantMsg)
         pushEvent('error', '智能体调用失败', error.message)
       } finally {
+        activeController = null
         window.clearTimeout(slowTimer)
+        renderNow(assistantMsg)
         sending.value = false
         modelSlow.value = false
         await scrollToBottom()
@@ -478,7 +444,7 @@ createApp({
       connect({ quiet: true })
     })
 
-    return { useMemory, saveMemory, newChat, user, userDraft, live, syncing, sending, ingesting, sessionKey, onIngestionBusy, onIngestionCompleted, modelSlow, activeTab, draft, messages, memories, preferences, stats, latency, lastSynced, events, forgetInstruction, forgetResult, toast, chatScroll, tabs, activePreferences, statusText, connect, loadDashboard, commitUser, onUserKeydown, sendMessage, handleComposerKeydown, openIngestion, usePrompt, prepareForget, forget, renderMarkdown }
+    return { stopMessage, runLabels, stageLabels, useMemory, saveMemory, newChat, user, userDraft, live, syncing, sending, ingesting, sessionKey, onIngestionBusy, onIngestionCompleted, modelSlow, activeTab, draft, messages, memories, preferences, stats, latency, lastSynced, events, forgetInstruction, forgetResult, toast, chatScroll, tabs, activePreferences, statusText, connect, loadDashboard, commitUser, onUserKeydown, sendMessage, handleComposerKeydown, openIngestion, usePrompt, prepareForget, forget, renderMarkdown }
   },
   template: `
     <div class="app-shell">
@@ -503,12 +469,17 @@ createApp({
               <div class="message-wrap">
                 <div class="message-meta"><b>{{ message.role === 'assistant' ? '麒忆助理' : '你' }}</b><span>{{ message.time }}</span></div>
                 <div class="bubble" v-html="message.html || renderMarkdown(message.content)"></div>
+                <p class="run-status" data-testid="run-status" v-if="message.status" role="status">{{ runLabels[message.status] || message.status }}<span v-if="message.status === 'running' && message.stage"> · {{ stageLabels[message.stage] || message.stage }}</span></p>
+                <p class="run-failure" data-testid="run-failure" v-if="message.failure" role="alert">{{ message.failure }}</p>
+                <p class="run-status" v-if="message.memoryWrite">本轮记忆：{{ ({ accepted: '已接收，按记忆策略处理', rejected: '未通过保存策略', disabled: '未启用保存', skipped: '已跳过保存', failed: '保存失败', unknown: '结果待同步确认' })[message.memoryWrite] || message.memoryWrite }}</p>
+                <ol class="workflow-phases" v-if="message.phases && message.phases.length"><li v-for="phase in message.phases" :key="phase.name">{{ stageLabels[phase.name] || phase.name }} · {{ phase.phase === 'end' ? '完成' : phase.phase === 'interrupted' ? '已中断' : '处理中' }}</li></ol>
+                <ul v-if="message.workflow?.artifacts?.length"><li v-for="artifact in message.workflow.artifacts" :key="artifact.path">已核实文件：{{ artifact.path }}</li></ul>
                 <div class="tool-steps" v-if="message.steps && message.steps.length">
-                  <div class="tool-step" v-for="step in message.steps" :key="step.name + '-' + step.status + '-' + (step.result || '').length">
+                  <div class="tool-step" v-for="step in message.steps" :key="step.id || step.name">
                     <span class="tool-dot" :class="step.status"></span>
                     <span class="tool-name">{{ step.name }}</span>
                     <code class="tool-args" v-if="step.args && Object.keys(step.args).length">{{ JSON.stringify(step.args) }}</code>
-                    <span class="tool-state" :class="step.status">{{ step.status === 'running' ? '运行中' : step.status === 'done' ? '完成' : '失败' }}</span>
+                    <span class="tool-state" :class="step.status">{{ step.status === 'running' ? '运行中' : step.status === 'done' ? '完成' : step.status === 'interrupted' ? '已中断' : '失败' }}</span>
                     <pre class="tool-output" v-if="step.result">{{ step.result }}</pre>
                   </div>
                 </div>
@@ -534,6 +505,7 @@ createApp({
               <span>Enter 发送 · 可上传 PDF / Word / 图片</span>
               <div class="composer-actions">
                 <button type="button" class="file-button" data-testid="open-ingestion" @click="openIngestion">＋ 多源接入</button>
+                <button v-if="sending" type="button" data-testid="chat-stop" @click="stopMessage">停止</button>
                 <button data-testid="chat-send" :disabled="!draft.trim() || sending || syncing || ingesting">{{ sending ? '处理中' : '发送 ↑' }}</button>
               </div>
             </div>

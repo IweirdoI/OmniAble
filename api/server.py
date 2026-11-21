@@ -17,6 +17,7 @@ from src.common.models import MemoryType, RetrievalQuery
 from src.core.factory import create_orchestrator
 from src.core.orchestrator import MemoryOrchestrator, ProcessInputResult
 from src.knowledge.memory_service.memory_schema import MemoryEntry
+from src.agent.runtime import RunTimedOut, get_stream_slots
 from src.agent.service import ChatRequest, MemoryAgent, ModelUnavailable
 from src.knowledge.memory_service.milvus_client import MemoryBackendUnavailable
 from src.security.semantic_detector import SemanticDetectionUnavailable
@@ -61,17 +62,57 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 @app.post("/agent/chat")
 def agent_chat(req: ChatRequest) -> dict[str, Any]:
+    agent = MemoryAgent(orchestrator)
     try:
-        return MemoryAgent(orchestrator).chat(req)
+        return agent.chat(req)
     except ModelUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        # Keep the legacy string detail while adding structured run state.
+        content = {"detail": str(exc)}
+        if agent._ctx is not None:
+            content["workflow"] = agent._workflow("failed", "model_unavailable")
+        return JSONResponse(status_code=503, content=content)
+    except RunTimedOut as exc:
+        # 同步入口：超时沿用 HTTP 错误语义，不伪装成 200 成功
+        raise HTTPException(
+            status_code=504,
+            detail={"message": "执行超过请求时间预算已停止；请缩小任务范围后重试。",
+                    "workflow": agent._workflow("timed_out", exc.reason)},
+        ) from exc
 
 
 @app.post("/agent/chat/stream")
 async def agent_chat_stream(req: ChatRequest):
-    """SSE 流式对话：逐事件推送 token、工具调用开始/结果与最终答案。"""
-    agent = MemoryAgent(orchestrator, stream=True)
-    return StreamingResponse(agent.chat_stream(req), media_type="text/event-stream")
+    """SSE 流式对话：逐事件推送 token、工具调用开始/结果与最终答案。
+
+    并发上限在开始输出 SSE 前检查（进程内约束，非分布式限流）；
+    达到上限直接 429 + Retry-After，不创建无界等候线程。槽位由执行
+    worker 在真实退出时释放——未退出的调用继续占用额度。
+    """
+    slots = get_stream_slots()
+    if not slots.try_acquire():
+        raise HTTPException(
+            status_code=429,
+            detail="当前流式执行数已达上限，请稍后重试。",
+            headers={"Retry-After": "2"},
+        )
+    try:
+        agent = MemoryAgent(orchestrator, stream=True)
+        class RunResponse(StreamingResponse):
+            async def __call__(self, scope, receive, send):
+                try:
+                    await super().__call__(scope, receive, send)
+                finally:
+                    if agent._ctx:
+                        agent._ctx.cancel("client_disconnected")
+                    if not agent._worker_started:
+                        slots.release()
+        return RunResponse(agent.chat_stream(req, on_finished=slots.release),
+                           media_type="text/event-stream",
+                           headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    except Exception:
+        # 响应未能建立时立即归还；正常路径由 worker 退出时释放
+        slots.release()
+        raise
 
 # CORS：绝不将 allow_origins 设为 "*" 同时 allow_credentials=True（无效且不安全的组合）。
 # 来源由 API_CORS_ORIGINS 显式配置（逗号分隔）；未配置时仅放行本地前端，且不开凭证。

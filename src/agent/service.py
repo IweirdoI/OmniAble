@@ -22,6 +22,26 @@ from urllib.parse import urlparse
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field, ConfigDict
 
+from src.agent.runtime import (
+    HEARTBEAT_COMMENT,
+    EventChannel,
+    RunAborted,
+    RunContext,
+    RunTimedOut,
+    format_sse,
+)
+from src.agent.workflow import (
+    STATUS_CANCELLED,
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+    STATUS_PARTIAL,
+    STATUS_TIMED_OUT,
+    WorkflowBudget,
+    budget_usage,
+    build_workflow_payload,
+    get_workflow_budget,
+    route_request,
+)
 from src.common.config import get_llm_config
 from src.common.models import RetrievalQuery
 from src.security.service import (
@@ -66,6 +86,9 @@ class AgentState(TypedDict, total=False):
 
 class ModelUnavailable(RuntimeError):
     pass
+
+
+# 明确遗忘指令的识别（同步与 SSE 入口共用；路由细化在设计第二阶段实现）
 
 
 _PLACEHOLDER_KEYS = frozenset({
@@ -129,11 +152,12 @@ class ChatModel:
             "ProxyError", "ReadTimeout", "ConnectionError",
         })
 
-    def _complete_once(self, messages, tools, proxy: str | None):
+    def _complete_once(self, messages, tools, proxy: str | None, timeout: float | None = None):
         """单次（非流式）调用聊天补全。
 
         先对 messages/tools 做出站脱敏（protect_payload），再走 OpenAI 兼容接口；
         temperature/max_tokens 见类常量 _CHAT_TEMPERATURE/_CHAT_MAX_TOKENS。
+        timeout 可由调用方按请求剩余时间收紧（取自身上限与剩余时间的较小值）。
         连接类异常由调用方负责代理重试（见 complete）。
         """
         messages = protect_payload(messages)
@@ -141,7 +165,8 @@ class ChatModel:
         import httpx
         from openai import OpenAI
 
-        timeout = httpx.Timeout(self.timeout)
+        effective = float(timeout if timeout is not None else self.timeout)
+        timeout = httpx.Timeout(effective)
         client_kwargs: dict[str, Any] = {"timeout": timeout, "trust_env": False}
         if proxy:
             client_kwargs["proxy"] = proxy
@@ -149,7 +174,7 @@ class ChatModel:
             with OpenAI(
                 base_url=self.base_url,
                 api_key=self.api_key or "local",
-                timeout=self.timeout,
+                timeout=effective,
                 max_retries=0,
                 http_client=http_client,
             ) as client:
@@ -160,7 +185,7 @@ class ChatModel:
                 )
                 return result.choices[0].message.model_dump(exclude_none=True)
 
-    def complete(self, messages, tools=None):
+    def complete(self, messages, tools=None, timeout: float | None = None):
         if not self.model or not self.base_url:
             raise ModelUnavailable("请配置 AGENT_BASE_URL、AGENT_MODEL 和 AGENT_API_KEY；本机模型可省略密钥。")
         if not self.local and self._is_placeholder_key(self.api_key):
@@ -170,13 +195,18 @@ class ChatModel:
             )
         proxy = None if self.local else self._http_proxy()
         host = urlparse(self.base_url).hostname or self.base_url
+        started = time.monotonic()
+        limit = timeout if timeout is not None else self.timeout
         try:
             try:
-                return self._complete_once(messages, tools, proxy)
+                return self._complete_once(messages, tools, proxy, timeout)
             except Exception as first:
                 # 本机 Clash HTTP 代理常把硅基流动 HTTPS 弄挂，直连往往可用。
                 if proxy and self._is_connect_error(first):
-                    return self._complete_once(messages, tools, None)
+                    remaining = limit - (time.monotonic() - started)
+                    if remaining <= 0:
+                        raise
+                    return self._complete_once(messages, tools, None, remaining)
                 raise
         except Exception as exc:
             status = getattr(exc, "status_code", None)
@@ -200,7 +230,7 @@ class ChatModel:
                 f"模型调用失败（{hint}）。请检查模型服务、模型名称、密钥和代理。"
             ) from exc
 
-    def complete_stream(self, messages, tools=None):
+    def complete_stream(self, messages, tools=None, timeout: float | None = None):
         """与 complete 相同，但逐 token 流式产出。每次产出 {"kind":"token","text":...}，
         结束前产出 {"kind":"message","message":<完整消息 dict>}。"""
         if not self.model or not self.base_url:
@@ -211,28 +241,35 @@ class ChatModel:
                 "SILICONFLOW_API_KEY 换成硅基流动控制台的真实 Key，然后重启 uvicorn。"
             )
         proxy = None if self.local else self._http_proxy()
+        started = time.monotonic()
+        limit = timeout if timeout is not None else self.timeout
+        emitted = False
         try:
-            yield from self._stream_once(messages, tools, proxy)
-        except Exception as exc:  # 首包连接失败时直连重试一次
-            if proxy and self._is_connect_error(exc):
-                yield from self._stream_once(messages, tools, None)
+            for event in self._stream_once(messages, tools, proxy, limit):
+                emitted = True
+                yield event
+        except Exception as exc:
+            remaining = limit - (time.monotonic()-started)
+            if proxy and not emitted and remaining > 0 and self._is_connect_error(exc):
+                yield from self._stream_once(messages, tools, None, remaining)
                 return
             raise
 
-    def _stream_once(self, messages, tools, proxy):
+    def _stream_once(self, messages, tools, proxy, timeout: float | None = None):
         messages = protect_payload(messages)
         tools = protect_payload(tools)
         import httpx
         from openai import OpenAI
 
-        timeout = httpx.Timeout(self.timeout)
+        effective = float(timeout if timeout is not None else self.timeout)
+        timeout = httpx.Timeout(effective)
         client_kwargs: dict[str, Any] = {"timeout": timeout, "trust_env": False}
         if proxy:
             client_kwargs["proxy"] = proxy
         with httpx.Client(**client_kwargs) as http_client:
             with OpenAI(
                 base_url=self.base_url, api_key=self.api_key or "local",
-                timeout=self.timeout, max_retries=0, http_client=http_client,
+                timeout=effective, max_retries=0, http_client=http_client,
             ) as client:
                 options = {"tools": tools} if tools else {}
                 stream = client.chat.completions.create(
@@ -241,25 +278,29 @@ class ChatModel:
                 )
                 content = ""
                 tool_calls: dict[int, dict[str, Any]] = {}
-                for chunk in stream:
-                    if not chunk.choices:
-                        continue
-                    delta = chunk.choices[0].delta
-                    piece = getattr(delta, "content", None)
-                    if piece:
-                        content += piece
-                        yield {"kind": "token", "text": piece}
-                    for tc in getattr(delta, "tool_calls", None) or []:
-                        idx = tc.index if tc.index is not None else 0
-                        slot = tool_calls.setdefault(idx, {
-                            "id": "", "type": "function",
-                            "function": {"name": "", "arguments": ""}})
-                        if tc.id:
-                            slot["id"] = tc.id
-                        if tc.function and tc.function.name:
-                            slot["function"]["name"] += tc.function.name
-                        if tc.function and tc.function.arguments:
-                            slot["function"]["arguments"] += tc.function.arguments
+                try:
+                    for chunk in stream:
+                        if not chunk.choices:
+                            continue
+                        delta = chunk.choices[0].delta
+                        piece = getattr(delta, "content", None)
+                        if piece:
+                            content += piece
+                            yield {"kind": "token", "text": piece}
+                        for tc in getattr(delta, "tool_calls", None) or []:
+                            idx = tc.index if tc.index is not None else 0
+                            slot = tool_calls.setdefault(idx, {
+                                "id": "", "type": "function",
+                                "function": {"name": "", "arguments": ""}})
+                            if tc.id:
+                                slot["id"] = tc.id
+                            if tc.function and tc.function.name:
+                                slot["function"]["name"] += tc.function.name
+                            if tc.function and tc.function.arguments:
+                                slot["function"]["arguments"] += tc.function.arguments
+                finally:
+                    if hasattr(stream, "close"):
+                        stream.close()
                 message = {"role": "assistant", "content": content or None}
                 if tool_calls:
                     message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
@@ -332,7 +373,7 @@ def _strip_wrapping_quotes(token: str) -> str:
     return token
 
 
-def _exec_terminal(command: str, timeout: int | None = None) -> tuple[bool, str]:
+def _exec_terminal(command: str, timeout: int | None = None, *, require_success: bool = False) -> tuple[bool, str]:
     """在沙箱根目录中执行单条命令（不使用 shell）。
 
     Returns:
@@ -398,7 +439,7 @@ def _exec_terminal(command: str, timeout: int | None = None) -> tuple[bool, str]
     if len(output) > _EXEC_OUTPUT_LIMIT:
         output = output[:_EXEC_OUTPUT_LIMIT] + "\n...（输出已截断）"
     status = "成功" if done.returncode == 0 else f"失败（退出码 {done.returncode}）"
-    return True, f"[沙箱根目录 {root}]\n执行{status}：{cmd}\n{output}".strip()
+    return (done.returncode == 0 if require_success else True), f"[沙箱根目录 {root}]\n执行{status}：{cmd}\n{output}".strip()
 
 
 # ---------------------------------------------------------------------------
@@ -603,7 +644,8 @@ def _calculate(expression: str) -> tuple[bool, str]:
     return True, f"{expr} = {result}"
 
 
-def _web_fetch(url: str) -> tuple[bool, str]:
+def _web_fetch(url: str, timeout: float | None = None) -> tuple[bool, str]:
+    """抓取网页文本；timeout 取抓取上限与请求剩余时间的较小值。"""
     url = (url or "").strip()
     if not url:
         return False, "URL 为空。"
@@ -616,9 +658,10 @@ def _web_fetch(url: str) -> tuple[bool, str]:
 
     if not is_external_url_safe(url):
         return False, "出于安全策略，禁止访问内网、回环或链路本地地址（SSRF 防护）。"
+    effective = _WEB_FETCH_TIMEOUT if timeout is None else max(1.0, min(_WEB_FETCH_TIMEOUT, float(timeout)))
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "MOKOA-Agent/1.0"})
-        with urllib.request.urlopen(req, timeout=_WEB_FETCH_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=effective) as resp:
             raw = resp.read(_WEB_FETCH_MAX_BYTES + 1)
             ctype = resp.headers.get("Content-Type", "")
     except (urllib.error.URLError, ValueError, OSError) as exc:
@@ -777,7 +820,7 @@ def _edit_file(path: str, old_string: str, new_string: str,
         return False, (f"old_string 出现 {count} 次，存在歧义；请提供更具体的字符串，"
                       f"或设置 replace_all=true 以全部替换。")
     done = count if replace_all else 1
-    new_data = data.replace(old_string, new_string, 0 if replace_all else 1)
+    new_data = data.replace(old_string, new_string) if replace_all else data.replace(old_string, new_string, 1)
     try:
         with open(full, "w", encoding="utf-8") as fh:
             fh.write(new_data)
@@ -786,31 +829,34 @@ def _edit_file(path: str, old_string: str, new_string: str,
     return True, f"已更新 {path}（替换 {done} 处）。"
 
 
-def _run_local_tool(name: str, args: dict) -> str:
-    """执行基础只读工具，返回给模型的文本结果（参数非法时抛 ValueError）。"""
+def _run_local_tool(name: str, args: dict) -> tuple[bool, str]:
+    """执行基础工具，传播底层 (ok, content) 成功标志（参数非法时抛 ValueError）。
+
+    ok 必须来自底层函数的真实结果，不能用错误文本猜测（设计 §4）。
+    """
     if name == "read_file":
         path = args.get("path")
         if not isinstance(path, str) or not path.strip() or set(args) != {"path"}:
             raise ValueError("invalid tool")
-        return _read_file(path)[1]
+        return _read_file(path)
     if name == "list_directory":
         if set(args) - {"path"}:
             raise ValueError("invalid tool")
-        return _list_directory(args.get("path"))[1]
+        return _list_directory(args.get("path"))
     if name == "get_current_datetime":
         if args:
             raise ValueError("invalid tool")
-        return _get_current_datetime()[1]
+        return _get_current_datetime()
     if name == "calculate":
         expr = args.get("expression")
         if not isinstance(expr, str) or not expr.strip() or set(args) != {"expression"}:
             raise ValueError("invalid tool")
-        return _calculate(expr)[1]
+        return _calculate(expr)
     if name == "search_files":
         pattern = args.get("pattern")
         if not isinstance(pattern, str) or not pattern.strip() or set(args) - {"pattern", "path"}:
             raise ValueError("invalid tool")
-        return _search_files(pattern, args.get("path"))[1]
+        return _search_files(pattern, args.get("path"))
     if name == "search_content":
         pattern = args.get("pattern")
         if not isinstance(pattern, str) or not pattern.strip():
@@ -819,13 +865,13 @@ def _run_local_tool(name: str, args: dict) -> str:
             raise ValueError("invalid tool")
         return _search_content(
             pattern, args.get("path"), args.get("glob", "*"),
-            args.get("context", 0), bool(args.get("case_sensitive", False)))[1]
+            args.get("context", 0), bool(args.get("case_sensitive", False)))
     if name == "write_file":
         path = args.get("path")
         content = args.get("content")
         if not isinstance(path, str) or not isinstance(content, str) or set(args) - {"path", "content", "overwrite"}:
             raise ValueError("invalid tool")
-        return _write_file(path, content, bool(args.get("overwrite", False)))[1]
+        return _write_file(path, content, bool(args.get("overwrite", False)))
     if name == "edit_file":
         path = args.get("path")
         old_string = args.get("old_string")
@@ -833,7 +879,7 @@ def _run_local_tool(name: str, args: dict) -> str:
         if not isinstance(path, str) or not isinstance(old_string, str) or not isinstance(new_string, str) \
                 or set(args) - {"path", "old_string", "new_string", "replace_all"}:
             raise ValueError("invalid tool")
-        return _edit_file(path, old_string, new_string, bool(args.get("replace_all", False)))[1]
+        return _edit_file(path, old_string, new_string, bool(args.get("replace_all", False)))
     raise ValueError("invalid tool")
 
 
@@ -878,26 +924,34 @@ MEMORY_OFF = (
 
 
 class MemoryAgent:
-    def __init__(self, orchestrator, model=None, stream: bool = False):
+    def __init__(self, orchestrator, model=None, stream: bool = False,
+                 budget: WorkflowBudget | None = None):
         self.memory = orchestrator
         self.model = model or ChatModel()
         # 终端执行工具默认关闭，需显式设置 AGENT_ENABLE_EXEC_TOOL=1 才注册给模型
         self.exec_enabled = os.getenv("AGENT_ENABLE_EXEC_TOOL", "0") == "1"
         # 联网抓取工具默认关闭，需显式设置 AGENT_ENABLE_WEB_TOOL=1 才注册给模型
         self.web_enabled = os.getenv("AGENT_ENABLE_WEB_TOOL", "0") == "1"
-        # 流式模式：工具调用与回答 token 通过事件队列实时推给前端（SSE）
+        # 流式模式：工具调用与回答 token 通过事件通道实时推给前端（SSE）
         self.streaming = stream
-        self._event_queue: "queue.Queue | None" = queue.Queue() if stream else None
+        # 请求级执行预算（服务端配置；客户端请求不可提升额度）
+        self.budget = budget or get_workflow_budget()
+        # 每个实例服务一次请求：上下文与通道随请求创建（同步请求无通道）
+        self._ctx: RunContext | None = None
+        self._channel: EventChannel | None = None
         self._started = 0.0
+        self._worker_started = False
         graph = StateGraph(AgentState)
         graph.add_node("recall", self._recall)
         graph.add_node("model", self._model)
         graph.add_node("tools", self._tools)
+        graph.add_node("verify", self._verify)
         graph.add_node("save", self._save)
         graph.add_edge(START, "recall")
         graph.add_edge("recall", "model")
-        graph.add_conditional_edges("model", lambda s: "tools" if s["tool_calls"] else "save")
+        graph.add_conditional_edges("model", lambda s: "tools" if s["tool_calls"] else "verify")
         graph.add_edge("tools", "model")
+        graph.add_edge("verify", "save")
         graph.add_edge("save", END)
         # Deliberately no checkpoint: the browser owns bounded session history.
         # Forgetting therefore cannot leave a second server-side chat archive.
@@ -909,9 +963,22 @@ class MemoryAgent:
         return [item.model_dump(mode="json", exclude={"embedding"}) for item in result.items]
 
     def _emit(self, event: dict) -> None:
-        """流式模式下把事件放入队列（非流式时静默丢弃）。"""
-        if self.streaming and self._event_queue is not None:
-            self._event_queue.put(event)
+        """流式模式下把事件放入通道（非流式时静默丢弃）。
+
+        通道有界：消费者失联时在耐心窗口后以取消收尾，不无限积压、不静默丢弃。
+        """
+        if self._channel is not None:
+            self._channel.put(event)
+
+    def _stage(self, stage: str, phase: str, summary: str | None = None,
+               elapsed_ms: float | None = None) -> None:
+        """阶段事件：recall/model/tool/verify/save 的开始/结束与短摘要。"""
+        event: dict[str, Any] = {"type": "stage", "stage": stage, "phase": phase}
+        if elapsed_ms is not None:
+            event["elapsed_ms"] = round(elapsed_ms, 3)
+        if summary:
+            event["summary"] = summary[:200]
+        self._emit(event)
 
     def _emit_token(self, text: str) -> None:
         """流式模式下把 token 实时推送给前端（非流式时静默丢弃）。"""
@@ -920,10 +987,16 @@ class MemoryAgent:
 
     def _recall(self, state):
         req = state["request"]
+        # 节点入口检查取消/截止
+        if self._ctx is not None:
+            self._ctx.check("recall")
         started = perf_counter()
+        self._stage("recall", "start")
         items, profile = [], {}
         if req.use_memory:
             items = self._search(req, req.message)
+            if self._ctx is not None:
+                self._ctx.check("before_profile")
             profile = self.memory.get_preference_profile(req.user_id, scene_id=req.scene_id)
         # Bound prompt size and redact before passing context to the model.
         context = json.dumps({"memories": items, "preferences": profile}, ensure_ascii=False, default=str)
@@ -940,13 +1013,21 @@ class MemoryAgent:
             messages.append({"role": "user", "content": MEMORY_OFF})
         messages.extend({"role": m.role, "content": redact_sensitive_text(m.content)} for m in req.history)
         messages.append({"role": "user", "content": redact_sensitive_text(req.message)})
+        recall_ms = (perf_counter() - started) * 1000
+        self._stage("recall", "end", summary=f"召回 {len(items)} 条记忆", elapsed_ms=recall_ms)
         self._emit({"type": "recall", "memories": len(items),
-                    "recall_ms": round(perf_counter() - started, 3) * 1000})
+                    "recall_ms": round(recall_ms, 3)})
         return {"memories": items, "messages": messages, "rounds": 0,
-                "recall_ms": (perf_counter() - started) * 1000, "warnings": []}
+                "recall_ms": recall_ms, "warnings": []}
 
     def _model(self, state):
-        enabled = self.model.tools_enabled and state["rounds"] < 2
+        ctx = self._ctx
+        # 模型调用前检查取消与总 deadline；终局调用同样受剩余时间约束
+        if ctx is not None:
+            ctx.check("model")
+        enabled = (self.model.tools_enabled and state["rounds"] < self.budget.max_tool_rounds
+                   and not (ctx and (ctx.partial or ctx.tool_calls >= self.budget.max_total_tool_calls
+                            or ctx.consecutive_tool_failures >= self.budget.max_consecutive_tool_failures)))
         # 按可用性动态注册工具：记忆检索需要开启记忆，终端执行需要单独开关
         tools = []
         if enabled and state["request"].use_memory:
@@ -998,21 +1079,44 @@ class MemoryAgent:
             raise ModelUnavailable("敏感信息检测未完成，本次未发送给对话模型；请检查本地检测服务后重试。") from None
         except (ValueError, TypeError, KeyError):
             raise ModelUnavailable("工具参数无法安全处理，请重试。") from None
+        # 模型调用超时取模型自身上限与请求剩余时间的较小值（替身模型可能无 timeout 属性）
+        if ctx is not None:
+            ctx.check("before_model_call")
+        own_timeout = getattr(self.model, "timeout", None)
+        model_timeout = (ctx.clamp_timeout(float(own_timeout))
+                         if ctx is not None and isinstance(own_timeout, (int, float))
+                         else None)
+        self._stage("model", "start", summary=f"第 {state['rounds'] + 1} 轮生成")
         if self.streaming:
             raw = None
-            for chunk in self.model.complete_stream(messages, tools or None):
-                if chunk["kind"] == "token":
-                    self._emit_token(chunk["text"])
-                elif chunk["kind"] == "message":
-                    raw = chunk["message"]
+            stream = self.model.complete_stream(messages, tools or None, timeout=model_timeout)
+            try:
+                for chunk in stream:
+                    # chunk 边界检查点：已断开/已停止的请求及时中止生成
+                    if ctx is not None:
+                        ctx.check("model_chunk")
+                    if chunk["kind"] == "token":
+                        self._emit_token(chunk["text"])
+                    elif chunk["kind"] == "message":
+                        raw = chunk["message"]
+            finally:
+                if hasattr(stream, "close"):
+                    stream.close()
             if raw is None:
                 raise ModelUnavailable("模型未返回任何内容。")
         else:
-            raw = self.model.complete(messages, tools or None)
+            raw = self.model.complete(messages, tools or None, timeout=model_timeout)
+        if ctx is not None:
+            ctx.check("after_model")
         calls = raw.get("tool_calls") or []
         if calls and not tools:
-            raise ModelUnavailable("模型在工具调用已关闭时仍返回工具请求，请检查模型兼容性。")
-        if len(calls) > 4:
+            if self.model.tools_enabled and state["rounds"]:
+                ctx.mark_partial("tool_round_budget")
+                calls = []
+                raw = {"content": "已达到工具执行预算，以下仅为已核实的部分结果。"}
+            else:
+                raise ModelUnavailable("模型在工具调用已关闭时仍返回工具请求，请检查模型兼容性。")
+        if len(calls) > self.budget.max_calls_per_round:
             raise ModelUnavailable("模型一次请求了过多工具，请重试。")
         answer = re.sub(r"<think>[\s\S]*?</think>", "", raw.get("content") or "").strip()
         if not calls and not answer:
@@ -1020,143 +1124,289 @@ class MemoryAgent:
         message = {"role": "assistant", "content": answer}
         if calls:
             message["tool_calls"] = calls
+        self._stage("model", "end", summary="完成生成" if not calls else "请求工具调用")
         return {"messages": state["messages"] + [message], "answer": answer,
                 "tool_calls": calls, "rounds": state["rounds"] + 1}
 
     def _tools(self, state):
+        import hashlib
         messages = list(state["messages"])
         items = {item["id"]: item for item in state["memories"]}
+        ctx = self._ctx
+        ctx.current_rounds += 1
         for call in state["tool_calls"]:
-            ok = True
-            fn = call.get("function", {})
-            name = fn.get("name", "?")
+            ctx.check("before_tool")
+            name = call.get("function", {}).get("name", "?")
+            call_id = str(call.get("id") or f"call-{ctx.tool_calls}")
+            started = perf_counter()
+            ok, content, error, executed = False, "", None, False
+            args = {}
+            if ctx.tool_calls >= self.budget.max_total_tool_calls:
+                error = "tool_call_budget"
+            elif ctx.consecutive_tool_failures >= self.budget.max_consecutive_tool_failures:
+                error = "consecutive_tool_failures"
             try:
-                args = json.loads(fn.get("arguments", "{}"))
-            except (KeyError, TypeError, ValueError):
-                args = {}
-            # 实时推送「工具开始」事件（流式前端据此显示进行中的步骤）
-            self._emit({"type": "tool_start", "id": call.get("id"), "name": name, "args": args})
-            try:
-                if name == "search_memory":
-                    query = args.get("query")
-                    if set(args) != {"query"} or not isinstance(query, str) or not 1 <= len(query.strip()) <= 2000:
-                        raise ValueError("invalid tool")
-                    hits = self._search(state["request"], query)
-                    items.update({item["id"]: item for item in hits})
-                    content = json.dumps(hits, ensure_ascii=False, default=str)[:12000]
-                elif name == "exec_terminal" and self.exec_enabled:
-                    command = args.get("command")
-                    timeout = args.get("timeout")
-                    if not isinstance(command, str) or not command.strip():
-                        raise ValueError("invalid tool")
-                    if set(args) - {"command", "timeout"}:
-                        raise ValueError("invalid tool")
-                    if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, int)):
-                        raise ValueError("invalid tool")
-                    ok, content = _exec_terminal(command, timeout)
-                elif name in _LOCAL_TOOL_NAMES and self.model.tools_enabled:
-                    content = _run_local_tool(name, args)
-                elif name == "web_fetch" and self.web_enabled:
-                    url = args.get("url")
-                    if not isinstance(url, str) or not url.strip() or set(args) - {"url"}:
-                        raise ValueError("invalid tool")
-                    ok, content = _web_fetch(url)
+                args = json.loads(call.get("function", {}).get("arguments", "{}"))
+                if not isinstance(args, dict):
+                    raise ValueError("arguments must be an object")
+                if error:
+                    ctx.mark_partial(error)
+                    content = "工具预算已耗尽，未执行此调用。"
                 else:
-                    ok = False
-                    content = ("不支持的工具；可用：search_memory、read_file、list_directory、"
-                               "search_files、search_content、get_current_datetime、calculate、"
-                               "write_file、edit_file，以及需服务端开启的 "
-                               "exec_terminal、web_fetch。")
+                    fingerprint = hashlib.sha256(json.dumps([name, args], sort_keys=True,
+                        ensure_ascii=False).encode()).hexdigest()
+                    mutates = name in {"write_file", "edit_file", "exec_terminal"}
+                    if mutates and fingerprint in ctx.mutations:
+                        error, content = "duplicate_mutation", "本请求已尝试过相同变更，不会自动重复执行。"
+                    else:
+                        safe_args = {}
+                        for key in ("path", "pattern", "query", "expression"):
+                            value = args.get(key)
+                            if isinstance(value, str) and not (key == "path" and pathlib.Path(value).is_absolute()):
+                                safe_args[key] = redact_sensitive_text(value)[:200]
+                        self._emit({"type": "tool_start", "id": call_id, "name": name, "args": safe_args})
+                        ctx.check("dispatch_tool")
+                        ctx.tool_calls += 1
+                        executed = True
+                        if mutates:
+                            ctx.mutations.add(fingerprint)
+                        if name == "search_memory" and state["request"].use_memory and self.model.tools_enabled:
+                            query = args.get("query")
+                            if set(args) != {"query"} or not isinstance(query, str) or not 1 <= len(query.strip()) <= 2000:
+                                raise ValueError("invalid query")
+                            hits = self._search(state["request"], query)
+                            items.update({item["id"]: item for item in hits})
+                            ok, content = True, json.dumps(hits, ensure_ascii=False, default=str)[:12000]
+                        elif name == "exec_terminal" and self.exec_enabled and self.model.tools_enabled:
+                            command, timeout = args.get("command"), args.get("timeout")
+                            if (not isinstance(command, str) or not command.strip() or set(args) - {"command", "timeout"}
+                                    or timeout is not None and (type(timeout) is not int or not 1 <= timeout <= _EXEC_MAX_TIMEOUT)):
+                                raise ValueError("invalid command")
+                            remaining = ctx.clamp_timeout(timeout or _EXEC_DEFAULT_TIMEOUT)
+                            if remaining < 1:
+                                raise RunTimedOut()
+                            ok, content = _exec_terminal(command, int(remaining), require_success=True)
+                        elif name in _LOCAL_TOOL_NAMES and self.model.tools_enabled:
+                            ok, content = _run_local_tool(name, args)
+                        elif name == "web_fetch" and self.web_enabled and self.model.tools_enabled:
+                            url = args.get("url")
+                            if set(args) != {"url"} or not isinstance(url, str) or not url.strip():
+                                raise ValueError("invalid url")
+                            ok, content = _web_fetch(url, ctx.clamp_timeout(_WEB_FETCH_TIMEOUT))
+                        else:
+                            error, content = "tool_unavailable", "不支持的工具：未获允许或当前不可用。"
             except (KeyError, TypeError, ValueError):
-                ok = False
-                content = ("工具参数无效；可用 search_memory(query)、read_file(path)、"
-                           "list_directory(path?)、search_files(pattern, path?)、"
-                           "search_content(pattern, path?, glob?, context?, case_sensitive?)、"
-                           "get_current_datetime()、calculate(expression)、"
-                           "write_file(path, content, overwrite?)、edit_file(path, old_string, new_string, replace_all?)、"
-                           "exec_terminal(command, timeout?)、web_fetch(url)。")
-            # 实时推送「工具结果」事件（内容脱敏后截断，避免把密钥回显到前端）
-            self._emit({"type": "tool_result", "id": call.get("id"), "name": name, "ok": ok,
-                        "content": redact_sensitive_text(content)[:800]})
-            messages.append({"role": "tool", "tool_call_id": call["id"],
+                error, content = "invalid_arguments", "工具参数无效，未完成操作。"
+            except OSError:
+                error, content = "tool_error", "工具执行失败，请检查输入及服务状态。"
+            if not ok:
+                error = error or "tool_failed"
+                ctx.consecutive_tool_failures += 1
+            else:
+                ctx.consecutive_tool_failures = 0
+            # Only a bounded, redacted summary is exposed, never raw arguments.
+            summary = redact_sensitive_text(content)[:800]
+            record = {"id": call_id, "name": name, "ok": ok, "error_code": error,
+                      "executed": executed, "elapsed_ms": round((perf_counter()-started)*1000, 3)}
+            if ok and name in {"write_file", "edit_file"}:
+                root = pathlib.Path(_exec_root()).resolve()
+                artifact = pathlib.Path(args["path"])
+                artifact = (artifact if artifact.is_absolute() else root / artifact).resolve()
+                if artifact.is_relative_to(root) and artifact.is_file() and artifact.stat().st_size:
+                    item = {"path": artifact.relative_to(root).as_posix(), "bytes": artifact.stat().st_size}
+                    if item not in ctx.artifacts:
+                        ctx.artifacts.append(item)
+                else:
+                    record.update(ok=False, error_code="artifact_unverified")
+                    ok = False
+            ctx.executions.append(record)
+            self._emit({"type": "tool_result", **record, "content": summary})
+            messages.append({"role": "tool", "tool_call_id": call_id,
                              "content": redact_sensitive_text(content)})
+            ctx.check("after_tool")
         return {"messages": messages, "memories": list(items.values())}
+
+    def _verify(self, state):
+        ctx = self._ctx
+        ctx.check("verify")
+        self._stage("verify", "start")
+        failed = [step for step in ctx.executions if not step["ok"]]
+        if failed:
+            ctx.mark_partial("tool_result_unverified")
+        if ctx.route == "tool_task" and not ctx.executions:
+            ctx.mark_partial("no_execution_evidence")
+        answer = state["answer"]
+        if ctx.partial:
+            # Do not repeat an ungrounded model claim of completed mutations.
+            completed = sum(step["ok"] for step in ctx.executions)
+            answer = f"任务尚未全部完成：已核实 {completed} 项工具结果"
+            if ctx.artifacts:
+                answer += " 已生成：" + "、".join(item["path"] for item in ctx.artifacts)
+            answer += "。部分步骤失败或达到执行预算，请检查执行记录后再继续。"
+        self._stage("verify", "end", summary="部分完成" if ctx.partial else "核验完成")
+        return {"answer": answer}
 
     def _save(self, state):
         req = state["request"]
-        if not req.save_memory:
-            return {"memory_write": {"status": "disabled"}}
-        try:
-            # Store user input only: generated claims are not user facts.
-            result = self.memory.process_input({"content": req.message, "role": "user"},
-                "conversation", user_id=req.user_id, scene_id=req.scene_id)
-            write = {"status": "accepted" if result.accepted else "rejected",
-                    "memory_id": result.memory_id, "reasons": result.reasons,
-                    "memory_type": result.memory_type}
+        ctx = self._ctx
+        self._stage("save", "start")
+        # 保存前检查点：已取消则不再开始新写入
+        if ctx is not None:
+            ctx.check("save")
+        if ctx is not None and ctx.partial:
+            write, warnings = {"status": "skipped", "reason": "partial_task"}, []
+        elif not req.save_memory:
+            write, warnings = {"status": "disabled"}, []
+        elif ctx is not None and not ctx.begin_write():
+            # 取消先于写入发生：禁止新写入，如实报告跳过
+            write, warnings = {"status": "skipped", "reason": "已请求停止，跳过本轮记忆写入"}, []
+        else:
+            # 写入已开始：此后请求取消不承诺回滚，结果如实报告
             warnings = []
-            if result.accepted and result.memory_type == "knowledge":
-                try:
-                    promotion = self.memory.consolidate(req.user_id)
-                    write["stored_memory_ids"] = promotion.stored_memory_ids
-                except Exception:
-                    warnings.append("内容已接收，但长期记忆晋升失败；请检查记忆服务。")
-            return {"memory_write": write, "warnings": warnings}
-        except Exception:
-            return {"memory_write": {"status": "failed"},
-                    "warnings": ["回答已生成，但记忆写入失败；请检查记忆服务。"]}
+            try:
+                # Store user input only: generated claims are not user facts.
+                result = self.memory.process_input({"content": req.message, "role": "user"},
+                    "conversation", user_id=req.user_id, scene_id=req.scene_id)
+                write = {"status": "accepted" if result.accepted else "rejected",
+                        "memory_id": result.memory_id, "reasons": result.reasons,
+                        "memory_type": result.memory_type}
+                if result.accepted and result.memory_type == "knowledge":
+                    try:
+                        if ctx is not None:
+                            ctx.check("before_consolidate")
+                        promotion = self.memory.consolidate(req.user_id)
+                        write["stored_memory_ids"] = promotion.stored_memory_ids
+                    except Exception:
+                        warnings.append("内容已接收，但长期记忆晋升失败；请检查记忆服务。")
+            except Exception:
+                write = {"status": "failed"}
+                warnings = ["回答已生成，但记忆写入失败；请检查记忆服务。"]
+        if ctx is not None:
+            ctx.write_result = write
+        self._stage("save", "end", summary=write.get("status"))
+        return {"memory_write": write, "warnings": warnings}
+
+    def _workflow(self, status, reason=None):
+        ctx = self._ctx
+        return build_workflow_payload(
+            run_id=ctx.run_id, route=ctx.route, status=status,
+            stop_reason=reason or ctx.stop_reason, steps=ctx.executions,
+            artifacts=ctx.artifacts,
+            budget_used=budget_usage(tool_rounds=ctx.current_rounds, tool_calls=ctx.tool_calls,
+                deadline_seconds=self.budget.deadline_seconds,
+                elapsed_ms=(perf_counter()-self._started)*1000))
+
+    def _execute(self, request):
+        ctx = self._ctx
+        ctx.check("route")
+        self._stage("route", "end", summary=ctx.route)
+        if ctx.route == "clarification":
+            result = {"answer": "请明确要遗忘的记忆范围，并将遗忘与其他任务分开提出；本次未删除或保存内容。",
+                      "memories": [], "recall_ms": 0, "warnings": [],
+                      "reset_history": False, "memory_write": {"status": "skipped"}}
+            status = "needs_clarification"
+        elif ctx.route == "forget":
+            if not ctx.begin_write():
+                ctx.check("forget")
+            ids = self.memory.forget(request.user_id, request.message)
+            result = {"answer": f"已处理遗忘指令，删除 {len(ids)} 条记忆。",
+                      "memories": [], "recall_ms": 0, "warnings": [],
+                      "reset_history": True, "deleted_ids": ids,
+                      "memory_write": {"status": "skipped"}}
+            status = STATUS_COMPLETED
+        else:
+            state = self.graph.invoke({"request": request}, {"recursion_limit": 20})
+            ctx.check("complete")
+            result = {key: state[key] for key in ("answer", "memories", "recall_ms", "warnings", "memory_write")}
+            result["reset_history"] = False
+            status = STATUS_PARTIAL if ctx.partial else STATUS_COMPLETED
+        result["latency_ms"] = (perf_counter()-self._started)*1000
+        result["workflow"] = self._workflow(status)
+        return result
 
     def chat(self, request: ChatRequest):
-        started = perf_counter()
-        # Explicit natural-language forgetting bypasses generation and ingestion.
-        if re.match(r"^(请)?(帮我)?(忘掉|忘记|删除|清除).+", request.message):
-            ids = self.memory.forget(request.user_id, request.message)
-            return {"answer": f"已处理遗忘指令，删除 {len(ids)} 条记忆。", "memories": [],
-                    "memory_write": {"status": "skipped"}, "reset_history": True,
-                    "deleted_ids": ids, "warnings": [], "recall_ms": 0,
-                    "latency_ms": (perf_counter() - started) * 1000}
-        result = self.graph.invoke({"request": request}, {"recursion_limit": 16})
-        return {"answer": result["answer"], "memories": result["memories"],
-                "memory_write": result["memory_write"], "warnings": result["warnings"],
-                "reset_history": False, "recall_ms": result["recall_ms"],
-                "latency_ms": (perf_counter() - started) * 1000}
-
-    def _run_stream_graph(self, request: ChatRequest) -> None:
-        """在后台线程跑图；把最终结果/错误以 done/error 事件收尾。"""
-        try:
-            # 自然语言遗忘指令：绕过生成与摄入，直接返回 forget 结果
-            if re.match(r"^(请)?(帮我)?(忘掉|忘记|删除|清除).+", request.message):
-                ids = self.memory.forget(request.user_id, request.message)
-                self._event_queue.put({
-                    "type": "done", "answer": f"已处理遗忘指令，删除 {len(ids)} 条记忆。",
-                    "memories": [], "memory_write": {"status": "skipped"}, "warnings": [],
-                    "reset_history": True, "deleted_ids": ids, "recall_ms": 0,
-                    "latency_ms": (perf_counter() - self._started) * 1000,
-                })
-                return
-            result = self.graph.invoke({"request": request}, {"recursion_limit": 16})
-        except ModelUnavailable as exc:
-            self._event_queue.put({"type": "error", "message": str(exc)})
-            return
-        except Exception as exc:  # 防止线程静默崩溃，把异常暴露给前端
-            self._event_queue.put({"type": "error", "message": f"智能体运行失败：{exc}"})
-            return
-        # 先冲刷剩余 token（保证顺序：token 都在 done 之前），再发完成事件
-        self._event_queue.put({
-            "type": "done", "answer": result["answer"], "memories": result["memories"],
-            "memory_write": result["memory_write"], "warnings": result["warnings"],
-            "reset_history": False, "recall_ms": result["recall_ms"],
-            "latency_ms": (perf_counter() - self._started) * 1000,
-        })
-
-    async def chat_stream(self, request: ChatRequest):
-        """SSE 生成器：逐事件产出（token / 工具开始 / 工具结果 / 完成 / 错误）。"""
         self._started = perf_counter()
-        self._event_queue = queue.Queue()
-        loop = asyncio.get_running_loop()
-        runner = threading.Thread(target=self._run_stream_graph, args=(request,), daemon=True)
+        self._ctx = RunContext(route=route_request(request.message), budget=self.budget)
+        self._channel = None
+        try:
+            return self._execute(request)
+        except ModelUnavailable:
+            self._ctx.check("model_error")
+            raise
+
+    def _error_terminal(self, ctx, message):
+        return {"type": "error", "message": redact_sensitive_text(message),
+                "workflow": self._workflow(STATUS_FAILED, "model_or_runtime_error")}
+
+    def _aborted_terminal(self, exc):
+        ctx = self._ctx
+        write = ctx.write_result or {"status": "unknown" if ctx.write_started else "skipped"}
+        return {"type": "error" if exc.status == STATUS_TIMED_OUT else "done",
+                "message": "执行超过时间预算，已停止后续操作。",
+                "answer": "执行已停止。已经开始的操作可能完成，请同步确认结果。",
+                "memories": [], "memory_write": write, "warnings": [],
+                "reset_history": ctx.route == "forget" and ctx.write_started,
+                "recall_ms": 0, "latency_ms": (perf_counter()-self._started)*1000,
+                "workflow": self._workflow(exc.status, exc.reason)}
+
+    def _run_with_channel(self, request, ctx, channel):
+        try:
+            channel.emit_terminal({"type": "done", **self._execute(request)})
+        except RunAborted as exc:
+            channel.emit_terminal(self._aborted_terminal(exc))
+        except ModelUnavailable as exc:
+            channel.emit_terminal(self._aborted_terminal(RunTimedOut()) if ctx.remaining_seconds() <= 0
+                                  else self._error_terminal(ctx, str(exc)))
+        except Exception:
+            # Tool exceptions and backend failures can contain paths and secrets.
+            channel.emit_terminal(self._error_terminal(ctx, "智能体运行失败，请检查服务状态后重试。"))
+
+    async def chat_stream(self, request: ChatRequest, on_finished=None):
+        self._started = perf_counter()
+        ctx = RunContext(route=route_request(request.message), budget=self.budget)
+        channel = EventChannel(ctx)
+        self._ctx, self._channel = ctx, channel
+        worker_done = threading.Event()
+
+        def worker():
+            try:
+                self._run_with_channel(request, ctx, channel)
+            finally:
+                worker_done.set()
+                if on_finished:
+                    on_finished()
+
+        channel.put({"type": "run_started", "protocol": 1, "route": ctx.route})
+        runner = threading.Thread(target=worker, daemon=True, name=f"mokoa-run-{ctx.run_id}")
+        # No await separates creation/start: response cleanup can distinguish unstarted runs.
         runner.start()
-        while True:
-            event = await loop.run_in_executor(None, self._event_queue.get)
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            if event.get("type") in ("done", "error"):
-                break
+        self._worker_started = True
+        last_beat = time.monotonic()
+        try:
+            while True:
+                if ctx.remaining_seconds() <= 0 and not worker_done.is_set():
+                    ctx.cancel("deadline_exceeded", status=STATUS_TIMED_OUT)
+                    terminal = channel.finish_now(self._aborted_terminal(RunTimedOut()))
+                    if terminal:
+                        yield format_sse(terminal)
+                        break
+                try:
+                    event = channel.get_nowait()
+                except queue.Empty:
+                    if worker_done.is_set():
+                        if channel.terminal_event:
+                            yield format_sse(channel.terminal_event)
+                        break
+                    if time.monotonic()-last_beat >= self.budget.heartbeat_seconds:
+                        last_beat = time.monotonic()
+                        yield HEARTBEAT_COMMENT
+                    await asyncio.sleep(0.02)
+                    continue
+                yield format_sse(event)
+                last_beat = time.monotonic()
+                if event.get("type") in ("done", "error"):
+                    break
+        finally:
+            # Cooperative cancellation, without blocking the event loop or releasing
+            # the worker's slot before an uninterruptible call actually exits.
+            ctx.cancel("client_disconnected")

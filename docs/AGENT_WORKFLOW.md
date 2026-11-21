@@ -1,6 +1,6 @@
 # Agent 工作流实施设计
 
-本方案在现有 LangGraph 单 Agent 上增加请求路由、执行预算、结果核验和可观测状态，先做好带记忆问答、受控文件阅读与资料整理。继续使用 Memory Orchestrator 作为唯一长期记忆入口。实施由 ZCode 承接，维护者复核；本文是实现约束，不表示功能已交付。
+本方案在现有 LangGraph 单 Agent 上增加请求路由、执行预算、结果核验和可观测状态，先做好带记忆问答、受控文件阅读与资料整理。继续使用 Memory Orchestrator 作为唯一长期记忆入口。ZCode 提供首轮后端基础实现，后续由 Codex 接续实现并验证；本文保留实现约束，运行与状态说明见 [LangGraph 接入说明](LANGGRAPH_AGENT.md)。真实模型和目标设备验收仍需单独执行。
 
 设计基线：`a0f5bd9`。现有入口为 `src/agent/service.py`、`api/server.py` 和 `frontend/src/main.js`，依赖保持 `langgraph==1.2.11`。第一版不引入新框架、多 Agent、服务端聊天 checkpoint、持久任务队列或新的记忆库，不做整站 UI 改版。
 
@@ -131,3 +131,11 @@ git diff --check
 新增 workflow/runtime/流式回归文件后将其真实路径加入测试命令；前端运行现有 node --test tests/ingestion.test.js、新增聊天单测及 npm run build。完成后端广泛改动后跑全量 pytest；需要模型或设备而不能运行的检查单列，保留失败，不改金标或放宽断言。
 
 交付：实现提交、测试摘要、手动可复现步骤、前端关键状态截图、未完成边界和配置说明。Windows hash/替身结果只证明接线与控制逻辑，不证明真实模型语义、目标设备 SDK 或 500ms 性能指标。任务进入 review 后由维护者验收，未验收不能 complete。
+
+## 9 本轮接续验证
+
+2026-11-22，Codex 保留 ZCode 未提交的后端初稿并接续完成工作流与前端。全量后端 pytest 为 796 passed、6 skipped；随后收紧代理重试的剩余时间预算，相关 Agent 与工作流 77 项测试再次通过。前端聊天流与摄取单测共 19 项通过，生产 build 通过。Clerk、配置约束、匿名化和 diff 检查通过。
+
+6 项跳过来自现有环境条件：缺少 sentence-transformers、未配置偏好 LLM 密钥、3 项忽略目录内的真实语料缺失，以及 Windows 文件权限差异。未新增跳过，不修改评测金标；工具拒绝用例改为校验 partial 与真实错误码，命令成功用例显式设置仅该命令的测试许可，避免模型文本替代执行成功。
+
+真实 FastAPI、LangGraph 和隔离 memory/hash 配合替身模型的页面联调已检查正常读取、工具失败后的部分完成、用户停止及停止后再次聊天。真实模型端到端、本地语义模型与麒麟 SDK 未在本轮验收。TASK-008、TASK-009、TASK-016 交付 review，等待维护者验收，不标记 done。
