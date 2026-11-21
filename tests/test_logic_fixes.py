@@ -154,17 +154,38 @@ def test_knowledge_conflict_unchanged_when_same_content() -> None:
     assert len(_recall(orch, "u1").items) == 1
 
 
-def test_knowledge_conflict_keeps_more_trusted_old() -> None:
+def test_knowledge_conflict_keeps_manual_fact_over_behavior() -> None:
     orch = MemoryOrchestrator()
     old = _knowledge_entry("端口 8080", user_id="u1", record_key="port")
     old.metadata["source_type"] = "manual_config"  # 高信任
     orch.store_memory_entry(old)
 
     new = _knowledge_entry("端口 9090", user_id="u1", record_key="port")
-    new.metadata["source_type"] = "conversation"  # 低信任
+    # Knowledge protects against low-trust observations, not explicit corrections.
+    # Frozen conflict cases K003/K007 allow a newer conversation to replace manual data.
+    new.metadata["source_type"] = "behavior"
     r2 = orch.store_memory_entry(new)
-    assert r2.created is False  # 低信任新值不覆盖高信任旧值
+    assert r2.created is False  # 低信任行为观测不覆盖高信任旧值
     assert "端口 8080" in _recall(orch, "u1").items[0].content
+
+
+def test_knowledge_explicit_correction_replaces_old_manual_fact() -> None:
+    """Frozen cases K003/K007 distinguish knowledge from preference priority."""
+    orch = MemoryOrchestrator()
+    old = _knowledge_entry("端口 8080", user_id="u1", record_key="port")
+    old.metadata["source_type"] = "manual_config"
+    first = orch.store_memory_entry(old)
+
+    new = _knowledge_entry(
+        "端口已经改为 9090", user_id="u1", record_key="port", source=MemorySource.CHAT
+    )
+    new.metadata["source_type"] = "conversation"
+    result = orch.store_memory_entry(new)
+
+    assert result.created is True
+    assert result.reason == "knowledge_replaced"
+    assert result.superseded_memory_id == first.memory_id
+    assert [item.content for item in _recall(orch, "u1").items] == ["端口已经改为 9090"]
 
 
 def test_knowledge_without_record_key_still_written() -> None:

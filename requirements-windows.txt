@@ -21,4 +21,4 @@ python-dotenv==1.2.3      # 从 .env 加载密钥等敏感配置，避免写死/
 # Dev & test
 pytest==9.1.1
 pytest-asyncio==1.4.0
-pyarrow==26.0.1  # 数据集评测读写 parquet；完整环境由 sentence-transformers 依赖链带入
+pyarrow==26.0.1  # 数据集评测读写 parquet；与完整环境一致，显式声明依赖

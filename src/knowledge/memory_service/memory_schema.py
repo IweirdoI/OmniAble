@@ -56,7 +56,7 @@ class MemoryEntry(BaseModel):
     user_id: str = "default"
     scene_id: str | None = None
     confidence: float = Field(default=0.7, ge=0.0, le=1.0)      #置信度，由preference完成
-    metadata: dict[str, Any] = Field(default_factory=dict)      #张嘉询
+    metadata: dict[str, Any] = Field(default_factory=dict)
     # 多维评价后由 memory_policy 填充
     save_score: float | None = None
 

@@ -29,6 +29,7 @@ python-dotenv==1.2.3      # 从 .env 加载密钥等敏感配置，避免写死/
 # Dev & test
 pytest==9.1.1
 pytest-asyncio==1.4.0
+pyarrow==26.0.1  # Dataset loaders and offline evaluation tests read/write parquet.
 
 # Local embedding (Windows dev) — core embedding_interface local backend
 sentence-transformers==6.0.1

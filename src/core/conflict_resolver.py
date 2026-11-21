@@ -173,9 +173,10 @@ class ConflictResolver:
 
         规则：
           - 新事实更新鲜时，默认 REPLACE（取最新事实）；
+          - 时间戳相同时按接收顺序，以本次提交的新事实为准；
           - 但低信任观测（behavior / tool_result）不应覆盖更高信任的旧事实
             （conversation / manual_config），避免噪声埋点改写权威知识。
-          - 新事实不更新鲜时 KEEP_OLD。
+          - 新事实时间更早时 KEEP_OLD。
         """
         new_time = new.updated_at if isinstance(new.updated_at, datetime) else datetime.utcnow()
         old_time = old.updated_at if isinstance(old.updated_at, datetime) else datetime.utcnow()
@@ -184,7 +185,9 @@ class ConflictResolver:
         new_src = self._SOURCE_ALIASES.get(new_src, new_src)
         old_src = self._SOURCE_ALIASES.get(old_src, old_src)
 
-        if new_time > old_time:
+        # Windows clocks may return the same timestamp for consecutive writes.
+        # The incoming record breaks a timestamp tie; a truly older record cannot.
+        if new_time >= old_time:
             if new_src in ("behavior", "tool_result") and old_src in ("conversation", "manual_config"):
                 return ConflictDecision(
                     action=ConflictAction.KEEP_OLD,
@@ -195,7 +198,7 @@ class ConflictResolver:
             new.metadata.setdefault("conflict_action", ConflictAction.REPLACE.value)
             return ConflictDecision(
                 action=ConflictAction.REPLACE,
-                reason="知识取最新事实（新事实更新鲜）",
+                reason="知识取最新事实（按时间与接收顺序）",
                 result=new,
             )
         return ConflictDecision(
