@@ -1,5 +1,13 @@
 > **个人工程化版本。** 发布者赵琳（GitHub [@IweirdoI](https://github.com/IweirdoI)）。在麒麟原版 `220bdd1` 上补充 Windows 安装、哈希向量接线和 CI。上游仓库：阿里云 Codeup `git@codeup.aliyun.com:6a60620d8c4f3693e22016a1/MOKOA.git`。原版快照：[mokoa-kylin](https://github.com/IweirdoI/mokoa-kylin)。本人分工是偏好记忆 `src/preference/`。说明见 [docs/发布说明.md](docs/发布说明.md)。偏好方案见 [赵琳-偏好记忆整体技术方案.md](赵琳-偏好记忆整体技术方案.md)。
 
+# 团队协作入口
+
+团队任务已接入 [Clerk 协作指南](docs/CLERK.md)，共享状态见 [团队任务状态](docs/TEAM_STATUS.md)。协作者克隆后各自安装工具，配置和记录随 Git/PR 共享。
+
+新成员先看 [协作与邀请说明](docs/COLLABORATION.md)、[贡献指南](CONTRIBUTING.md) 和 [固定团队／比赛协作协议草案](docs/TEAM_AGREEMENT.md)。采用 Issue 认领 → 分支开发 → PR 审查 → 合并到 `master` 的流程，保留 Apache 2.0，新增贡献作 DCO 来源签署。比赛署名、费用与奖金由成员另行书面确认。
+
+下文的原团队分工、比赛信息和进度保留为项目背景；本次组队成员和任务以新确认的协议及 Issue 为准。贡献记录见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
+
 # 仓库说明：
 
 ## LangGraph 单智能体
@@ -301,7 +309,7 @@ python scripts/eval_preference_hf_dataset.py --mode fusion --semantic --refresh-
 ## 十一、开发约定
 
 1. 只改自己负责的目录  
-2. **改动后先写测试再提交**：每次完成代码改动，先编写对应测试（优先纯函数 / 规则路径 / `use_llm=False` 端到端，避免不必要的远程 LLM 调用）确认通过，再 `git commit` → `git pull --no-rebase origin master`（merge 模式）→ `git push origin master`  
+2. **验证后提交 PR**：代码变动运行相关测试，提交到个人分支并向 `master` 提 PR，由维护者审查后合并；不再直接推送主线。文档变动检查链接和步骤。具体流程与 DCO 签署见 [贡献指南](CONTRIBUTING.md)。
 3. 配置修改走 `configs/default.yaml`  
 4. 有问题先查 `docs/ARCHITECTURE.md` 和 `memory_service/README.md`  
 5. **提交规范**：遵循 Conventional Commits 格式（如 `feat:`, `fix:`, `docs:` 等），以便自动生成 CHANGELOG

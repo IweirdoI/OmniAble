@@ -1,0 +1,28 @@
+name: Bug 报告
+description: 提供复现与环境，安全漏洞请按 SECURITY.md 私下报告
+title: "[Bug] "
+body:
+  - type: textarea
+    id: environment
+    attributes:
+      label: 运行环境
+      description: 系统、Python、提交 SHA、存储与 Embedding 后端、是否使用 SDK
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 最小复现步骤
+      description: 使用虚构或脱敏输入，附命令
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期与实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 脱敏日志、截图与影响

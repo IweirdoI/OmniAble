@@ -1,0 +1,29 @@
+name: 团队任务／认领
+description: 约定负责人、交付与验收
+title: "[Task] "
+body:
+  - type: textarea
+    id: scope
+    attributes:
+      label: 目标、目录和接口影响
+    validations:
+      required: true
+  - type: textarea
+    id: ownership
+    attributes:
+      label: 负责人、验收人、计划日期与依赖
+      description: GitHub 账号和可用环境，未确认则标注待认领
+    validations:
+      required: true
+  - type: textarea
+    id: deliverables
+    attributes:
+      label: 交付物与验收标准
+      description: 测试命令、预期行为、环境与证据
+    validations:
+      required: true
+  - type: textarea
+    id: handover
+    attributes:
+      label: 进度、各人贡献与交接
+      description: 关联 PR，不公开财务或个人敏感资料

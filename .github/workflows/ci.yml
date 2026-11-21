@@ -1,0 +1,88 @@
+# GitHub Actions CI for 麒忆智脑 (MOKOA) OS Agent Memory system
+# Runs the Python test suite on every push / PR to main.
+# Mirrors the local dev setup: Python 3.12 + project venv + requirements.txt.
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Cache pip downloads + the sentence-transformers (BGE-M3) model cache
+      # so reruns don't re-download ~2GB every time.
+      - name: Cache pip and HuggingFace model cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cache/huggingface
+          key: ${{ runner.os }}-py3.12-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-py3.12-
+
+      - name: Create virtual environment and install dependencies
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # HF_ENDPOINT (project-documented mirror) lets the embedding tests
+      # download BGE-M3 from the domestic mirror instead of huggingface.co.
+      - name: Run tests
+        env:
+          HF_ENDPOINT: https://hf-mirror.com
+        run: |
+          source .venv/bin/activate
+          pytest -q
+
+  test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-py3.12-core-${{ hashFiles('requirements-windows.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-py3.12-core-
+
+      - name: Create virtual environment and install Windows core dependencies
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements-windows.txt
+
+      - name: Run hash-backend tests
+        env:
+          OS_AGENT_MEMORY_BACKEND: memory
+          OS_AGENT_EMBEDDING_BACKEND: hash
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: utf-8
+        run: .\.venv\Scripts\python.exe -m pytest -q

@@ -1,86 +1,69 @@
-# 贡献指南 — 麒忆智脑 (MOKOA)
+# 贡献指南
 
-> OS Agent 记忆优化系统 | 挑战杯 XA-202612 | 麒麟软件有限公司
+适用于 `IweirdoI/mokoa-windows` 的新贡献。README 的历史团队标识用于说明来源，不自动成为新团队分工或署名排名。固定团队／比赛成员另行确认 [团队协议](docs/TEAM_AGREEMENT.md)。
 
-首先感谢你参与这个项目！以下为团队协作规范，请所有成员阅读。
+## 认领与开发
 
----
+固定团队使用 [Clerk](docs/CLERK.md) 记录任务认领与状态，并关联 GitHub Issue。任务与受管记录变更提交前运行 `./scripts/clerk.ps1 check`；各人自行安装工具，不共享本机身份或凭据。
 
-## 一、目录结构与负责人
+1. 先阅读 [项目说明](README.md)、[发布说明](docs/发布说明.md)、[Windows 开发](docs/WINDOWS.md)。
+2. 在 [Issues](https://github.com/IweirdoI/mokoa-windows/issues) 认领或新建任务，约定负责人、目录、交付、验收人、时间和依赖，由维护者确认。
+3. 一个任务一个分支、一个 PR；较大改动先讨论接口。文档、测试、设计、评测和审查也是贡献。
+4. PR 目标为 `master`，维护者审查后合并；不直接推主线，不强推共享分支，不用旧分支整份文件覆盖主线。
 
-| 目录 | 负责人 | 职责 |
-|------|--------|------|
-| `src/core/` | efca9634 | Orchestrator、短/中/长期记忆、冲突消解、Embedding |
-| `src/ingestion/` | 3fba60e1 | 多源接入四段式：collector → cleaner → normalizer → quality |
-| `src/preference/` | 26a9835a | 偏好提取、版本化、entry_adapter |
-| `src/knowledge/memory_service/` | cb0aeabe | Milvus CRUD、RAG、memory_schema |
-| `src/security/` | 2abac5a6 | 敏感信息识别于替换、NL遗忘、上下班维护 |
-| `frontend/` | 6714f379 | Web 演示 |
-| `tests/`, `benchmarks/`, `docs/` | da0f41a1 | 测试、文档、benchmark |
+新人优先 Fork，不需要写权限。Fork 后在自己的克隆中执行：
 
-## 二、协作规则
-
-1. **只改自己负责的目录**。跨模块调用通过 `src/common/interfaces.py` 或 `memory_schema.py` 进行。
-2. **26a9835a不直接写 Milvus**：产出 `MemoryEntry` JSON → 调用 `create_memory()`。
-3. **Embedding 统一入口**：`src/embedding/embedding_interface.py`（efca9634维护），其他人不要修改。
-4. `src/adapters/` 是参考 stub，答辩前可不实现。
-5. **最终记忆库只有一个**：cb0aeabe的 Milvus（`memory_service/`），当前开发后端为 mock。
-
-## 三、数据流简要
-
-```
-数据源 → ingestion(3fba60e1) → Orchestrator(efca9634)
-    → 敏感过滤(2abac5a6) → 分类 → 短期记忆
-    → 晋升(short→mid→long) → 冲突消解 → preference(26a9835a) / knowledge(cb0aeabe)
-    → 查询: recall(query) → query_memory → 长期记忆返回
+```bash
+git clone https://github.com/YOUR_GITHUB_LOGIN/mokoa-windows.git
+cd mokoa-windows
+git remote add upstream https://github.com/IweirdoI/mokoa-windows.git
+git fetch upstream
+git switch -c feat/123-short-description upstream/master
 ```
 
-详见 [README.md](./README.md) 第七节「数据流」。
+固定成员获邀后可克隆主仓库，以 `origin/master` 为起点创建个人分支。开始前检查 `git status`，妥善保留自己的未提交改动，再更新远端。
 
-## 四、Commit 规范
-
-使用 Conventional Commits 格式，一行不超过 72 字符：
-
-- `feat:` 新功能
-- `fix:` Bug 修复
-- `docs:` 文档更新
-- `refactor:` 重构
-- `test:` 测试相关
-- `chore:` 构建/工具/杂项
-
-示例：
-```
-feat(core): 实现短期记忆热度晋升逻辑
-fix(security): 修复手机号正则漏匹配 IPv4 段
+```bash
+git add <本次任务的文件>
+git commit -s -m "fix(preference): 修复偏好版本更新"
+git push -u origin HEAD
 ```
 
-> 项目使用 `git-cliff` 自动生成 `CHANGELOG.md`，请勿手动维护。
+Fork 的 `origin` 是自己的仓库。在 GitHub 创建 PR，base 选择 `IweirdoI/mokoa-windows:master`。
 
-## 五、测试
+只改任务约定范围。公共接口、`api/server.py`、`src/core/`、配置、依赖变更先说明影响。历史分工见 README，当前认领以 Issue 为准。维护者为 [@IweirdoI](https://github.com/IweirdoI)。CODEOWNERS 用于请求审查；强制走 PR 需要仓库端另行启用分支保护。
 
-- 完成新功能或修改后，补充对应测试。
-- 运行测试：
-  ```bash
-  cd MOKOA
-  pip install -r requirements.txt
-  python -m pytest tests/ -v
-  ```
-- 快速验证环境：
-  ```bash
-  python -c "from src.core.factory import create_orchestrator; o=create_orchestrator(); print('OK')"
-  ```
+## 接口与环境
 
-## 六、常见问题
+- 契约先看 `src/common/interfaces.py`、`src/knowledge/memory_service/memory_schema.py` 和现有调用链。
+- Embedding 统一入口为 `src/embedding/embedding_interface.py`，不要绕过统一接口另建存储链路。
+- 麒麟目标后端为麒麟向量引擎，Milvus 是兼容选项；旧指南“最终库只有 Milvus”的说法不再适用。
+- Windows memory/hash、Windows BGE、麒麟 SDK 证据分别记录。hash 没有语义，不能证明召回质量或麒麟验收性能。
 
-**Q: 我该从哪里开始看代码？**
-A: 先看 [README.md](./README.md)，了解整体架构和分工。然后查 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)。
+## 验证与提交
 
-**Q: 如何理解记忆分类？**
-A: 见 [src/knowledge/memory_service/memory_schema.py](./src/knowledge/memory_service/memory_schema.py)，定义了 5 种 `memory_type`。
+Windows 需要 Python 3.12，安装步骤见 Windows 开发文档：
 
-**Q: 性能指标是什么？**
-A: 见 README.md 第八节 — 偏好提取 ≥ 85%、知识检索召回 ≥ 85%、检索响应 ≤ 500ms、冲突处理正确 ≥ 88%。
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup_windows.ps1
+. ./scripts/windows_env.ps1
+./.venv/Scripts/python.exe -m pytest tests/test_preference_extract.py tests/test_preference_orchestrator_wire.py tests/test_api.py::test_health -q
+```
 
-## License
+代码变动运行相关测试，按影响范围运行 `python -m pytest tests/ -q`。仅文档变更检查链接与步骤。前端在 `frontend/` 安装依赖后执行 `npm run build`，界面变化附截图。不能运行的检查注明原因，不写成通过。
 
-Apache 2.0
+禁止提交密钥、`.env`、聊天原文、个人资料、本地数据库、模型、缓存和构建产物。使用虚构、脱敏且允许再分发的测试材料。密钥由各自环境变量或仓库 Secrets 配置。
+
+使用 Conventional Commits：`feat:`、`fix:`、`docs:`、`test:`、`refactor:`、`chore:`。`CHANGELOG.md` 由 git-cliff 生成。填写 PR 模板，说明行为、验证结果、兼容性、参与者和第三方来源。
+
+## DCO 与许可
+
+所有新增贡献提交用 `git commit -s` 确认 [DCO 1.1](DCO)。这是来源声明，和密码学签名不同，不要求 GPG。签署前阅读原文；身份和邮箱随公开提交长期保存，可使用关联账户的 GitHub noreply 邮箱，信息需能真实代表提交者。
+
+漏签时，仅对自己的未共享最新提交可使用 `git commit --amend --no-edit -s`；已推送分支先联系维护者，不强推共享历史。合并前由维护者人工核查 DCO 和来源，目前没有自动 DCO 检查。合并推荐 Squash，应保留实际作者、共同作者 `Co-authored-by` 与有效签署记录，不替别人签署。
+
+项目沿用 [Apache License 2.0](LICENSE)，除另有明确标注和合法约定外，提交用于合入的贡献按此许可提供。贡献者保留自身著作权，不要求转让给维护者。第三方代码、SDK、模型和数据集各自的许可仍需遵守。
+
+引入第三方材料时写明原链接、版本、许可、改动与所需声明。AI 辅助内容也要人工验证，PR 中说明实质使用范围。不得提交无权公开的学校、雇主、原团队或企业资料。
+
+代码贡献记录见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。比赛署名、论文作者顺序、报酬和分配按团队另行确认的协议执行；合并 PR 不自动取得名额、报酬或分成。行为规范见 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)，安全问题见 [SECURITY.md](SECURITY.md)。

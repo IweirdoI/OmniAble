@@ -1,0 +1,7 @@
+# Module reviewers must accept and have repository write access.
+# Branch protection / rulesets are required for enforcement.
+* @IweirdoI
+/.github/ @IweirdoI
+/LICENSE @IweirdoI
+/DCO @IweirdoI
+/docs/TEAM_AGREEMENT.md @IweirdoI
