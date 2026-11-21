@@ -1,0 +1,35 @@
+version = 1
+name = "mokoa-windows"
+
+[layout]
+status = "docs/TEAM_STATUS.md"
+seal_log = "docs/clerk/seal-log.md"
+
+[time]
+offset_hours = 8
+
+[policy]
+auto_commit = false
+auto_push = false
+
+[sync]
+enabled = false
+remote = "origin"
+branch = "master"
+
+[ids.tasks]
+pattern = "TASK-{serial:3}"
+counter = "serial"
+
+[[path]]
+path = ".clerk/data"
+level = "sealed"
+
+[[path]]
+path = ".clerk/archive"
+level = "sealed"
+
+[[path]]
+path = "docs/TEAM_STATUS.md"
+level = "sealed"
+regions = ["tasks"]

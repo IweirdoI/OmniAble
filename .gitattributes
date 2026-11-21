@@ -1,2 +1,6 @@
 *.sh text eol=lf
 *.ps1 text eol=crlf
+# Clerk hashes exact bytes; retain LF in every collaborator's checkout.
+.clerk/** text eol=lf
+docs/TEAM_STATUS.md text eol=lf
+docs/clerk/** text eol=lf

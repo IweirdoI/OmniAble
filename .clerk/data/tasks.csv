@@ -1,0 +1,4 @@
+id,title,state,issue,accept,evidence,commit,note,publisher,publisher_email,claimant,claimant_email,claimed_at,updated
+TASK-001,确认团队成员与比赛规则,todo,,逐人确认参与形式、比赛资格、官方规则及本阶段目标,,,,Linnea,2312809203@qq.com,,,,20261121-190025
+TASK-002,复核 Windows 新人上手流程,todo,,在独立环境按文档安装启动，提交脱敏命令与日志，不冒充麒麟 SDK 验收,,,,Linnea,2312809203@qq.com,,,,20261121-190025
+TASK-003,确认署名与成果分配附件,todo,,由受影响成员书面确认署名规则、费用、报酬与奖金安排，不适用项注明,,,,Linnea,2312809203@qq.com,,,,20261121-190026

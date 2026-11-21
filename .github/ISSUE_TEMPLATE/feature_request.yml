@@ -1,0 +1,22 @@
+name: 功能讨论
+description: 开发前明确场景、方案与验收
+title: "[Feature] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 用户场景与问题
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 方案、替代方案和模块影响
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准与依赖
+    validations:
+      required: true

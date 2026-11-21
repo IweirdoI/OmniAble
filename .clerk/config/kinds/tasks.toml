@@ -1,0 +1,137 @@
+title = "团队任务"
+description = "认领任务、记录验收与关联 GitHub Issue 和 PR"
+table = ".clerk/data/tasks.csv"
+key = ["id"]
+numbering = "tasks"
+
+[state]
+field = "state"
+registry = "state"
+default = "todo"
+
+[[field]]
+name = "id"
+type = "text"
+role = "status"
+
+[[field]]
+name = "title"
+type = "text"
+required = true
+
+[[field]]
+name = "state"
+type = "enum"
+registry = "state"
+role = "status"
+
+[[field]]
+name = "issue"
+type = "text"
+
+[[field]]
+name = "accept"
+type = "text"
+required = true
+
+[[field]]
+name = "evidence"
+type = "text"
+required_when = "state == done"
+
+[[field]]
+name = "commit"
+type = "commit"
+required_when = "state == done"
+
+[[field]]
+name = "note"
+type = "text"
+
+[[field]]
+name = "publisher"
+type = "text"
+auto = "git_name"
+immutable = true
+role = "status"
+
+[[field]]
+name = "publisher_email"
+type = "email"
+auto = "git_email"
+immutable = true
+role = "status"
+
+[[field]]
+name = "claimant"
+type = "text"
+role = "status"
+
+[[field]]
+name = "claimant_email"
+type = "email"
+role = "status"
+
+[[field]]
+name = "claimed_at"
+type = "stamp"
+role = "status"
+
+[[field]]
+name = "updated"
+type = "stamp"
+auto = "now"
+role = "status"
+
+[[transition]]
+name = "start"
+from = ["todo", "paused"]
+to = "active"
+
+[[transition]]
+name = "review"
+from = ["active"]
+to = "review"
+
+[[transition]]
+name = "pause"
+from = ["active", "review"]
+to = "paused"
+requires = ["note"]
+
+[[transition]]
+name = "resume"
+from = ["paused", "review"]
+to = "active"
+
+[[transition]]
+name = "complete"
+from = ["review"]
+to = "done"
+requires = ["evidence", "commit"]
+archive = true
+
+[[action]]
+name = "claim"
+handler = "identity"
+fields = ["claimant", "claimant_email", "claimed_at"]
+states = ["todo", "active"]
+require_empty = ["claimant"]
+
+[[action]]
+name = "release"
+handler = "clear"
+fields = ["claimant", "claimant_email", "claimed_at"]
+
+[[view]]
+name = "list"
+columns = ["id", "title", "state", "claimant", "issue", "updated"]
+flex = "title"
+
+[[view]]
+name = "status"
+renderer = "table"
+target = "docs/TEAM_STATUS.md"
+region = "tasks"
+columns = ["id", "title", "state", "claimant", "issue", "updated"]
+headers = ["编号", "任务", "状态", "认领者", "Issue", "更新"]

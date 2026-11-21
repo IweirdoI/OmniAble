@@ -57,3 +57,11 @@ security_index.json
 
 # Secret scanning reports
 secrets-scan-report.txt
+
+# Per-clone Clerk installation and local scratch files
+.tools/
+.work/
+
+# Clerk task data is shared project state, not an application database.
+!.clerk/data/
+!.clerk/data/**

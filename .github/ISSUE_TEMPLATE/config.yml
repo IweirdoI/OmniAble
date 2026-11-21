@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全问题报告
+    url: https://github.com/IweirdoI/mokoa-windows/blob/master/SECURITY.md
+    about: 阅读私下报告方式，不要公开密钥、用户数据或漏洞细节

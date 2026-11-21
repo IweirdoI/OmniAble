@@ -1,0 +1,27 @@
+name: Clerk
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  clerk-check:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate shared configuration and task records
+        run: python scripts/check_clerk_config.py
+      - name: Install public Clerk release
+        shell: pwsh
+        run: ./scripts/install_clerk.ps1
+      - name: Validate state with upstream Clerk
+        shell: pwsh
+        run: ./scripts/clerk.ps1 check
