@@ -21,5 +21,6 @@
 | TASK-013 | [P2] 贯通聊天、偏好画像和记忆查询的场景选择 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/12 | 20261121-215647 |
 | TASK-014 | [P2] 增加可分页的长期记忆浏览与筛选，独立于本轮聊天召回 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/13 | 20261121-215815 |
 | TASK-015 | [P1] 建立前端自动化回归 CI，覆盖聊天流式与响应式主流程 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/14 | 20261121-215649 |
+| TASK-016 | [P1] 按设计完善 Agent 路由、执行预算与结果核验 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/16 | 20261121-233702 |
 
 <!-- clerk:end tasks -->

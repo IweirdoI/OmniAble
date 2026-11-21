@@ -54,6 +54,7 @@ git remote -v
 
 - **聊天与 API**：先看 [接入说明](LANGGRAPH_AGENT.md)、`api/server.py`、
   `src/agent/service.py`，再看 `tests/test_agent.py`、`tests/test_api.py`、`tests/test_api_validation.py`。
+  工作流改造另读 [Agent 工作流实施设计](AGENT_WORKFLOW.md)，按其中任务边界与验收场景实施。
 - **编排、冲突、生命周期**：`src/core/orchestrator.py`、`factory.py`、`layer_manager.py`、
   `conflict_resolver.py`、`entry_adapter.py`；对应 `tests/test_core.py`、`test_consolidator.py`、
   `test_logic_fixes.py`、`test_knowledge_conflict_ordering.py`。
