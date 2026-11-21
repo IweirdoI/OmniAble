@@ -2,6 +2,8 @@
 
 # 团队协作入口
 
+**协作者的 AI 新对话从这里开始：** [Agent 开工指南](docs/AGENT_ONBOARDING.md)。根目录 [AGENTS.md](AGENTS.md) 和 Cursor 的通用规则均指向这一入口；其他工具可直接把指南链接交给 Agent。
+
 团队任务已接入 [Clerk 协作指南](docs/CLERK.md)，共享状态见 [团队任务状态](docs/TEAM_STATUS.md)。协作者克隆后各自安装工具，配置和记录随 Git/PR 共享。
 
 新成员先看 [协作与邀请说明](docs/COLLABORATION.md)、[贡献指南](CONTRIBUTING.md) 和 [固定团队／比赛协作协议草案](docs/TEAM_AGREEMENT.md)。采用 Issue 认领 → 分支开发 → PR 审查 → 合并到 `master` 的流程，保留 Apache 2.0，新增贡献作 DCO 来源签署。比赛署名、费用与奖金由成员另行书面确认。

@@ -1,8 +1,10 @@
 # 协作入口与邀请说明
 
+协作者的 AI 新对话先读 [Agent 开工指南](AGENT_ONBOARDING.md)。它汇总必读顺序、模块路径、Clerk、环境与验证方式；可直接转发文末的开工提示词。
+
 任务工具已接入 [Clerk](CLERK.md)，状态见 [TEAM_STATUS.md](TEAM_STATUS.md)。每位协作者按指南安装后即可使用仓库中的共享配置与记录。
 
-推荐“固定小团队 + 公开 PR”：@IweirdoI 负责路线、审查和发布；任务明确负责人及验收人。新人先 Fork，稳定成员按需要邀请为 Collaborator，主线始终走 PR。
+推荐“固定小团队 + 公开 PR”：@IweirdoI 负责路线、审查和发布；任务明确负责人及验收人。新人先 Fork，稳定成员按需要邀请为 Collaborator。普通协作者通过 PR 合入主线；所有者按明确授权可使用下文的管理员例外直接合入。
 
 代码沿用 Apache 2.0，贡献采用 DCO。固定团队先确认 [团队协作协议](TEAM_AGREEMENT.md)，分别约定参赛、署名、费用和成果分配。
 
