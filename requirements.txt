@@ -30,5 +30,5 @@ python-dotenv==1.2.3      # 从 .env 加载密钥等敏感配置，避免写死/
 pytest==9.1.1
 pytest-asyncio==1.4.0
 
-# Local embedding (Windows dev) — efca9634 embedding_interface local backend
+# Local embedding (Windows dev) — core embedding_interface local backend
 sentence-transformers==6.0.1

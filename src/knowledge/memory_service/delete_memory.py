@@ -1,4 +1,4 @@
-"""Delete memory. Owner: cb0aeabe."""
+"""Delete memory. Module: knowledge."""
 
 from __future__ import annotations
 

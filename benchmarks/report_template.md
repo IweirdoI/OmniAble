@@ -1,6 +1,6 @@
 # 麒忆智脑 — 量化评测效果验证报告（模板）
 
-> 模块负责人：da0f41a1 | 对应比赛要求 **(7) 量化评测**
+> 模块负责人：testing | 对应比赛要求 **(7) 量化评测**
 > 运行方式：`python benchmarks/run_benchmarks.py [--real]`
 > 本报告填写说明：用 `benchmarks/results/report_*.json` 与 `summary_*.md` 的真实数字替换下方占位；真机数字来自麒麟 V11 宿主（kylin 后端）的 `--real` 跑分。
 

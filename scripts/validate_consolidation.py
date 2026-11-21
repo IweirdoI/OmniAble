@@ -1,4 +1,4 @@
-"""端到端真实验证：跨对话记忆固化（26a9835a方向）。
+"""端到端真实验证：跨对话记忆固化（preference方向）。
 
 跑真实代码路径：IngestionPipeline → 短期层 → consolidate(短→中语义合并 / 中→长抽象)
 → 结构化偏好画像(LPM) 回写。向量存储用 InMemoryMilvusClient（与默认工厂一致），

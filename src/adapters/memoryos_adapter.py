@@ -2,7 +2,7 @@
 MemoryOS adapter - short/mid/long-term flow.
 
 Repo: https://github.com/BAI-LAB/MemoryOS
-Owner: efca9634
+Module: core
 
 TODO:
   - pip install memoryos-pro (or vendor memoryos-pypi/)

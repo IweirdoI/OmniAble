@@ -1,6 +1,6 @@
-"""Preference memory dynamic capture — Owner: 26a9835a.
+"""Preference memory dynamic capture — Module: preference.
 
-Path B (cb0aeabe对接):
+Path B (knowledge对接):
   extract() → list[MemoryEntry]
   本地版本索引供 get_version_history()
   不 import MilvusClient，不直接调 create_memory()
@@ -66,7 +66,7 @@ def _utc_now() -> datetime:
 
 class PreferenceMemoryStore(PreferenceStore):
     """
-    Owner: 26a9835a (Core module)
+    Module: preference (Core module)
     Requirement: (2) habits, output style, security policy + versioning
     """
 

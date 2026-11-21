@@ -2,7 +2,7 @@
 Cognee adapter - knowledge graph + forget/improve.
 
 Repo: https://github.com/topoteretes/cognee
-Owner: cb0aeabe, 2abac5a6
+Module: knowledge, security
 
 TODO:
   - pip install cognee

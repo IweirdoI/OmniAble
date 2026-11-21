@@ -1,6 +1,6 @@
 """通用自然语言遗忘目标解析器。
 
-Owner: 2abac5a6
+Module: security
 Ref: 比赛题目 (5) 敏感信息识别与精准遗忘
 
 背景（P0 根因）：

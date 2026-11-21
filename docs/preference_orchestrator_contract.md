@@ -1,7 +1,7 @@
 # 偏好模块 → Orchestrator 挂接契约
 
-**From: 26a9835a（preference）→ To: efca9634（Orchestrator）**  
-**抄送参考: cb0aeabe（create_memory 方案 2）**  
+**From: preference（preference）→ To: core（Orchestrator）**
+**抄送参考: knowledge（create_memory 方案 2）**
 **日期: 2026-08-01**
 
 ---
@@ -42,7 +42,7 @@ ingestion → process_input → short-term
 
 ---
 
-## 3. 入库策略（cb0aeabe已定 · 方案 2）
+## 3. 入库策略（knowledge已定 · 方案 2）
 
 同一 `preference_key` 从 v1 → v2：
 
@@ -109,7 +109,7 @@ profile = self.preference.get_feature_profile(user_id, scene_id)
 - [x] Path B：`process_input` 规则命中 / 偏好分类时并行 extract；亦可 `POST /preferences/extract`  
 - [x] 冲突与版本链按 `preference_key`  
 - [x] v1→v2：旧条 `is_latest=false`，新条可查  
-- [ ] 前端偏好页区分短期候选 vs `GET /preferences` 已生效（6714f379）  
+- [ ] 前端偏好页区分短期候选 vs `GET /preferences` 已生效（frontend）
 - [ ] 面板确认流（可选）与 Agent 个性化闭环联调  
 
-有问题 @26a9835a（extract / metadata）或 @cb0aeabe（Milvus schema）。
+有问题 @preference（extract / metadata）或 @knowledge（Milvus schema）。

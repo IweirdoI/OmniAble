@@ -1,4 +1,4 @@
-"""Create memory. Owner: cb0aeabe."""
+"""Create memory. Module: knowledge."""
 
 from __future__ import annotations
 

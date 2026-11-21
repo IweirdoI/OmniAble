@@ -1,4 +1,4 @@
-"""REST API for OS Agent integration. Owner: efca9634."""
+"""REST API for OS Agent integration. Module: core."""
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 """Context perception engine for dynamic message handling.
 
-Owner: 2abac5a6
+Module: security
 Ref: Context-aware compression, Priority-based analysis, Streaming support
 """
 

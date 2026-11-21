@@ -1,10 +1,10 @@
 ﻿"""
 Memory entry schema — shared contract between ingestion, preference, and RAG.
 
-Owner: cb0aeabe (schema) | Review: 3fba60e1, 26a9835a, efca9634
+Module: knowledge (schema) | Review: ingestion, preference, core
 
-cb0aeabe定义的五类 memory_type:
-  - preference      用户偏好（26a9835a产出候选，cb0aeabe入库）
+knowledge定义的五类 memory_type:
+  - preference      用户偏好（preference产出候选，knowledge入库）
   - tool_call       工具调用经验
   - document_chunk  文档/论文片段
   - project_context 编程项目上下文
@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 
 class MemoryTypeTag(str, Enum):
-    """Fine-grained type stored in Milvus metadata (cb0aeabe RAG 模块)."""
+    """Fine-grained type stored in Milvus metadata (knowledge RAG 模块)."""
 
     PREFERENCE = "preference"
     TOOL_CALL = "tool_call"
@@ -55,7 +55,7 @@ class MemoryEntry(BaseModel):
     source: MemorySource
     user_id: str = "default"
     scene_id: str | None = None
-    confidence: float = Field(default=0.7, ge=0.0, le=1.0)      #置信度，由26a9835a完成
+    confidence: float = Field(default=0.7, ge=0.0, le=1.0)      #置信度，由preference完成
     metadata: dict[str, Any] = Field(default_factory=dict)      #张嘉询
     # 多维评价后由 memory_policy 填充
     save_score: float | None = None

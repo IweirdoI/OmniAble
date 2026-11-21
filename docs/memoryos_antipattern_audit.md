@@ -19,7 +19,7 @@
 4. **频率信号**：`n_observations`，行为源 ≥3 升为 `repeated_behavior`  
 5. **规范 embedding 文本**：`[preference] key=value | desc`，避免「描述不变、值已变」的陈旧向量  
 
-## 给efca9634的移植红线（lifecycle）
+## 给core的移植红线（lifecycle）
 
 实现 `promote_to_mid` / `promote_to_long` 时 **禁止** 原样拷贝 MemoryOS：
 

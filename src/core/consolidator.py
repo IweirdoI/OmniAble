@@ -1,4 +1,4 @@
-"""Memory consolidation — cross-conversation 固化 (26a9835a/efca9634 协作方向). Owner: efca9634.
+"""Memory consolidation — cross-conversation 固化 (preference/core 协作方向). Module: core.
 
 参考 MemoryOS memoryos-pypi/updater.py 与 TiMem 的时间分层固化思路：
 

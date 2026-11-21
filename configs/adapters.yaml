@@ -6,7 +6,7 @@ adapters:
     repo: https://github.com/BAI-LAB/MemoryOS
     role: memory_lifecycle_reference
     borrows: [short_mid_long_flow, heat_promotion, updater]
-    owner: efca9634
+    owner: core
     modules: [core/layer_manager]
     status: reference
 
@@ -14,7 +14,7 @@ adapters:
     repo: https://github.com/mem0ai/mem0
     role: preference_extraction_reference
     borrows: [fact_extraction, hybrid_retrieval]
-    owner: 26a9835a
+    owner: preference
     modules: [preference, adapters/mem0_adapter]
     status: reference
 
@@ -22,7 +22,7 @@ adapters:
     repo: https://github.com/topoteretes/cognee
     role: knowledge_graph_reference
     borrows: [entity_relation, structured_storage, forget_api]
-    owner: cb0aeabe
+    owner: knowledge
     modules: [knowledge, adapters/cognee_adapter]
     status: reference
 

@@ -1,4 +1,4 @@
-"""Memory conflict detection and resolution. Owner: efca9634 + cb0aeabe."""
+"""Memory conflict detection and resolution. Module: core + knowledge."""
 
 from __future__ import annotations
 

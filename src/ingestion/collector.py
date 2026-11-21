@@ -17,7 +17,7 @@
     输入由 API/Agent 提供；输出遵循 ``src.common.models.RawRecord``，
     下游仅依赖 ``DataCleaner``，不直接依赖 SQLite、security 或 Milvus。
 
-Owner: 3fba60e1
+Module: ingestion
 """
 
 from __future__ import annotations

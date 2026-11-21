@@ -1,6 +1,6 @@
 """Knowledge memory service tests — 记忆库 CRUD 与策略.
 
-Owner: 2abac5a6 | Ref: src/knowledge/memory_service/ + src/core/entry_adapter.py
+Module: security | Ref: src/knowledge/memory_service/ + src/core/entry_adapter.py
 
 覆盖:
   - MemoryPolicy 多维评分（隐私风险/临时性/反馈信号）

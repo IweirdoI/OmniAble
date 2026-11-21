@@ -16,7 +16,7 @@ from src.common.models import (
     SensitiveEntry,
 )
 
-# MemoryEntry lives in memory_service schema (cb0aeabe); preference extract returns it.
+# MemoryEntry lives in memory_service schema (knowledge); preference extract returns it.
 if TYPE_CHECKING:
     from src.knowledge.memory_service.memory_schema import MemoryEntry
     from src.security.forget_parser import ForgetResolution
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 class SensitiveService(ABC):
     """敏感信息处理服务接口。
     
-    Owner: 2abac5a6
+    Module: security
     Ref: DLP, PII detection, NL-driven forgetting
     """
     
@@ -100,7 +100,7 @@ class SensitiveService(ABC):
 
 
 class IngestionAdapter(ABC):
-    """Owner: 3fba60e1 | Ref: Zep ingestion, Cognee ingest patterns."""
+    """Module: ingestion | Ref: Zep ingestion, Cognee ingest patterns."""
 
     @abstractmethod
     def ingest(self, raw: dict[str, Any], source: str) -> RawRecord:
@@ -112,7 +112,7 @@ class IngestionAdapter(ABC):
 
 
 class PreferenceStore(ABC):
-    """Owner: 26a9835a | Ref: Mem0 fact extract, MemoryOS long_term.
+    """Module: preference | Ref: Mem0 fact extract, MemoryOS long_term.
 
     Path B: extract() → MemoryEntry; Orchestrator calls create_memory / store_memory_entry.
     Preference module maintains local version index only (no Milvus write).
@@ -132,7 +132,7 @@ class PreferenceStore(ABC):
 
 
 class KnowledgeStore(ABC):
-    """Owner: cb0aeabe | Ref: Cognee KG, mem0 hybrid retrieval."""
+    """Module: knowledge | Ref: Cognee KG, mem0 hybrid retrieval."""
 
     @abstractmethod
     def store(self, item: MemoryItem) -> MemoryItem:
@@ -148,7 +148,7 @@ class KnowledgeStore(ABC):
 
 
 class SecurityService(ABC):
-    """Owner: 2abac5a6 | Ref: Cognee forget, Supermemory contradiction handling."""
+    """Module: security | Ref: Cognee forget, Supermemory contradiction handling."""
 
     @abstractmethod
     def filter_sensitive(self, text: str) -> tuple[str, list[str], dict[str, str]]:
@@ -204,7 +204,7 @@ class SecurityService(ABC):
 
 
 class EmbeddingProvider(ABC):
-    """Owner: TBD (efca9634协调) | Target: Kylin embedding SDK."""
+    """Owner: TBD (core协调) | Target: Kylin embedding SDK."""
 
     @abstractmethod
     def embed(self, texts: list[str]) -> list[list[float]]:
@@ -212,7 +212,7 @@ class EmbeddingProvider(ABC):
 
 
 class StorageBackend(ABC):
-    """Owner: TBD (efca9634协调) | Lightweight edge storage."""
+    """Owner: TBD (core协调) | Lightweight edge storage."""
 
     @abstractmethod
     def save(self, item: MemoryItem) -> None: ...
@@ -225,7 +225,7 @@ class StorageBackend(ABC):
 
 
 class MemoryLayerManager(ABC):
-    """Owner: efca9634 | Ref: MemoryOS short/mid/long + LangMem background."""
+    """Module: core | Ref: MemoryOS short/mid/long + LangMem background."""
 
     @abstractmethod
     def write_short(self, item: MemoryItem): ...

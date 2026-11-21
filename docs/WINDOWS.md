@@ -2,7 +2,7 @@
 
 麒麟真机验收不走本文。真机仍用 `requirements.txt`、`scripts/*.sh` 和麒麟 Embedding SDK。本文只覆盖 Windows 上的安装、接线和本地 API。
 
-原版代码在 [mokoa-kylin](https://github.com/IweirdoI/mokoa-kylin)，对应上游阿里云 Codeup `git@codeup.aliyun.com:6a60620d8c4f3693e22016a1/MOKOA.git` 的提交 `220bdd1`。本仓与上游的关系见 [发布说明.md](发布说明.md)。
+原版代码在 [mokoa-kylin](https://github.com/IweirdoI/mokoa-kylin)，对应原项目的提交 `220bdd1`。本仓与上游的关系见 [发布说明.md](发布说明.md)。
 
 ## 能证明什么
 

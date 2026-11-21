@@ -1,6 +1,6 @@
 """LLM 语义级敏感信息检测器。
 
-Owner: 2abac5a6
+Module: security
 Ref: 主方案（语义识别）→ 回退方案（正则规则），确保模型不可用时不崩溃。
 
 通过本地 LLM（默认 LM Studio 原生 REST API /api/v1/chat）识别正则规则难以

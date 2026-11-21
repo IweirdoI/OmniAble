@@ -110,7 +110,7 @@ storage:
   memory_backend: auto       # auto | memory | milvus | kylin
   milvus_uri: http://localhost:19530
   collection_name: os_agent_memory
-  # Ingestion staging (3fba60e1) — 详见 3fba60e1-ingestion-SQLite建库说明.md
+  # Ingestion staging (ingestion) — 详见 ingestion-SQLite建库说明.md
   staging_backend: sqlite          # sqlite | memory
   staging_sqlite: ./data/ingestion_staging.db
   staging_jsonl: ./data/staging.jsonl  # export_jsonl 推荐路径；当前不自动 mirror
@@ -150,7 +150,7 @@ knowledge:
     short_text_max_length: 512
     id_max_length: 128
 
-# 文件摄取（3fba60e1）：图片在当前 llm.model 具备视觉能力时走多模态描述。
+# 文件摄取（ingestion）：图片在当前 llm.model 具备视觉能力时走多模态描述。
 ingestion:
   vision: auto   # auto | on | off ；auto 按模型名判断（含 -vl / gpt-4o / gemini 等）
   vision_probe: false  # true 时再查 /v1/models 的 capabilities
@@ -177,7 +177,7 @@ adapters:
   mem0: true
   cognee: true
 
-# 全局 LLM 服务配置（2abac5a6）：所有调用本地/云端模型的模块统一从这里读取，
+# 全局 LLM 服务配置（security）：所有调用本地/云端模型的模块统一从这里读取，
 # 禁止在代码中硬编码端点、密钥与模型名。
 llm:
   provider: lm-studio          # lm-studio | ollama | openai
@@ -192,7 +192,7 @@ llm:
 security:
   enable_pii_filter: true
   enable_nl_forget: true
-  # 语义级敏感识别（可选增强，2abac5a6）：依赖本地 LLM（默认 LM Studio，OpenAI 兼容接口），
+  # 语义级敏感识别（可选增强，security）：依赖本地 LLM（默认 LM Studio，OpenAI 兼容接口），
   # 识别正则遗漏的敏感信息（如工号、昵称、隐式地址等）。
   # 默认关闭；开启后入库与聊天出站均检测，失败会阻止本次处理，需保证本地服务可用。
   # 端点/密钥/模型名等继承顶层 llm 段，此处仅保留模块自身开关与阈值。
@@ -200,7 +200,7 @@ security:
     enabled: false            # 开发期默认关闭，需配合本地 LM Studio 开启
     min_confidence: 0.6       # 语义匹配置信度阈值
 
-# 偏好提取（26a9835a）：与顶层 llm（安全语义）分离，避免互相覆盖。
+# 偏好提取（preference）：与顶层 llm（安全语义）分离，避免互相覆盖。
 # 默认 fusion = use_llm + allow_rules；无密钥或 LLM 失败时降级到规则。
 preference:
   storage_dir: ./data/preferences

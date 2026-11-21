@@ -1,6 +1,6 @@
 """跨语种检索：中文问句不应因词面过滤丢弃英文文档。
 
-Owner: da0f41a1
+Module: testing
 复现场景：KO-02/03/04/09/10、DOC-01/02 等知识检索 FAIL（词面过滤过严）。
 该测试只验证 rerank_and_filter 的重排/过滤逻辑（不依赖真实向量检索），
 确认中英主题对齐能够保留相关文档；完整补召链路见 test_recall_strategy.py。

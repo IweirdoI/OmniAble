@@ -1,6 +1,6 @@
 # 架构设计文档 — 麒忆智脑
 
-Owner: efca9634 | 协助: da0f41a1
+Module: core | 协助: testing
 
 ## 1. 设计原则：收缩而非堆叠
 
@@ -82,9 +82,9 @@ Owner: efca9634 | 协助: da0f41a1
 
 | 层级 | 方案 | 负责人 |
 |------|------|--------|
-| 最终记忆库 | **Milvus（生产目标）**；当前为进程内 mock | cb0aeabe `memory_service/` |
-| 摄取中转库 | SQLite staging（审计、TTL 去重、按需 JSONL 导出） | 3fba60e1 |
-| Embedding | 麒麟 SDK / 本地 fallback | efca9634 `embedding/` |
+| 最终记忆库 | **Milvus（生产目标）**；当前为进程内 mock | knowledge `memory_service/` |
+| 摄取中转库 | SQLite staging（审计、TTL 去重、按需 JSONL 导出） | ingestion |
+| Embedding | 麒麟 SDK / 本地 fallback | core `embedding/` |
 
 > 已移除早期 `src/storage/` SQLite 双库 stub，统一由 Milvus 承担向量存储。
 > staging 在 Orchestrator 敏感过滤之前写入，但审计 content、扩展 metadata 和 raw
@@ -123,6 +123,6 @@ embedding_interface.py   ← 后端工厂
 ## 10. 待办
 
 - [x] 麒麟 SDK 文档整理（KYLIN_SDK.md）
-- [ ] Cognee adapter 最小 POC（cb0aeabe）
-- [ ] 冲突消解评测集（da0f41a1）
-- [ ] 麒麟真机 embedding 延迟测试（efca9634）
+- [ ] Cognee adapter 最小 POC（knowledge）
+- [ ] 冲突消解评测集（testing）
+- [ ] 麒麟真机 embedding 延迟测试（core）

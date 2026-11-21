@@ -19,7 +19,7 @@
     ``QualityEvaluator`` 和可选 ``StagingStore``；实现
     ``src.common.interfaces.IngestionAdapter`` 供 Orchestrator/API 调用。
 
-Owner: 3fba60e1
+Module: ingestion
 """
 
 from __future__ import annotations

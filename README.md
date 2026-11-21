@@ -1,4 +1,4 @@
-> **个人工程化版本。** 发布者赵琳（GitHub [@IweirdoI](https://github.com/IweirdoI)）。在麒麟原版 `220bdd1` 上补充 Windows 安装、哈希向量接线和 CI。上游仓库：阿里云 Codeup `git@codeup.aliyun.com:6a60620d8c4f3693e22016a1/MOKOA.git`。原版快照：[mokoa-kylin](https://github.com/IweirdoI/mokoa-kylin)。本人分工是偏好记忆 `src/preference/`。说明见 [docs/发布说明.md](docs/发布说明.md)。偏好方案见 [赵琳-偏好记忆整体技术方案.md](赵琳-偏好记忆整体技术方案.md)。
+> **个人工程化版本。** 发布者 Linnea（GitHub [@IweirdoI](https://github.com/IweirdoI)）。在麒麟原版 `220bdd1` 上补充 Windows 安装、哈希向量接线和 CI。原版快照：[mokoa-kylin](https://github.com/IweirdoI/mokoa-kylin)。本人分工是偏好记忆 `src/preference/`。说明见 [docs/发布说明.md](docs/发布说明.md)。偏好方案见 [Linnea-偏好记忆整体技术方案.md](Linnea-偏好记忆整体技术方案.md)。
 
 # 团队协作入口
 
@@ -6,7 +6,7 @@
 
 新成员先看 [协作与邀请说明](docs/COLLABORATION.md)、[贡献指南](CONTRIBUTING.md) 和 [固定团队／比赛协作协议草案](docs/TEAM_AGREEMENT.md)。采用 Issue 认领 → 分支开发 → PR 审查 → 合并到 `master` 的流程，保留 Apache 2.0，新增贡献作 DCO 来源签署。比赛署名、费用与奖金由成员另行书面确认。
 
-下文的原团队分工、比赛信息和进度保留为项目背景；本次组队成员和任务以新确认的协议及 Issue 为准。贡献记录见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
+下文的历史模块分工、比赛信息和进度保留为项目背景，以模块角色代替旧成员账户；本次组队成员和任务以新确认的协议及 Issue 为准。贡献记录见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
 
 # 仓库说明：
 
@@ -33,15 +33,15 @@
 
 ## 二、与比赛题目对照
 
-| 比赛要求 | 我们的实现 | 目录 | 负责人 | 状态 |
+| 比赛要求 | 我们的实现 | 目录 | 协作模块 | 状态 |
 |----------|-----------|------|--------|------|
-| **(1) 多源接入 + 清洗 + 标准化 + 质量校验** | 四段式 ingestion 流水线（含 SQLite staging） | `src/ingestion/` | 3fba60e1 | 主链、默认脱敏、遗忘清理和手动保留期 purge 已完成；性能待验收 |
-| **(2) 偏好记忆：提取、版本化、跨场景** | preference 模块 + Orchestrator 分类 + entry_adapter | `src/preference/` | 赵琳 / 26a9835a | 规则+LLM 提取已合入主线；**动态键兜底**（未知/长尾偏好不再静默丢弃，落为 `habit.custom_*` 等自由文本键）；LLM 后端无参优先本地 LM Studio；偏好 HF 数据集评测脚本已就绪；版本链/跨场景已接；真机 12/12 PASS |
-| **(3) 知识记忆：结构化、冲突、RAG 检索** | memory_service（麒麟向量引擎 CRUD） | `src/knowledge/memory_service/` | cb0aeabe | 已切麒麟原生向量引擎（768 维、严格模式）；知识检索词面过滤过严已修复（中文问句 vs 英文文档不再被误杀，见 `src/core/recall_ranker.py`/`orchestrator.py`），待真机复测；冲突 5/8 为独立 resolver 逻辑问题待修 |
-| **(4) 端侧 + 麒麟 Embedding SDK + ≤500ms** | embedding 统一接口 + Kylin SDK | `src/embedding/` | efca9634 | Windows/开发机已接入 BGE-M3（sentence-transformers）；**麒麟 V11 真机 SDK 已验证**（768 维，严格模式无降级） |
-| **(5) 敏感信息 + 自然语言精准遗忘** | security + delete_memory | `src/security/` | 2abac5a6 | 脱敏 + NL 遗忘解析 + 索引加密 + 语义识别（LM Studio）；遗忘已覆盖普通记忆/偏好（版本索引同步删），并支持知识库按自然语言条件批量定位遗忘（knowledge_forget.py）；真机 10/10 PASS |
-| **(6) 短/中/长期记忆流转** | layer_manager + mid_term 晋升 | `src/core/layer_manager.py` | efca9634 | 主链完成（heat 晋升、相似度去重、质量门控、`GET /stats`）；FLOW 重启持久化补测全 PASS |
-| **(7) 量化评测 + 测试报告** | tests + benchmarks | `tests/`, `benchmarks/` | da0f41a1 | 4 项硬指标组件级基线已落地（`tests/test_metrics.py` + `benchmarks/run_benchmarks.py`）；真机/麒麟后端跑分待补 |
+| **(1) 多源接入 + 清洗 + 标准化 + 质量校验** | 四段式 ingestion 流水线（含 SQLite staging） | `src/ingestion/` | ingestion | 主链、默认脱敏、遗忘清理和手动保留期 purge 已完成；性能待验收 |
+| **(2) 偏好记忆：提取、版本化、跨场景** | preference 模块 + Orchestrator 分类 + entry_adapter | `src/preference/` | Linnea | 规则+LLM 提取已合入主线；**动态键兜底**（未知/长尾偏好不再静默丢弃，落为 `habit.custom_*` 等自由文本键）；LLM 后端无参优先本地 LM Studio；偏好 HF 数据集评测脚本已就绪；版本链/跨场景已接；真机 12/12 PASS |
+| **(3) 知识记忆：结构化、冲突、RAG 检索** | memory_service（麒麟向量引擎 CRUD） | `src/knowledge/memory_service/` | knowledge | 已切麒麟原生向量引擎（768 维、严格模式）；知识检索词面过滤过严已修复（中文问句 vs 英文文档不再被误杀，见 `src/core/recall_ranker.py`/`orchestrator.py`），待真机复测；冲突 5/8 为独立 resolver 逻辑问题待修 |
+| **(4) 端侧 + 麒麟 Embedding SDK + ≤500ms** | embedding 统一接口 + Kylin SDK | `src/embedding/` | core | Windows/开发机已接入 BGE-M3（sentence-transformers）；**麒麟 V11 真机 SDK 已验证**（768 维，严格模式无降级） |
+| **(5) 敏感信息 + 自然语言精准遗忘** | security + delete_memory | `src/security/` | security | 脱敏 + NL 遗忘解析 + 索引加密 + 语义识别（LM Studio）；遗忘已覆盖普通记忆/偏好（版本索引同步删），并支持知识库按自然语言条件批量定位遗忘（knowledge_forget.py）；真机 10/10 PASS |
+| **(6) 短/中/长期记忆流转** | layer_manager + mid_term 晋升 | `src/core/layer_manager.py` | core | 主链完成（heat 晋升、相似度去重、质量门控、`GET /stats`）；FLOW 重启持久化补测全 PASS |
+| **(7) 量化评测 + 测试报告** | tests + benchmarks | `tests/`, `benchmarks/` | testing | 4 项硬指标组件级基线已落地（`tests/test_metrics.py` + `benchmarks/run_benchmarks.py`）；真机/麒麟后端跑分待补 |
 
 **结论：没有跑题。** 架构与题目一一对应。需注意答辩时说明：
 
@@ -53,7 +53,7 @@
 ## 三、系统架构（给团队成员的一页纸）
 
 ```
-多源数据 ──→ ingestion（3fba60e1）──→ Orchestrator（efca9634）
+多源数据 ──→ ingestion（ingestion）──→ Orchestrator（core）
                                       ├─ 记忆分类（classify）
                                       ├─ 短期记忆写入
                                       ├─ 短→中→长期晋升（layer_manager）
@@ -61,12 +61,12 @@
                                       └─ 偏好入库（entry_adapter → create_memory）
                 ┌─────────────────────┴─────────────────────┐
                 ▼                                           ▼
-         preference（赵琳 / 26a9835a）                    memory_service（cb0aeabe）
+         preference（Linnea）                    memory_service（knowledge）
          产出候选 MemoryEntry                        麒麟向量引擎 增删改查 + RAG
          不调库，产出 JSON                           create/query/update/delete
                 └─────────────────────┬─────────────────────┘
                                       ▼
-                              security（2abac5a6）
+                              security（security）
                               敏感过滤 + NL 遗忘 → delete_memory
 ```
 
@@ -80,24 +80,24 @@
 
 ---
 
-## 四、团队分工与成员负责的文件
+## 四、模块分工与文件范围
 
-| 成员 | 负责模块 | 主要目录 | 不要改 |
+| 角色 | 职责 | 主要目录 | 边界 |
 |------|----------|----------|--------|
-| **efca9634** | 编排核心、短/中/长期、冲突、联调、Embedding | `src/core/`, `src/embedding/` | 别人模块 |
-| **3fba60e1** | 多源接入四段式 | `src/ingestion/` | — |
-| **赵琳（26a9835a）** | 偏好提取、版本化、动态键兜底 | `src/preference/` | 不调向量库，产出 JSON 调 `create_memory`；LLM 客户端无参优先本地 LM Studio |
-| **cb0aeabe** | 记忆库 CRUD + RAG | `src/knowledge/memory_service/` | — |
-| **2abac5a6** | 敏感信息、NL 遗忘 | `src/security/` | 解析后调 `delete_memory` |
-| **6714f379** | Web 演示 | `frontend/` | 调 `api/server.py` |
-| **da0f41a1** | 测试、文档、benchmark | `tests/`, `benchmarks/`, `docs/` | — |
+| **core** | 编排核心、短/中/长期、冲突、联调、Embedding | `src/core/`, `src/embedding/` | 别人模块 |
+| **ingestion** | 多源接入四段式 | `src/ingestion/` | — |
+| **Linnea（preference）** | 偏好提取、版本化、动态键兜底 | `src/preference/` | 不调向量库，产出 JSON 调 `create_memory`；LLM 客户端无参优先本地 LM Studio |
+| **knowledge** | 记忆库 CRUD + RAG | `src/knowledge/memory_service/` | — |
+| **security** | 敏感信息、NL 遗忘 | `src/security/` | 解析后调 `delete_memory` |
+| **frontend** | Web 演示 | `frontend/` | 调 `api/server.py` |
+| **testing** | 测试、文档、benchmark | `tests/`, `benchmarks/`, `docs/` | — |
 
 ### 模块间调用规则
 
 1. **只通过接口协作**：`src/common/interfaces.py`、`memory_schema.py`
-2. **最终记忆库目标只有一个**：cb0aeabe的 **麒麟向量引擎**（`memory_service/`）；开发/CI 后端为进程内 mock/memory，真机验收走 kylin
-3. **26a9835a不直接写向量库**：产出 `MemoryEntry` JSON → 调 `create_memory()`
-4. **Embedding 统一入口**：`src/embedding/embedding_interface.py`（efca9634维护）
+2. **最终记忆库目标只有一个**：knowledge的 **麒麟向量引擎**（`memory_service/`）；开发/CI 后端为进程内 mock/memory，真机验收走 kylin
+3. **preference不直接写向量库**：产出 `MemoryEntry` JSON → 调 `create_memory()`
+4. **Embedding 统一入口**：`src/embedding/embedding_interface.py`（core维护）
 5. **`src/adapters/` 是参考 stub**，答辩前可不实现，不影响主流程
 
 ---
@@ -113,7 +113,7 @@ memory/
 ├── configs/default.yaml
 ├── src/
 │   ├── common/                        ← 全队共用模型与接口
-│   ├── core/                          ← ★ Orchestrator（efca9634）
+│   ├── core/                          ← ★ Orchestrator（core）
 │   │   ├── entry_adapter.py           ← MemoryItem ↔ MemoryEntry 转换
 │   │   ├── mid_term.py                ← 中期记忆池（50 条容量）
 │   │   ├── orchestrator.py            ← 记忆编排核心
@@ -121,13 +121,13 @@ memory/
 │   │   ├── short_term.py              ← 短期记忆池
 │   │   ├── conflict_resolver.py       ← 冲突消解
 │   │   └── classifier.py              ← 记忆分类
-│   ├── ingestion/                     ← 3fba60e1
+│   ├── ingestion/                     ← ingestion
 │   │   ├── pipeline.py                ← 四阶段摄取管线
 │   │   ├── cleaner.py                 ← 字符层清洗
 │   │   ├── normalizer.py              ← 来源专属标准化器
 │   │   ├── collector.py               ← 数据采集
 │   │   └── quality.py                 ← 质量评分
-│   ├── preference/                    ← 26a9835a（规则+LLM 提取已合入主线）
+│   ├── preference/                    ← preference（规则+LLM 提取已合入主线）
 │   │   ├── keys.py                    ← 偏好键定义 + 动态键兜底（未知键→custom_）
 │   │   ├── extractor.py               ← 规则+LLM 提取，未知偏好不丢弃
 │   │   ├── store.py                   ← PreferenceMemoryStore 端到端
@@ -135,20 +135,20 @@ memory/
 │   │   ├── version_index.py           ← 本地版本索引持久化
 │   │   └── llm_client.py              ← SiliconFlow/OpenAI/LM Studio 统一客户端
 │   ├── knowledge/
-│   │   ├── memory_service/            ← ★ cb0aeabe：麒麟向量引擎 CRUD
+│   │   ├── memory_service/            ← ★ knowledge：麒麟向量引擎 CRUD
 │   │   │   ├── create_memory.py
 │   │   │   ├── query_memory.py
 │   │   │   ├── update_memory.py
 │   │   │   ├── delete_memory.py
 │   │   │   └── memory_schema.py       ← 五类 memory_type 定义
 │   │   └── store.py                   ← 知识业务层（调 memory_service）
-│   ├── security/                      ← 2abac5a6
+│   ├── security/                      ← security
 │   │   ├── service.py                 ← 正则脱敏 + NL 遗忘 + HASH 占位符
 │   │   ├── forget_parser.py           ← 通用 NL 遗忘目标解析（普通记忆/偏好）
 │   │   ├── knowledge_forget.py        ← 知识库 NL 遗忘解析（定向召回 + 批量删除计划）
 │   │   ├── semantic_detector.py       ← LLM 语义级敏感识别（LM Studio / Ollama，可选）
 │   │   └── index_crypto.py            ← 索引原文 AES-GCM 加密
-│   ├── embedding/                     ← efca9634
+│   ├── embedding/                     ← core
 │   └── adapters/                      ← 参考 stub（可选）
 ├── api/server.py
 ├── frontend/
@@ -161,7 +161,7 @@ memory/
 
 ---
 
-## 六、cb0aeabe的记忆分类（全队统一 Schema）
+## 六、knowledge的记忆分类（全队统一 Schema）
 
 入库 JSON 格式见 `src/knowledge/memory_service/memory_schema.py`：
 
@@ -182,28 +182,28 @@ memory/
 ## 七、数据流（完整链路）
 
 ```
-1. 3fba60e1  collector → cleaner → normalizer → quality
+1. ingestion  collector → cleaner → normalizer → quality
            输出 NormalizedRecord（含 quality_score、dedup_fingerprint/兼容 fingerprint）
            normalizer 按来源（tool_result/user_behavior/manual_config/conversation）
            分别构造稳定正文，只传白名单 metadata
            process() 结束前写入 SQLite staging 审计与 TTL 去重
            staging 的 content/metadata/raw 默认先脱敏；raw 可关闭或仅 dev 明文
 
-2. efca9634  Orchestrator.process_input → 敏感过滤 → 分类 → 写入短期记忆
+2. core  Orchestrator.process_input → 敏感过滤 → 分类 → 写入短期记忆
            classify → 偏好 or 知识 → layer_manager.write_short()
 
-3. 26a9835a    目标链路：从 NormalizedRecord 提取偏好 → MemoryEntry
+3. preference    目标链路：从 NormalizedRecord 提取偏好 → MemoryEntry
            规则+LLM 提取已合入主线；产出 MemoryEntry 经 store_memory_entry()
            完成版本管理、冲突消解和 is_latest 标记
 
-4. efca9634  consolidate: short → mid（heat 达标）→ long（quality 达标）
+4. core  consolidate: short → mid（heat 达标）→ long（quality 达标）
            resolve_and_store → entry_adapter → create_memory(向量库)
            持久化成功后在 staging 额外绑定 milvus_memory_id，保留原本地 memory_id
 
-5. cb0aeabe  memory_policy 评分 → embed → memory_service（create/query/update/delete）
+5. knowledge  memory_policy 评分 → embed → memory_service（create/query/update/delete）
            开发/CI 为进程内 mock + 零向量本地 fallback；真机验收走麒麟向量引擎（768 维、严格模式）
 
-6. 2abac5a6  写入短期记忆前 filter_sensitive（正则 + 可选 LLM 语义层，默认 LM Studio）；
+6. security  写入短期记忆前 filter_sensitive（正则 + 可选 LLM 语义层，默认 LM Studio）；
            脱敏正文写回 <HASH_...> 占位符，索引原文 AES-GCM 加密落盘
            forget() 解析 NL 指令并返回目标 ID（脱敏占位符 + 普通记忆/偏好 memory_id + 知识库候选），
            由 Orchestrator 统一删除索引并级联记忆层；偏好删除后同步清除本地版本索引；
@@ -211,7 +211,7 @@ memory/
            staging 使用不可恢复的固定标签独立脱敏，不写敏感索引；目标 ID 定位成功后
            同步擦除 content、metadata、raw 和 TTL 指纹
 
-7. 3fba60e1  POST /staging/purge 手动执行 7d raw / 90d audit 清理
+7. ingestion  POST /staging/purge 手动执行 7d raw / 90d audit 清理
            自动定时 purge 待部署方式确定后接入
 
 8. 查询    recall(query) → query_memory → 长期记忆返回
@@ -224,10 +224,10 @@ memory/
 
 | 指标 | 目标 | 负责人 |
 |------|------|--------|
-| 偏好提取准确率 | ≥ 85% | da0f41a1 |
-| 知识检索召回率 | ≥ 85% | da0f41a1 |
-| 检索响应时间 | ≤ 500ms | cb0aeabe + efca9634 |
-| 冲突处理正确率 | ≥ 88% | cb0aeabe + efca9634 |
+| 偏好提取准确率 | ≥ 85% | testing |
+| 知识检索召回率 | ≥ 85% | testing |
+| 检索响应时间 | ≤ 500ms | knowledge + core |
+| 冲突处理正确率 | ≥ 88% | knowledge + core |
 
 > 组件级基线见 `tests/test_metrics.py` 与 `benchmarks/run_benchmarks.py`；真机/麒麟后端跑分待补，方法见 `benchmarks/report_template.md`。
 
@@ -298,7 +298,7 @@ python scripts/eval_preference_hf_dataset.py --mode fusion --semantic --refresh-
 
 ## 十、待团队会议确认的事项
 
-- [x] **中转库**：使用3fba60e1负责的 SQLite staging；JSONL 由中转库按需导出（最终库为麒麟向量引擎）
+- [x] **中转库**：使用ingestion负责的 SQLite staging；JSONL 由中转库按需导出（最终库为麒麟向量引擎）
 - [x] **存储后端**：验收形态确认为麒麟向量引擎（非 Milvus）；Milvus 仅兼容档
 - [x] **演示场景**：办公助手 + 编程 Agent + 系统操作偏好（星河笔记/课程助手虚构项目）
 - [x] **LLM 来源**：对话用云端硅基流动（DeepSeek-V3.2，密钥在 `.env`）；Embedding 用麒麟端侧 SDK / 本地 BGE-M3

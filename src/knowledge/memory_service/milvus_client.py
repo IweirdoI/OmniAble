@@ -1,4 +1,4 @@
-"""Milvus connection wrapper. Owner: cb0aeabe."""
+"""Milvus connection wrapper. Module: knowledge."""
 
 from __future__ import annotations
 

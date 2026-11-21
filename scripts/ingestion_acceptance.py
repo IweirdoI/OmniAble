@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""3fba60e1 · ingestion 准上线验收脚本。
+"""ingestion · ingestion 准上线验收脚本。
 
 重放 ``benchmarks/datasets/ingestion_acceptance.jsonl``，再生成一批合成事件
 测量吞吐与 p95。可在开发机或麒麟真机上运行：

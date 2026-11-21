@@ -1,6 +1,6 @@
 # 多源数据摄取模块（Ingestion）
 
-- 负责人：3fba60e1
+- 负责人：ingestion
 - 模块路径：`src/ingestion/`
 - 规格版本：1.2（SQLite staging）
 

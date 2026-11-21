@@ -22,7 +22,7 @@ LIB_CANDIDATES = (
 
 class KylinEmbeddingLib:
     """
-    Low-level ctypes wrapper. Owner: efca9634
+    Low-level ctypes wrapper. Module: core
 
     See docs/KYLIN_SDK.md for full API reference.
     """

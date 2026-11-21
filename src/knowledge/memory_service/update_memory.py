@@ -1,4 +1,4 @@
-"""Update memory. Owner: cb0aeabe."""
+"""Update memory. Module: knowledge."""
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 """Sensitive information filtering and precise forgetting.
 
-Owner: 2abac5a6
+Module: security
 
 Phase 1 — 正则规则脱敏 + 加盐哈希占位符 + 索引文件:
   覆盖手机号、身份证号、邮箱、银行卡号、护照、统一社会信用代码、
@@ -699,7 +699,7 @@ def _generate_llm_placeholder(original_content: str, sensitive_type: str) -> str
 
 class SecurityAndForgetService(SecurityService):
     """
-    Owner: 2abac5a6
+    Module: security
     Requirement: (5) PII detection + NL-driven forgetting
 
     Phase 1: 正则规则脱敏 + 哈希占位符 + 索引文件（默认启用）

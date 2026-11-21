@@ -1,4 +1,4 @@
-"""Preference memory module — Owner: 26a9835a."""
+"""Preference memory module — Module: preference."""
 
 from src.preference.store import PreferenceMemoryStore
 
