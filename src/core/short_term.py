@@ -1,4 +1,4 @@
-"""Short-term memory store — session-level working memory. Owner: efca9634."""
+"""Short-term memory store — session-level working memory. Module: core."""
 
 from __future__ import annotations
 

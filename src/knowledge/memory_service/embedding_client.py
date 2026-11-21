@@ -1,4 +1,4 @@
-"""Embedding client — wraps efca9634's unified embedding interface. Owner: cb0aeabe."""
+"""Embedding client — wraps the unified embedding interface. Module: knowledge."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from src.embedding.embedding_interface import get_shared_embedding_backend
 
 
 class EmbeddingClient:
-    """Only embed `content` field per cb0aeabe spec."""
+    """Only embed `content` field per knowledge spec."""
 
     def __init__(self, backend: str | None = None) -> None:
         self._provider = get_shared_embedding_backend(backend)

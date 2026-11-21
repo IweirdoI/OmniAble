@@ -17,8 +17,8 @@
 |------|------------------|
 | **9 AI SDK** | **核心**：文本向量化（embedding）、文本生成 |
 | 系统能力 SDK | 可选：进程/资源监控 |
-| 系统安全 SDK | 可选：与2abac5a6安全模块联动 |
-| 应用支撑 SDK | 6714f379前端 Qt 控件可参考 |
+| 系统安全 SDK | 可选：与security安全模块联动 |
+| 应用支撑 SDK | frontend前端 Qt 控件可参考 |
 
 比赛要求的 **「调用银河麒麟 embedding SDK」** 对应 **9.4.3 向量化 → 9.4.3.1 文本向量化**。
 
@@ -175,7 +175,7 @@ src/embedding/
 - [ ] 记忆检索端到端 ≤ 500ms  
 - [ ] 指定适配机型测试截图  
 
-Owner: **efca9634** | Review: cb0aeabe（检索）、da0f41a1（测试报告）
+Owner: **core** | Review: knowledge（检索）、testing（测试报告）
 
 ### 自动化入口
 

@@ -1,4 +1,4 @@
-"""Unified embedding interface. Owner: efca9634."""
+"""Unified embedding interface. Module: core."""
 
 from __future__ import annotations
 

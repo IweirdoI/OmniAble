@@ -1,4 +1,4 @@
-"""Mid-term memory store — recent high-value fragment pool. Owner: efca9634.
+"""Mid-term memory store — recent high-value fragment pool. Module: core.
 
 改进（参考 MemoryOS memoryos-pypi/mid_term.py）：
 - 合并由字符相似 (SequenceMatcher) 改为 **语义(embedding)余弦 + 关键词 Jaccard**，

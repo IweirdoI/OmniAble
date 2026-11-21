@@ -1,7 +1,7 @@
-# 麒忆智脑 · cb0aeabe对接说明（偏好入库 & Orchestrator 联调）
+# 麒忆智脑 · knowledge对接说明（偏好入库 & Orchestrator 联调）
 
-**发起人：efca9634**  
-**关联角色：26a9835a（偏好记忆模块负责人）、cb0aeabe（知识检索模块负责人）**  
+**发起人：core**
+**关联角色：preference（偏好记忆模块负责人）、knowledge（知识检索模块负责人）**
 **日期：2026-07-31；状态复核：2026-08-06（按当前代码更新）**
 
 ---
@@ -10,16 +10,16 @@
 
 在偏好模块实现初期，团队确立了以下关键架构决策，旨在解耦数据提取与存储逻辑：
 
-1.  **入库路径决策**：采纳方案 B。偏好模块（26a9835a负责）仅负责从原始数据中提取结构化 `MemoryEntry`，**不直接操作数据库**。
+1.  **入库路径决策**：采纳方案 B。偏好模块（preference负责）仅负责从原始数据中提取结构化 `MemoryEntry`，**不直接操作数据库**。
 2.  **存储架构**：采用两层存储模型。
     *   **本地版本索引**：由偏好模块维护，用于开发期测试及冲突消解前的历史查询。
-    *   **Milvus 正式库（目标架构）**：由知识检索模块（cb0aeabe负责）管理，存储最终权威数据，支持 RAG 检索与前端展示；当前代码仍使用进程内 mock。
+    *   **Milvus 正式库（目标架构）**：由知识检索模块（knowledge负责）管理，存储最终权威数据，支持 RAG 检索与前端展示；当前代码仍使用进程内 mock。
 
 ---
 
 ## 二、当前系统状态（联调起点）
 
-### 1. 编排核心模块（efca9634负责）
+### 1. 编排核心模块（core负责）
 - ✅ `Orchestrator.process_input`：已实现，负责接收输入并写入短期记忆，已对接多源接入模块。
 - ✅ `POST /ingest` 与 `GET /short-term/{user_id}` API：已可用。
 - ✅ `Orchestrator.resolve_and_store`：已通过适配器转换为 `MemoryEntry`，并调用 `create_memory()`；偏好条目走 `store_memory_entry()` 完成版本处理。
@@ -27,12 +27,12 @@
 - ✅ `POST /recall`、`POST /store-entry`、`GET /preferences/{user_id}` 与 `POST /consolidate/{user_id}` API：已接线。
 - ⚠️ 当前 `MilvusClient` 仍是进程内 mock，真实 pymilvus 连接、Collection 建表和向量检索尚未实现。
 
-### 2. 偏好记忆模块（26a9835a负责）
+### 2. 偏好记忆模块（preference负责）
 - ⏳ `extract()` 方法：待实现，需输出 `list[MemoryEntry]`。
 - ✅ `get_version_history()`：已支持按 `preference_key` / `config_key` 查询进程内版本历史。
 - ✅ 当前版本链使用 `preference_key`、`version`、`is_latest`、`supersedes_memory_id`；`preference_value`、`category` 仍可按业务需要放入 metadata。
 
-### 3. 知识检索模块（cb0aeabe负责）
+### 3. 知识检索模块（knowledge负责）
 - ✅ 基础骨架：`create_memory`, `query_memory`, `update_memory`, `delete_memory` 已就绪。
 - ✅ Schema 定义：`memory_schema.py` 已定义五类 `memory_type`。
 - ✅ 策略配置：`memory_policy.py` 已实现入库评分逻辑。
@@ -58,7 +58,7 @@
 
 当前结论：
 1. `create_memory` 会通过 `**entry.metadata` 合并自定义字段，当前 mock 可保存上述字段。
-2. 真实 Milvus Collection 尚未创建，生产 Schema、动态字段策略、字段白名单和长度限制仍需cb0aeabe确认。
+2. 真实 Milvus Collection 尚未创建，生产 Schema、动态字段策略、字段白名单和长度限制仍需knowledge确认。
 
 ### 3.2 偏好更新策略选择
 
@@ -183,9 +183,9 @@
 
 ## 七、沟通渠道
 
-- **编排/冲突/联调节奏** → efca9634（编排核心模块）
-- **存储细节/查询格式** → cb0aeabe（知识检索模块）
-- **偏好提取逻辑** → 26a9835a（偏好记忆模块）
+- **编排/冲突/联调节奏** → core（编排核心模块）
+- **存储细节/查询格式** → knowledge（知识检索模块）
+- **偏好提取逻辑** → preference（偏好记忆模块）
 
 ---
 

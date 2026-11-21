@@ -1,4 +1,4 @@
-# 偏好记忆模块（26a9835a）
+# 偏好记忆模块（preference）
 
 对应赛题 **(2)**：操作习惯 / 输出风格 / 安全策略等偏好的自动提取、版本化、跨场景适配。
 
@@ -70,7 +70,7 @@ for e in entries:
 
 ## MemoryEntry.metadata 约定
 
-与cb0aeabe对接文档一致：`preference_key` / `preference_value` / `category` / `version` / `is_latest` / `supersedes_memory_id` / `scene_id` / `scope`。
+与knowledge对接文档一致：`preference_key` / `preference_value` / `category` / `version` / `is_latest` / `supersedes_memory_id` / `scene_id` / `scope`。
 
 ## 工业优化（相对 MemoryOS 弊端）
 
@@ -79,7 +79,7 @@ for e in entries:
 | 每次更新整文件 IO | dirty + `extract()` 末尾一次 `flush()`；原子写 |
 | 自由文本用户画像 | `get_feature_profile()` 结构化 kv/confidence/rank_score |
 | session 向量创建后不刷新 | 偏好 `content` 用 `[preference] key=value`，值变则向量输入变 |
-| 中期热度 peek 不淘汰 | **不在本模块**；见 `docs/memoryos_antipattern_audit.md` 给efca9634的红线 |
+| 中期热度 peek 不淘汰 | **不在本模块**；见 `docs/memoryos_antipattern_audit.md` 给core的红线 |
 
 ```python
 profile = store.get_feature_profile("demo_user", scene_id="os_operation")

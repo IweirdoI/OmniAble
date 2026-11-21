@@ -2,7 +2,7 @@
 mem0 adapter - hybrid retrieval (semantic + BM25 + entity).
 
 Repo: https://github.com/mem0ai/mem0
-Owner: cb0aeabe
+Module: knowledge
 
 TODO:
   - pip install mem0ai[nlp]

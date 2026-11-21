@@ -1,4 +1,4 @@
-"""Kylin CoreAI embedding adapter. Owner: efca9634. See docs/KYLIN_SDK.md."""
+"""Kylin CoreAI embedding adapter. Module: core. See docs/KYLIN_SDK.md."""
 
 from __future__ import annotations
 

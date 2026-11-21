@@ -16,7 +16,7 @@ Cleaner 负责字符层清洗；Normalizer 负责把结构化字段转换成稳�
     依赖 ``src.common.models`` 的 ``DataSource``/``RawRecord``/
     ``NormalizedRecord``；上游为 Cleaner，下游为 ``QualityEvaluator``。
 
-Owner: 3fba60e1
+Module: ingestion
 """
 
 from __future__ import annotations

@@ -203,7 +203,7 @@ def create_orchestrator() -> MemoryOrchestrator:
         quality_weights=quality_weights if isinstance(quality_weights, dict) else None,
         quality_type_thresholds=quality_type_thresholds,
     )
-    # 偏好/固化共用的硅基流动客户端（26a9835a方向：提取与跨对话固化抽象共用）。
+    # 偏好/固化共用的硅基流动客户端（preference方向：提取与跨对话固化抽象共用）。
     pref_llm_cfg = (config.get("preference", {}) or {}).get("llm", {}) or {}
     pref_llm = SiliconFlowClient(
         api_key=pref_llm_cfg.get("api_key") or None,

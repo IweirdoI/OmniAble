@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke test for local BGE-M3 embedding on Windows/dev. Owner: efca9634."""
+"""Smoke test for local BGE-M3 embedding on Windows/dev. Module: core."""
 
 from __future__ import annotations
 

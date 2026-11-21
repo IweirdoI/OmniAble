@@ -1,4 +1,4 @@
-"""Local embedding for dev/test (BGE-M3). Owner: efca9634."""
+"""Local embedding for dev/test (BGE-M3). Module: core."""
 
 from __future__ import annotations
 

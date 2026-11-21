@@ -1,6 +1,6 @@
 """Evaluation framework — 硬指标评测基线.
 
-Owner: da0f41a1 | Requirement: (7) 量化评测
+Module: testing | Requirement: (7) 量化评测
 Updated: 2026-08-09 移除 skip，用确定性组件构建可重复的评测基线。
 
 硬指标:

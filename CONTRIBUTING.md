@@ -1,6 +1,6 @@
 # 贡献指南
 
-适用于 `IweirdoI/mokoa-windows` 的新贡献。README 的历史团队标识用于说明来源，不自动成为新团队分工或署名排名。固定团队／比赛成员另行确认 [团队协议](docs/TEAM_AGREEMENT.md)。
+适用于 `IweirdoI/mokoa-windows` 的新贡献。README 以模块角色说明历史协作范围，不公开旧成员账户，也不自动成为新团队分工或署名排名。固定团队／比赛成员另行确认 [团队协议](docs/TEAM_AGREEMENT.md)。
 
 ## 认领与开发
 

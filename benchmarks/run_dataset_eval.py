@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """MOKOA 数据集驱动评测 harness —— 可复现抽测 + 详细测试报告.
 
-Owner: da0f41a1 | 对应赛题要求 (3) 知识检索 / (7) 量化评测
+Module: testing | 对应赛题要求 (3) 知识检索 / (7) 量化评测
 运行:
     python benchmarks/run_dataset_eval.py --seed 42 --n 40 --rq 50 --rc 800
 

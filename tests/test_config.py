@@ -1,6 +1,6 @@
 """公共配置加载器测试 — src/common/config.py 及各模块配置接入.
 
-Owner: 2abac5a6
+Module: security
 
 验证：
   - load_default_config / get_llm_config 合并与覆盖逻辑

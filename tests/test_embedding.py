@@ -1,4 +1,4 @@
-"""Local / Kylin embedding tests. Owner: efca9634."""
+"""Local / Kylin embedding tests. Module: core."""
 
 from __future__ import annotations
 

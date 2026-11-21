@@ -1,4 +1,4 @@
-"""Evidence-based preference classification. Owner: efca9634.
+"""Evidence-based preference classification. Module: core.
 
 Knowledge is the fallback of the two-class interface, not an admission decision.
 Ingestion quality gates still decide whether a record is worth saving.

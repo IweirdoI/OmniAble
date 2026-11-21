@@ -1,4 +1,4 @@
-"""Multi-dimensional save/update/delete policy. Owner: cb0aeabe (rules) + 26a9835a/2abac5a6 (input signals)."""
+"""Multi-dimensional save/update/delete policy. Module: knowledge (rules) + preference/security (input signals)."""
 
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ class MemoryPolicy:
               - 隐私风险 - 过期风险
 
     上下游分工:
-      - 3fba60e1 ingestion/quality.py: 初筛
-      - 26a9835a preference: 产出候选 + confidence
-      - 2abac5a6 security: 隐私风险、显式删除信号
-      - cb0aeabe memory_policy: 入库前最终评价（本模块）
+      - ingestion ingestion/quality.py: 初筛
+      - preference preference: 产出候选 + confidence
+      - security security: 隐私风险、显式删除信号
+      - knowledge memory_policy: 入库前最终评价（本模块）
     """
 
     # 入库/持久化决策阈值：score_save 综合评分达到该值才写入长期记忆。

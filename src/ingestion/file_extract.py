@@ -4,7 +4,7 @@ PDF / Word 只做本地抽文本。图片优先走视觉模型描述；当前模
 视觉能力或调用失败时，再回退本地 Tesseract OCR，最后才用用户说明
 （caption）。扫描件 PDF 若抽不出文字，同样要求补充说明，否则拒绝。
 
-Owner: 3fba60e1
+Module: ingestion
 """
 
 from __future__ import annotations

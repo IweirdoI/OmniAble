@@ -1,6 +1,6 @@
 """知识库自然语言精准遗忘解析器。
 
-Owner: 2abac5a6
+Module: security
 Ref: 比赛题目 (5) 敏感信息识别与精准遗忘 —— 知识库按自然语言条件批量定位遗忘
 
 本模块把「遗忘知识库中关于某主题的内容」这类自然语言指令解析为一份
@@ -10,7 +10,7 @@ Ref: 比赛题目 (5) 敏感信息识别与精准遗忘 —— 知识库按自�
 - ``recall_query``：用于定向召回的查询串（从指令抽取的主题词），提升知识命中率；
 - ``want_all``：是否为「删除全部某类知识」的提权指令；
 - ``memory_types``：知识库支持的细分类（非偏好），用于删除过滤；
-- ``filters``：配合cb0aeabe ``delete_memory`` 的批量删除过滤条件（含 ``nl_condition``）。
+- ``filters``：配合knowledge ``delete_memory`` 的批量删除过滤条件（含 ``nl_condition``）。
 
 解析阶段**不执行任何删除**，正式删除由 ``Orchestrator.forget`` 统一编排
 （定向召回 → 候选打分 → ``_purge_memory`` 走 ``delete_memory`` 级联删除；

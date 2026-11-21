@@ -1,4 +1,4 @@
-"""Preference module v1 tests — Owner: 26a9835a. Offline (rules only)."""
+"""Preference module v1 tests — Module: preference. Offline (rules only)."""
 
 from __future__ import annotations
 

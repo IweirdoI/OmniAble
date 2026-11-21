@@ -20,7 +20,7 @@
     输入依赖 ``NormalizedRecord`` 中的 type/content/confidence/metadata；
     输出 ``QualityDecision`` 供 pipeline、审计、前端和 benchmark 共用。
 
-Owner: 3fba60e1
+Module: ingestion
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-# preference_extraction.jsonl — 对接说明（26a9835a → da0f41a1）
+# preference_extraction.jsonl — 对接说明（preference → testing）
 
 ## 文件
 
@@ -40,7 +40,7 @@ got = {f"{e.metadata['preference_key']}={e.metadata['preference_value']}" for e 
 
 - 线上默认 **Fusion**（LLM + 规则）；本数据集可用于 LLM-only / Fusion 对比。
 - pref_021→022 为同用户同 key 版本演进；评测准确率时可按单条抽取计，版本链另测 `get_version_history`。
-- **计分约定**：本轮保留 `expected_preferences` 原标签计分，不为抬分改标签或硬补规则。准确率定义与独立验证集由评测侧（da0f41a1）固定后再对比 rule / LLM / fusion。
+- **计分约定**：本轮保留 `expected_preferences` 原标签计分，不为抬分改标签或硬补规则。准确率定义与独立验证集由评测侧（testing）固定后再对比 rule / LLM / fusion。
 
 ## 标注待审（不改标签，仅记录争议）
 

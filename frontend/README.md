@@ -1,10 +1,10 @@
 # 前端演示指南
 
-> **负责人：6714f379** | 对应比赛 **效果演示视频** + **应用案例展示** | 后端接口：`api/server.py`
+> **负责人：frontend** | 对应比赛 **效果演示视频** + **应用案例展示** | 后端接口：`api/server.py`
 
 本文档说明：**做什么页面、调哪些 API、找谁对接、答辩 Demo 怎么设计**。
 
-> **当前状态（2026-09-08）：** 已实现 Vue 3 双栏对话与实时记忆面板，并接入3fba60e1
+> **当前状态（2026-09-08）：** 已实现 Vue 3 双栏对话与实时记忆面板，并接入ingestion
 > `cacd8b5` 的文件摄取接口。下文原有比赛规划保留作背景；实际使用以本节为准。
 
 ### 运行与多源接入
@@ -71,7 +71,7 @@ Embedding，不代表真实视觉模型、BGE-M3 或麒麟 SDK 的效果/性能�
 |--------|------|
 | **效果演示视频** | 展示偏好捕捉、知识整合、检索复用等核心功能 |
 | **至少 1 个真实场景应用案例** | 可交互 Demo，证明方案能落地 |
-| **用户手册 / 操作说明**（协助） | 界面截图 + 操作步骤，da0f41a1可协助文档整合 |
+| **用户手册 / 操作说明**（协助） | 界面截图 + 操作步骤，testing可协助文档整合 |
 
 **你不负责**实现记忆算法、Milvus、Embedding，只负责 **把后端能力可视化**，让评委「看得见、点得动、看得懂」。
 
@@ -171,7 +171,7 @@ POST /ingest
 }
 ```
 
-**对接：3fba60e1**
+**对接：ingestion**
 
 - 要几条「清洗前 → 清洗后」真实样例，放进 Demo 默认文案
 - 若后端返回清洗结果，页面上展示 **前后对比**（加分项）
@@ -194,7 +194,7 @@ POST /ingest
 GET /preferences/demo_user?latest_only=false&top_k=10
 ```
 
-**对接：26a9835a**
+**对接：preference**
 
 - 偏好字段含义、展示哪些 metadata
 - 至少 3 条可演示的偏好样例
@@ -224,12 +224,12 @@ POST /recall
 }
 ```
 
-**对接：cb0aeabe**
+**对接：knowledge**
 
 - `query_memory` 返回字段格式（items、latency_ms）
 - 答辩前预置 5～10 条种子记忆（工具类、文档类各几条）
 
-**对接：da0f41a1**
+**对接：testing**
 
 - Demo 用的 query **必须与测试数据集一致**，报告数字和演示可复现
 
@@ -245,7 +245,7 @@ POST /recall
 2. 再写入：「用户偏好 Python，以后都用 Python」
 3. 界面展示：**旧记忆被更新/替换**，带 version 或时间线
 
-**对接：efca9634**
+**对接：core**
 
 - `/ingest` 已返回 `updated_existing`、`memory_id` 和 `evicted_memory_id`
 - 前端可用 `updated_existing` 展示本次写入是否更新了已有记忆
@@ -272,7 +272,7 @@ POST /forget
 }
 ```
 
-**对接：2abac5a6**
+**对接：security**
 
 - NL 解析后的删除范围说明（删几条、按什么条件）
 - 敏感信息演示：输入含手机号的内容，展示 **被过滤** 提示
@@ -281,7 +281,7 @@ POST /forget
 
 ## 五、后端 API 现状与待联调
 
-当前 `api/server.py` 接口（**efca9634负责联调 Orchestrator**）：
+当前 `api/server.py` 接口（**core负责联调 Orchestrator**）：
 
 | 方法 | 路径 | 状态 | 你需要 |
 |------|------|------|--------|
@@ -296,14 +296,14 @@ POST /forget
 | POST | `/forget` | ⚠️ 部分完成 | HTTP 和删除链路已接线，NL 目标解析仍为 TODO |
 | POST | `/staging/purge` | ✅ 可用 | 手动执行默认 7d raw / 90d audit 清理（运维接口） |
 
-**仍缺少或可选增加的接口（和efca9634确认）：**
+**仍缺少或可选增加的接口（和core确认）：**
 
 | 路径 | 用途 |
 |------|------|
 | `GET /memories?user_id=&memory_type=` | 跨层统一记忆列表页；当前分别使用 short/mid/preferences 接口 |
 | `GET /stats/{user_id}` | ✅ 可用 | Dashboard 数字（记忆总数、各类型占比） |
 
-**原则：** 缺接口就提需求给 **efca9634**，不要在 frontend 里写 Python 业务逻辑。
+**原则：** 缺接口就提需求给 **core**，不要在 frontend 里写 Python 业务逻辑。
 
 ---
 
@@ -320,7 +320,7 @@ POST /forget
 | 5 | 用户说「忘掉刚才的测试」 | NL 遗忘（后端解析完成后再纳入正式演示） |
 | 6 | 打开偏好页，展示更新后的画像 | 偏好版本/整合 |
 
-此场景与 **da0f41a1测试数据集** 对齐，演示和报告数字一致。
+此场景与 **testing测试数据集** 对齐，演示和报告数字一致。
 
 ---
 
@@ -328,16 +328,16 @@ POST /forget
 
 | 你要展示的功能 | 找谁 | 要什么 |
 |----------------|------|--------|
-| 写入 / 清洗展示 | **3fba60e1** | 四类数据源样例、清洗前后 JSON |
-| 偏好列表 / 版本 | **26a9835a** | 偏好字段、展示样例 |
-| 检索结果 / 耗时 | **cb0aeabe** | query 返回格式、种子数据 |
-| 冲突更新效果 | **efca9634** | 冲突 API 或 ingest 返回 |
-| 遗忘 / 敏感过滤 | **2abac5a6** | forget 行为、过滤提示文案 |
-| API 联调 / 新接口 | **efca9634** | server.py 接入 Orchestrator |
-| Demo 与报告一致 | **da0f41a1** | 测试 query 列表 |
-| 麒麟环境部署 | **efca9634** | 答辩机器上前后端启动方式 |
+| 写入 / 清洗展示 | **ingestion** | 四类数据源样例、清洗前后 JSON |
+| 偏好列表 / 版本 | **preference** | 偏好字段、展示样例 |
+| 检索结果 / 耗时 | **knowledge** | query 返回格式、种子数据 |
+| 冲突更新效果 | **core** | 冲突 API 或 ingest 返回 |
+| 遗忘 / 敏感过滤 | **security** | forget 行为、过滤提示文案 |
+| API 联调 / 新接口 | **core** | server.py 接入 Orchestrator |
+| Demo 与报告一致 | **testing** | 测试 query 列表 |
+| 麒麟环境部署 | **core** | 答辩机器上前后端启动方式 |
 
-**建议：每周和efca9634对一次 API，后端就绪一个接口，前端接一个页面。**
+**建议：每周和core对一次 API，后端就绪一个接口，前端接一个页面。**
 
 ---
 
@@ -351,7 +351,7 @@ POST /forget
 | (4) 端侧 / 延迟 | Search 上显示 latency | ✅ |
 | (5) 敏感 + 遗忘 | Forget | ✅ |
 | (6) 短中长期流转 | Dashboard 或 Timeline（可选） | 建议有 |
-| (7) 评测 | 不需前端实现 | da0f41a1负责 |
+| (7) 评测 | 不需前端实现 | testing负责 |
 
 ---
 
@@ -362,7 +362,7 @@ POST /forget
 | 可运行前端工程 | `frontend/` 可 `npm run dev` | 8 月下旬 |
 | 与后端联调通过 | 5 大演示能力均可点击 | 9 月上旬 |
 | **演示视频** | 3～5 分钟，按「推荐 Demo 场景」录制 | 9 月 15 日前 |
-| 界面截图 | 供da0f41a1写入用户手册 | 9 月上旬 |
+| 界面截图 | 供testing写入用户手册 | 9 月上旬 |
 | 答辩 Live Demo | 现场可离线/在线演示 | 11 月擂台 |
 
 **录视频建议：**
@@ -380,7 +380,7 @@ POST /forget
 | **第 2 周** | Ingest + Search 两页（mock 数据也可先画 UI） |
 | **第 3 周** | 后端接口就绪后联调；Preference + Forget |
 | **第 4 周** | Dashboard、冲突演示、latency 展示、UI 打磨 |
-| **答辩前** | 录演示视频；与da0f41a1对齐 query；麒麟机部署试跑 |
+| **答辩前** | 录演示视频；与testing对齐 query；麒麟机部署试跑 |
 
 ---
 
@@ -390,7 +390,7 @@ POST /forget
 2. **不要用假数据糊弄答辩**：最终 Demo 必须调真实后端（mock Milvus 也算后端真实链路）  
 3. **memory_type 五类** 用不同颜色标签区分（见 `memory_schema.py`）  
 4. **检索耗时** 务必展示，对应比赛 500ms 指标  
-5. CORS：若前后端分离部署，让efca9634在 FastAPI 加 `CORSMiddleware`  
+5. CORS：若前后端分离部署，让core在 FastAPI 加 `CORSMiddleware`
 
 ---
 
@@ -400,7 +400,7 @@ POST /forget
 |------|------|
 | `api/server.py` | 后端 REST 入口 |
 | `src/knowledge/memory_service/memory_schema.py` | memory_type 枚举 |
-| `benchmarks/README.md` | da0f41a1测试场景（Demo 应对齐） |
+| `benchmarks/README.md` | testing测试场景（Demo 应对齐） |
 | 项目根 `README.md` | 全队架构与分工 |
 
-有问题先 @ **efca9634**（API / 联调），业务细节 @ 对应模块同学。
+有问题先 @ **core**（API / 联调），业务细节 @ 对应模块同学。

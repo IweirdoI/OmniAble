@@ -1,6 +1,6 @@
 """Tests for cross-conversation consolidation (MemoryConsolidator + LayerManager wiring).
 
-26a9835a方向：短期→中期语义聚类合并、中期→长期 LLM 抽象（参考 MemoryOS updater.py /
+preference方向：短期→中期语义聚类合并、中期→长期 LLM 抽象（参考 MemoryOS updater.py /
 TiMem）。这些用例刻意走 identity（preference_key）合并路径，不依赖 embedding 是否就绪，
 保证在无 GPU / 本地 fallback 环境下也稳定可跑。
 """

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """一键量化评测入口 — 4 项硬指标 + 报告输出.
 
-Owner: da0f41a1 | Requirement: (7) 量化评测
+Module: testing | Requirement: (7) 量化评测
 
 复刻 tests/test_metrics.py 的组件级基线，并在此之上输出更完整的指标
 （Recall@5 / Hit@1 / P50 / P95）与可直接汇入效果验证报告的 JSON / Markdown。

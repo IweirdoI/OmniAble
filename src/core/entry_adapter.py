@@ -27,7 +27,7 @@ _SCENE_TASK_HINTS: dict[str, TaskType] = {
 
 
 def memory_item_to_entry(item: MemoryItem) -> MemoryEntry:
-    """将 Orchestrator 层 MemoryItem 转为cb0aeabe create_memory 所需的 MemoryEntry."""
+    """将 Orchestrator 层 MemoryItem 转为knowledge create_memory 所需的 MemoryEntry."""
 
     metadata = dict(item.metadata)
     source_type = str(metadata.get("source_type", ""))

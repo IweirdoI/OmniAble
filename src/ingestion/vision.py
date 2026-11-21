@@ -3,7 +3,7 @@
 检测顺序：``ingestion.vision`` 开关 → 模型名启发式 → 可选 ``/v1/models`` 探测。
 调用失败时返回空串，由 ``file_extract`` 回退到本地 OCR 或用户说明。
 
-Owner: 3fba60e1
+Module: ingestion
 """
 
 from __future__ import annotations

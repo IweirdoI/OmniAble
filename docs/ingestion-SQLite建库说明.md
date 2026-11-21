@@ -1,6 +1,6 @@
-# 3fba60e1 · Ingestion SQLite 中转库 — 完整建库说明
+# ingestion · Ingestion SQLite 中转库 — 完整建库说明
 
-**From: efca9634（Orchestrator）→ To: 3fba60e1（ingestion）**  
+**From: core（Orchestrator）→ To: ingestion（ingestion）**
 **日期: 2026-08-03；需求落地复核: 2026-08-08**
 **目的: 把「需建什么库、建哪些表、什么时候读写、怎么验收」一次说清楚**
 
@@ -9,7 +9,7 @@
 ## 0. 核心要点
 
 1. **本模块建的是「ingestion 中转库」，不是最终记忆库。**
-2. **最终记忆库只有 Milvus（cb0aeabe负责），本模块不写 Milvus，也不存 embedding。**
+2. **最终记忆库只有 Milvus（knowledge负责），本模块不写 Milvus，也不存 embedding。**
 3. **中转库负责审计、持久化去重、默认脱敏归档、遗忘擦除、保留期清理和 benchmark 导出。**
 
 洗完后仍然输出 `NormalizedRecord` 给 Orchestrator，**现有 `process()` 接口不变**。
@@ -22,7 +22,7 @@
 
 - 服务重启 → 去重缓存清空，5 分钟内可能重复接收相同数据
 - 无法查历史：不知道某条为什么被拒绝（low_quality / duplicate）
-- da0f41a1 benchmark 无法统计：通过率、拒绝码分布、质量分分布
+- testing benchmark 无法统计：通过率、拒绝码分布、质量分分布
 - 答辩无法演示：「这条数据什么时候进来的、为什么没进记忆」
 
 **ingestion 中转库** 就是为了解决这些问题。
@@ -33,9 +33,9 @@
 
 | 不在本模块内 | 原因 |
 |--------|------|
-| 存 embedding 向量 | cb0aeabe Milvus 负责 |
-| 存 preference 版本链 | 26a9835a + Milvus metadata |
-| 替代短期/中期记忆 | efca9634 `layer_manager` 内存负责 |
+| 存 embedding 向量 | knowledge Milvus 负责 |
+| 存 preference 版本链 | preference + Milvus metadata |
+| 替代短期/中期记忆 | core `layer_manager` 内存负责 |
 | 让前端直连本库 | 必须走 `api/server.py` |
 | 引入 MySQL/PostgreSQL 等服务端数据库 | 当前单机智能体和比赛负载使用 SQLite 足够，保持部署简单 |
 
@@ -54,7 +54,7 @@ memory/
 └── configs/default.yaml               ← 【已接线】staging 配置
 ```
 
-**库文件路径（默认）：** `./data/ingestion_staging.db`  
+**库文件路径（默认）：** `./data/ingestion_staging.db`
 **配置键：** `storage.staging_sqlite`
 
 ---
@@ -221,7 +221,7 @@ process(raw, source, user_id, scene_id) 开始
 
 ```python
 class StagingStore:
-    """Ingestion SQLite 中转库。Owner: 3fba60e1"""
+    """Ingestion SQLite 中转库。Module: ingestion"""
 
     def __init__(
         self,
@@ -282,7 +282,7 @@ class StagingStore:
         """审计/debug 用，给测试和 benchmark"""
 
     def export_jsonl(self, path: str, *, user_id: str | None = None, accepted: bool | None = None) -> int:
-        """导出 JSONL，返回导出行数；给da0f41a1"""
+        """导出 JSONL，返回导出行数；给testing"""
 
     def stats(self, user_id: str | None = None) -> dict:
         """返回 {total, accepted, rejected, by_reject_code: {...}}"""
@@ -300,7 +300,7 @@ class StagingStore:
 | `configs/default.yaml` | 使用下面配置节 |
 | `tests/test_ingestion_staging.py` | SQLite 专项测试：持久化、过期、并发、查询/导出、工厂接线和连接关闭 |
 
-**efca9634这边不会改你的 `staging_store.py`**，只要求 `process()` 返回的 `IngestionResult` 不变。
+**core这边不会改你的 `staging_store.py`**，只要求 `process()` 返回的 `IngestionResult` 不变。
 
 ---
 
@@ -310,7 +310,7 @@ class StagingStore:
 storage:
   milvus_uri: http://localhost:19530
   collection_name: os_agent_memory
-  # --- 以下由3fba60e1 ingestion staging 使用 ---
+  # --- 以下由ingestion ingestion staging 使用 ---
   staging_backend: sqlite        # sqlite | memory（memory=仅进程内，兼容旧行为）
   staging_sqlite: ./data/ingestion_staging.db
   staging_jsonl: ./data/staging.jsonl   # 推荐导出路径；当前不会自动 mirror
@@ -416,33 +416,33 @@ IngestionPipeline.process()     ← 在此写入 SQLite
     ↓
 NormalizedRecord
     ↓
-ShortTermMemory（efca9634，内存）
+ShortTermMemory（core，内存）
     ↓
-consolidate → create_memory（cb0aeabe，Milvus）
+consolidate → create_memory（knowledge，Milvus）
 ```
 
 **其他模块协作说明：**
 
-- **26a9835a** 将来如需批量读已接受记录：`staging_store.query_events(user_id, accepted=True)`  
-- **da0f41a1** benchmark 所需数据：`staging_store.stats()` + `export_jsonl()`  
-- **cb0aeabe** 不直接读取本模块的数据库  
+- **preference** 将来如需批量读已接受记录：`staging_store.query_events(user_id, accepted=True)`
+- **testing** benchmark 所需数据：`staging_store.stats()` + `export_jsonl()`
+- **knowledge** 不直接读取本模块的数据库
 
 ---
 
 ## 14. 常见问题
 
-**Q：和 Milvus 有什么区别？**  
+**Q：和 Milvus 有什么区别？**
 A：本模块存储「洗之前/洗之后的事件审计」；Milvus 存储「值得长期记住且已 embedding 的记忆」。
 
-**Q：accepted=1 是不是就等于进了 Milvus？**  
+**Q：accepted=1 是不是就等于进了 Milvus？**
 A：不是。accepted=1 只表示通过 ingestion；进 Milvus 还要走 consolidate / store-entry。
 
-**Q：JSONL 还要吗？**  
+**Q：JSONL 还要吗？**
 A：SQLite 为主；需要样例或 benchmark 时调用 `export_jsonl()` 按需导出。当前不会在每次
 ingestion 时自动 mirror，避免 SQLite 与 JSONL 两条写路径不一致。
 
-**Q：表结构能改吗？**  
-A：上面列是 v1 定稿；要加列先与efca9634对齐，Orchestrator 不依赖本模块表结构，但 benchmark 会依赖。
+**Q：表结构能改吗？**
+A：上面列是 v1 定稿；要加列先与core对齐，Orchestrator 不依赖本模块表结构，但 benchmark 会依赖。
 
 ---
 
@@ -466,4 +466,4 @@ A：上面列是 v1 定稿；要加列先与efca9634对齐，Orchestrator 不依
 
 ---
 
-有问题 @efca9634（Orchestrator / 联调）或 @da0f41a1（benchmark 导出格式）。
+有问题 @core（Orchestrator / 联调）或 @testing（benchmark 导出格式）。

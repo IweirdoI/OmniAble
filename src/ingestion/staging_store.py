@@ -23,7 +23,7 @@ Milvus；这里也不会保存 embedding。
     ``src.security.service.redact_sensitive_text``；映射绑定与擦除由
     Orchestrator 调用；与 ``memory_service``/Milvus 没有直接数据库依赖。
 
-Owner: 3fba60e1
+Module: ingestion
 """
 
 from __future__ import annotations

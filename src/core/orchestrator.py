@@ -1,7 +1,7 @@
 """
 Memory Orchestrator — 面向 OS Agent 的智能记忆管理控制器.
 
-Owner: efca9634
+Module: core
 
 职责：调用 ingestion / security / layer_manager / preference / knowledge，
 完成记忆分类、短期写入、生命周期晋升、冲突消解与检索编排。
@@ -964,7 +964,7 @@ class MemoryOrchestrator:
         *,
         filters: dict | None = None,
     ) -> RetrievalResult:
-        """包装cb0aeabe query_memory，供 Agent / 前端检索。
+        """包装knowledge query_memory，供 Agent / 前端检索。
 
         默认不返回已覆盖的旧条（``is_latest=false`` 的偏好或知识），避免未过滤
         召回夹带 D 盘、旧端口等过期版本。查版本历史时传
@@ -1146,7 +1146,7 @@ class MemoryOrchestrator:
         # 2. 普通记忆/偏好目标解析（新增）
         candidates = self._forget_candidates(user_id)
 
-        # 2.5 知识库按自然语言条件批量定位遗忘（2abac5a6）
+        # 2.5 知识库按自然语言条件批量定位遗忘（security）
         #     解析 NL 指令 → 命中知识意图时，用抽取的主题做定向召回，
         #     把命中的知识候选并入候选集，供后续目标解析与级联删除。
         knowledge_plan = self.security.plan_knowledge_forget(instruction)

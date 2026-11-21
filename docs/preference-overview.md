@@ -1,4 +1,4 @@
-# preference_extraction.jsonl — 对接说明（26a9835a → da0f41a1）
+# preference_extraction.jsonl — 对接说明（preference → testing）
 
 > **主线状态复核（2026-08-06）：** 本文描述的 35 条
 > `preference_extraction.jsonl`、`extract_from_text()`、LLM / 规则融合实现目前仅在

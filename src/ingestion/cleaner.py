@@ -19,7 +19,7 @@
     输入/输出依赖 ``RawRecord``；正式 API 的跨进程去重由
     ``StagingStore`` 替代内存缓存；敏感信息仍依赖下游 ``src.security``。
 
-Owner: 3fba60e1
+Module: ingestion
 """
 
 from __future__ import annotations

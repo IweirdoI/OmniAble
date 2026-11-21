@@ -11,7 +11,7 @@ from src.core.short_term import ShortTermMemory, ShortTermStats, WriteShortResul
 
 class LayerManager(MemoryLayerManager):
     """
-    Owner: efca9634
+    Module: core
     Reference: MemoryOS (short_term.py, mid_term.py, long_term.py, updater.py)
 
     Acceptance:
@@ -19,7 +19,7 @@ class LayerManager(MemoryLayerManager):
       - Mid-term promotion by heat/similarity threshold
       - Long-term split into preference vs knowledge routing
 
-    TODO: Optional SQLite memory_schema backend (coordinate with 3fba60e1).
+    TODO: Optional SQLite memory_schema backend (coordinate with ingestion).
     """
 
     def __init__(

@@ -1,6 +1,6 @@
 """Context perception engine tests — 上下文压缩引擎.
 
-Owner: 2abac5a6 | Ref: src/core/context_perception.py
+Module: security | Ref: src/core/context_perception.py
 
 覆盖 ContextBlock / ContextAnalyzer 的分层压缩策略：
 关键词快速过滤 → 模型摘要 → 语义检索兜底，以及流式压缩。

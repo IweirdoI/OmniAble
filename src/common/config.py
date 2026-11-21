@@ -1,6 +1,6 @@
 """全局配置加载器 — 统一从 configs/default.yaml 读取全项目默认值.
 
-Owner: efca9634（配置加载器，全队共用）
+Module: core（配置加载器，全队共用）
 
 设计原则（三层优先级，高 -> 低）:
   1. 环境变量（OS_AGENT_* / LM_STUDIO_* / SILICONFLOW_* / AGENT_* 等）: 运行态覆盖，最高优先;

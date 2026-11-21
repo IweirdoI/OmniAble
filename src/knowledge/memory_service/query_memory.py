@@ -1,5 +1,5 @@
 
-"""Query memory. Owner: cb0aeabe."""
+"""Query memory. Module: knowledge."""
 
 from __future__ import annotations
 

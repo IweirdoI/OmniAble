@@ -557,7 +557,6 @@ ot pref 为假，整段过滤被跳过，无关候选只按
 
 ### 2026-09-14 | `d7f2365` | fix(memory): ingest persona facts and disambiguate BPMN queries
 
-Co-authored-by: Cursor <cursoragent@cursor.com>
 
 ### 2026-09-14 | `7798ea1` | fix(retrieval): unify gold metrics and add explicit semantic recall
 **Fixed**
@@ -801,7 +800,7 @@ pytest tests/test_retrieval_crosslang.py tests/test_metrics.py -> 11 passed。
 
 ### 2026-09-12 | `e5a464f` | docs(changelog): 新增 [Unreleased] 记录跨对话固化与 EMA 置信度
 
-记录本次26a9835a方向(偏好捕捉与跨对话中期记忆固化)的 Added/Changed 条目，符合项目 Keep a Changelog 规范。
+记录本次preference方向(偏好捕捉与跨对话中期记忆固化)的 Added/Changed 条目，符合项目 Keep a Changelog 规范。
 
 ### 2026-09-12 | `5371574` | feat(conflict): 信任分与来源等级引入近因降权，支持偏好漂移覆盖
 
@@ -859,7 +858,7 @@ HTML 去标签保留正文；明确风格偏好先识别再过质量门；SSID �
 - 文档：维护 CHANGELOG 记录知识库批量遗忘、隔离安全测试与密钥整改（`CHANGELOG.md`）。
 
 ### 2026-09-09 | `dcf9bd1` | docs: 同步遗忘/知识库批量定位相关技术文档与 README 等说明
-- 文档：更新 `2abac5a6-技术文档.md`、README.md、benchmarks/README.md、frontend/README.md、分工.md、`2abac5a6-信息脱敏与上下文维护.md` 中关于「自然语言精准遗忘 / 知识库按自然语言条件批量定位遗忘」的状态：由「仍待实现 / 尚未实现」统一更正为已实现，并补充测试计数（`test_security.py` 121 项、专项+集成 15 项）与 `knowledge_forget.py` 目录说明。
+- 文档：更新 `安全模块技术文档.md`、README.md、benchmarks/README.md、frontend/README.md、分工.md、`信息脱敏与上下文维护.md` 中关于「自然语言精准遗忘 / 知识库按自然语言条件批量定位遗忘」的状态：由「仍待实现 / 尚未实现」统一更正为已实现，并补充测试计数（`test_security.py` 121 项、专项+集成 15 项）与 `knowledge_forget.py` 目录说明。
 
 ### 2026-09-09 | `b6c8262` | test(security): 用户隔离与持久化安全专项测试
 **Added**
@@ -940,10 +939,7 @@ feat(frontend): 搭建 Vue 记忆演示工作台
   feat(frontend): 搭建 Vue 记忆演示工作台
   fix(frontend): 接入真实记忆数据
 
-Signed-off-by: ttttxiaoqi@aliyun.com <accounts_6a76bec3b772adbb5d42d501@mail.teambition.com>
-Merged-by: ttttxiaoqi@aliyun.com <accounts_6a76bec3b772adbb5d42d501@mail.teambition.com>
 
-CR-link: https://codeup.aliyun.com/6a60620d8c4f3693e22016a1/MOKOA/change/3
 
 ---
 
@@ -971,7 +967,6 @@ CR-link: https://codeup.aliyun.com/6a60620d8c4f3693e22016a1/MOKOA/change/3
 
 分离 memory/milvus 后端并限制 pymilvus 2.x，避免开发环境强依赖真实 Milvus；新增 hash embedding、麒麟严格模式、动态库探测与预检/验收/离线 E2E 脚本，并补充会议结论与真机验收清单。
 
-Co-authored-by: Cursor <cursoragent@cursor.com>
 
 ---
 
@@ -979,7 +974,6 @@ Co-authored-by: Cursor <cursoragent@cursor.com>
 
 基于最新 master 迁入真实偏好模块，接线 extract→store_memory_entry，并补充评测、演示数据与版本历史查询能力。
 
-Co-authored-by: Cursor <cursoragent@cursor.com>
 
 ---
 
@@ -1033,10 +1027,7 @@ Co-authored-by: Cursor <cursoragent@cursor.com>
   refactor(knowledge): finalize memory service delivery
   Merge branch master into feature/knowledge (Conflict resolved online)
 
-Signed-off-by: 闹钟也很困 <2860240437@qq.com>
-Merged-by: 闹钟也很困 <2860240437@qq.com>
 
-CR-link: https://codeup.aliyun.com/6a60620d8c4f3693e22016a1/MOKOA/change/2
 
 ---
 
@@ -1073,7 +1064,7 @@ CR-link: https://codeup.aliyun.com/6a60620d8c4f3693e22016a1/MOKOA/change/2
 ---
 
 ### 2026-08-09 | `6ed633a` | docs: 调整 CHANGELOG 生成规则与脱敏范围说明
-- 更新 CHANGELOG 生成规则（允许基于 git log diff 细化）；脱敏范围说明补充"至少是模型输入"（`2abac5a6-信息脱敏与上下文维护.md`）。
+- 更新 CHANGELOG 生成规则（允许基于 git log diff 细化）；脱敏范围说明补充"至少是模型输入"（`信息脱敏与上下文维护.md`）。
 
 ---
 
@@ -1112,7 +1103,6 @@ CR-link: https://codeup.aliyun.com/6a60620d8c4f3693e22016a1/MOKOA/change/2
 - 本地 embedding 零向量改为确定性哈希；麒麟 init/推理失败可降级并释放会话
 - 同步文档过时描述，补充 core/API/embedding 回归测试
 
-Co-authored-by: Cursor <cursoragent@cursor.com>
 
 ---
 
@@ -1135,7 +1125,6 @@ Co-authored-by: Cursor <cursoragent@cursor.com>
 - memory_service: VECTOR_DIM 改为 1024，mock search 增加 cosine 排序以支持联调
 - 新增 tests/test_embedding.py 与 scripts/verify_local_embedding.py
 
-Co-authored-by: Cursor <cursoragent@cursor.com>
 
 ---
 
@@ -1146,7 +1135,7 @@ Co-authored-by: Cursor <cursoragent@cursor.com>
 - 新增 GET /stats/{user_id}，展示 short/mid/待入库/Milvus 各层统计
 - factory 从 default.yaml 加载相似度阈值配置
 
-长期持久化（不改动cb0aeabe/26a9835a等模块，仅编排层）：
+长期持久化（不改动knowledge/preference等模块，仅编排层）：
 - _long 作为待入库队列，consolidate 成功写入 Milvus 后 release_long_pending
 - 入库失败时保留队列条目供重试；forget 级联清理 delete_long
 - stats 中 long= pending_persist，milvus= authoritative，避免重复计数
@@ -1155,7 +1144,6 @@ Co-authored-by: Cursor <cursoragent@cursor.com>
 - 补充相似度合并、stats API、consolidate 清队列及入库失败保留用例（129 passed）
 - 更新生命周期模块说明、README、分工与 frontend 接口文档
 
-Co-authored-by: Cursor <cursoragent@cursor.com>
 
 ---
 
@@ -1168,13 +1156,11 @@ Co-authored-by: Cursor <cursoragent@cursor.com>
 
 ### 2026-08-05 | `3c50c76` | feat(api): wire POST /forget with short/mid/Milvus cascade delete
 
-Co-authored-by: Cursor <cursoragent@cursor.com>
 
 ---
 
 ### 2026-08-05 | `374238a` | fix(orchestrator): align filter_sensitive with new 3-tuple return signature
 
-Co-authored-by: Cursor <cursoragent@cursor.com>
 
 ---
 
@@ -1187,7 +1173,7 @@ Co-authored-by: Cursor <cursoragent@cursor.com>
 ---
 
 ### 2026-08-04 | `5a76c9f` | docs: 更新安全模块 PII 扩展说明
-- 同步安全模块 PII 扩展与测试覆盖说明（`2abac5a6-信息脱敏与上下文维护.md`）。
+- 同步安全模块 PII 扩展与测试覆盖说明（`信息脱敏与上下文维护.md`）。
 
 ---
 
@@ -1297,7 +1283,7 @@ Co-authored-by: Cursor <cursoragent@cursor.com>
 
 ### 2026-08-03 | `3eb8cb9` | feat(core): 衔接 preference 入库、Milvus 检索与生命周期 consolidate
 
-对接26a9835a/cb0aeabe联调契约，将 Orchestrator 从内存 stub 改为调用
+对接preference/knowledge联调契约，将 Orchestrator 从内存 stub 改为调用
 create_memory / update_memory / query_memory（方案 2 版本链）。
 
 - 新增 entry_adapter：MemoryItem 与 MemoryEntry 互转
@@ -1308,20 +1294,18 @@ create_memory / update_memory / query_memory（方案 2 版本链）。
 - Milvus mock 支持 memory_id 与 filters 检索
 - 新增 benchmarks 偏好种子数据与联调测试
 
-Co-authored-by: Cursor <cursoragent@cursor.com>
 
 ---
 
 ### 2026-08-03 | `eacb039` | feat(core): 短期记忆与冲突识别优先按 record_key 合并
 
-对接3fba60e1 ingestion 新增的 record_key 稳定键，使同一配置项改值时
+对接ingestion ingestion 新增的 record_key 稳定键，使同一配置项改值时
 能合并更新而非重复写入短期记忆。
 
 - 新增 merge_identity_key()：record_key > fingerprint/dedup_fingerprint
 - ShortTermMemory.write() 与 ConflictResolver.memory_key() 共用该逻辑
 - 补充短期合并、Orchestrator 端到端、冲突检测相关单元测试
 
-Co-authored-by: Cursor <cursoragent@cursor.com>
 
 ---
 
@@ -1353,15 +1337,15 @@ Co-authored-by: Cursor <cursoragent@cursor.com>
 
 ---
 
-### 2026-08-03 | `6754137` | docs: 更新26a9835a偏好入库与Orchestrator联调文档
+### 2026-08-03 | `6754137` | docs: 更新preference偏好入库与Orchestrator联调文档
 **Changed**
-- `docs/cb0aeabe-偏好入库与Orchestrator联调.md`：更新联调说明。
+- `docs/偏好入库与Orchestrator联调.md`：更新联调说明。
 
 ---
 
-### 2026-08-03 | `01338f7` | docs: 重命名2abac5a6信息脱敏文档为简洁格式
+### 2026-08-03 | `01338f7` | docs: 重命名security信息脱敏文档为简洁格式
 **Changed**
-- 文档重命名：`2abac5a6-信息脱敏与上下文维护.md` → `2abac5a6-信息脱敏.md`。
+- 文档重命名：`信息脱敏与上下文维护.md` → `security-信息脱敏.md`。
 
 ---
 

@@ -1,6 +1,6 @@
 """集成测试：知识库按自然语言条件批量定位遗忘（待办第 3 项）。
 
-Owner: 2abac5a6
+Module: security
 验证 Orchestrator.forget 在命中知识库遗忘意图时：
   1. 用 NL 抽取的主题做定向召回，把知识候选并入删除范围；
   2. 命中的知识条目经 _purge_memory → delete_memory 级联删除；

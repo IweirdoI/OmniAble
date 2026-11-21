@@ -575,7 +575,7 @@ def test_acceptance_dataset_matches_current_pipeline() -> None:
 
 
 def test_three_source_demo_samples_match_current_pipeline() -> None:
-    """3fba60e1 Demo 的三类样例必须能被当前 pipeline 稳定重放。"""
+    """ingestion Demo 的三类样例必须能被当前 pipeline 稳定重放。"""
 
     dataset = PROJECT_ROOT / "benchmarks" / "datasets" / "ingestion_demo.jsonl"
     samples = [

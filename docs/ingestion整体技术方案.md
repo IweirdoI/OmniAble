@@ -1,15 +1,15 @@
 # 麒忆智脑 · 多源摄取（Ingestion）整体技术方案
 
-> 负责人：3fba60e1  
-> 模块路径：`src/ingestion/`  
-> 规格版本：1.3（准上线）  
+> 负责人：ingestion
+> 模块路径：`src/ingestion/`
+> 规格版本：1.3（准上线）
 > 对应比赛要求：**(1) 多源接入 + 清洗 + 标准化 + 质量校验**
 
 ---
 
 ## 1. 目标与边界
 
-本模块是「麒忆智脑」的可信数据入口。它把 OS Agent 的多源原始事件变成统一、可解释、可审计的 `NormalizedRecord`，再交给efca9634的 Orchestrator。
+本模块是「麒忆智脑」的可信数据入口。它把 OS Agent 的多源原始事件变成统一、可解释、可审计的 `NormalizedRecord`，再交给core的 Orchestrator。
 
 模块负责：
 
@@ -31,14 +31,14 @@
 | Milvus 入库与 RAG | `src/knowledge/memory_service/` |
 | 短 / 中 / 长期晋升 | `src/core/layer_manager.py` |
 
-Staging **不是**最终记忆库，也不存 embedding。最终长期记忆只有cb0aeabe的 Milvus。
+Staging **不是**最终记忆库，也不存 embedding。最终长期记忆只有knowledge的 Milvus。
 
 ---
 
 ## 2. 在系统中的位置
 
 ```
-多源数据 ──→ ingestion（3fba60e1）──→ Orchestrator（efca9634）
+多源数据 ──→ ingestion（ingestion）──→ Orchestrator（core）
                                       ├─ 敏感过滤
                                       ├─ 分类 / 短期写入
                                       └─ 短→中→长期 / 冲突 / 偏好入库

@@ -1,11 +1,11 @@
 # 测试与 Benchmark 指南
 
-> **模块负责人：da0f41a1** | 对应比赛要求 **(7) 量化评测机制** | 协助：`tests/`、`docs/` 效果验证章节
+> **模块负责人：testing** | 对应比赛要求 **(7) 量化评测机制** | 协助：`tests/`、`docs/` 效果验证章节
 
 本文档说明：**评测内容、测试方法、模块对接关系、交付材料**。
 
 > **当前代码状态（2026-08-06）：** `tests/test_metrics.py` 中四项指标测试仍全部
-> `skip`；`benchmarks/` 目前已有 MemoryEntry 样例和3fba60e1三类 ingestion Demo。
+> `skip`；`benchmarks/` 目前已有 MemoryEntry 样例和ingestion三类 ingestion Demo。
 > 下文其余标准数据集、跑分脚本和结果目录均为
 > 规划项，不能作为已经完成的评测交付物。
 
@@ -71,16 +71,16 @@ datasets/preference_extraction.jsonl
   → 对比 expected_preferences 标注
 ```
 
-**对接：偏好记忆模块（26a9835a）**
+**对接：偏好记忆模块（preference）**
 
-| 需要26a9835a提供 | 说明 |
+| 需要preference提供 | 说明 |
 |----------------|------|
 | 稳定的 `extract()` 接口 | `src/preference/store.py` |
 | 5～10 条真实样例 | 清洗前后 JSON，用于数据集 |
 | 版本化/跨场景用例 | 同一偏好在不同 `scene_id` 下是否一致 |
 
 当前主线中的 `PreferenceMemoryStore.extract()` 仍直接返回空列表，且尚无
-`extract_from_text()`；因此本指标目前不能得到有效跑分。26a9835a的完整提取实现仍位于
+`extract_from_text()`；因此本指标目前不能得到有效跑分。preference的完整提取实现仍位于
 `origin/feature/preference`，合并时需要先处理公共接口与配置冲突。
 
 **数据集格式示例**（`datasets/preference_extraction.jsonl`，一行一条）：
@@ -121,9 +121,9 @@ datasets/preference_extraction.jsonl
   → 检查 relevant_memory_ids 是否出现在 top_k 结果中
 ```
 
-**对接：知识检索模块（cb0aeabe）**
+**对接：知识检索模块（knowledge）**
 
-| 需要cb0aeabe提供 | 说明 |
+| 需要knowledge提供 | 说明 |
 |----------------|------|
 | 可用的 `create_memory` / `query_memory` | `src/knowledge/memory_service/` |
 | Milvus 可连环境或 mock 说明 | 开发期 mock，答辩前真机 |
@@ -133,7 +133,7 @@ datasets/preference_extraction.jsonl
 embedding 做相似度排序，也不会返回可供验收的真实向量召回结果。召回率指标必须在
 真实 Milvus（或等价的确定性向量测试后端）接入后再计算。
 
-**对接：编排核心模块（efca9634，协助）**
+**对接：编排核心模块（core，协助）**
 
 - Orchestrator 的 `recall()` 若走统一入口，联调时确认调用路径。
 
@@ -172,15 +172,15 @@ Recall@K = |检索结果 ∩ 相关记忆| / |相关记忆|
 
 | 环境 | 用途 | 对接 |
 |------|------|------|
-| 开发机（Windows + local embedding + mock Milvus） | 日常回归 | cb0aeabe mock |
-| 麒麟真机（Kylin SDK + Milvus Lite/集群） | **正式答辩数据** | efca9634 Embedding + cb0aeabe Milvus |
+| 开发机（Windows + local embedding + mock Milvus） | 日常回归 | knowledge mock |
+| 麒麟真机（Kylin SDK + Milvus Lite/集群） | **正式答辩数据** | core Embedding + knowledge Milvus |
 
-**对接：知识检索模块（cb0aeabe）+ 编排核心模块（efca9634）**
+**对接：知识检索模块（knowledge）+ 编排核心模块（core）**
 
 | 模块 | 提供 |
 |------|------|
-| cb0aeabe | `query_memory` 返回 `latency_ms` 字段；Milvus 部署方式 |
-| efca9634 | 麒麟 Embedding 真机联调时间窗口；`docs/KYLIN_SDK.md` 环境 |
+| knowledge | `query_memory` 返回 `latency_ms` 字段；Milvus 部署方式 |
+| core | 麒麟 Embedding 真机联调时间窗口；`docs/KYLIN_SDK.md` 环境 |
 
 **测试方法：**
 
@@ -218,12 +218,12 @@ datasets/conflict_resolution.jsonl
   → 对比 expected_action / expected_content
 ```
 
-**对接：编排核心模块（efca9634，主）+ 知识检索模块（cb0aeabe，辅）**
+**对接：编排核心模块（core，主）+ 知识检索模块（knowledge，辅）**
 
 | 模块 | 提供 |
 |------|------|
-| efca9634 | `src/core/conflict_resolver.py` 稳定接口；Orchestrator `resolve_and_store` |
-| cb0aeabe | `update_memory` 更新后 Milvus 中 content/version 是否正确 |
+| core | `src/core/conflict_resolver.py` 稳定接口；Orchestrator `resolve_and_store` |
+| knowledge | `update_memory` 更新后 Milvus 中 content/version 是否正确 |
 
 `ConflictResolver` 已有单元测试，但标准冲突数据集和
 `test_conflict_resolution_correctness` 的实际计分逻辑尚未完成。
@@ -252,7 +252,7 @@ datasets/conflict_resolution.jsonl
 
 这些写入 **功能测试报告**，证明「方案完整性」（复评 60 分相关）。
 
-### 4.1 多源接入 — 对接 **3fba60e1**
+### 4.1 多源接入 — 对接 **ingestion**
 
 | 测试项 | 通过标准 | 代码位置 |
 |--------|----------|----------|
@@ -270,7 +270,7 @@ datasets/conflict_resolution.jsonl
 
 ---
 
-### 4.2 短/中/长期记忆流转 — 对接 **编排核心模块（efca9634）**
+### 4.2 短/中/长期记忆流转 — 对接 **编排核心模块（core）**
 
 | 测试项 | 通过标准 | 代码位置 |
 |--------|----------|----------|
@@ -279,11 +279,11 @@ datasets/conflict_resolution.jsonl
 | 长期分流 | 偏好 → preference；知识 → knowledge | `core/orchestrator.py` |
 | 记忆分类 | 「喜欢 Python」→ preference | `core/classifier.py` |
 
-**对接efca9634：** 一条完整链路 Demo 脚本（输入 → 短期 → 晋升 → 入库）。
+**对接core：** 一条完整链路 Demo 脚本（输入 → 短期 → 晋升 → 入库）。
 
 ---
 
-### 4.3 记忆 CRUD — 对接 **知识检索模块（cb0aeabe）**
+### 4.3 记忆 CRUD — 对接 **知识检索模块（knowledge）**
 
 | 测试项 | 通过标准 | 代码位置 |
 |--------|----------|----------|
@@ -293,11 +293,11 @@ datasets/conflict_resolution.jsonl
 | delete_memory | 软删 / 硬删生效 | `delete_memory.py` |
 | memory_policy | 低分条目拒绝入库 | `memory_policy.py` |
 
-**对接cb0aeabe：** 五类 `memory_type` 各 1 条可写入的 `MemoryEntry` 样例（见 `memory_schema.py`）。
+**对接knowledge：** 五类 `memory_type` 各 1 条可写入的 `MemoryEntry` 样例（见 `memory_schema.py`）。
 
 ---
 
-### 4.4 安全与遗忘 — 对接 **安全遗忘模块（2abac5a6）**
+### 4.4 安全与遗忘 — 对接 **安全遗忘模块（security）**
 
 | 测试项 | 通过标准 | 代码位置 |
 |--------|----------|----------|
@@ -313,12 +313,12 @@ datasets/conflict_resolution.jsonl
 
 ---
 
-### 4.5 演示与 API — 对接 **前端模块（6714f379）+ 编排核心模块（efca9634）**
+### 4.5 演示与 API — 对接 **前端模块（frontend）+ 编排核心模块（core）**
 
 | 测试项 | 对接 |
 |--------|------|
-| Web Demo 与测试场景一致 | 6714f379：Demo 走同一套 query |
-| REST API `/ingest` `/recall` `/forget` | efca9634：`api/server.py` |
+| Web Demo 与测试场景一致 | frontend：Demo 走同一套 query |
+| REST API `/ingest` `/recall` `/forget` | core：`api/server.py` |
 
 ---
 
@@ -345,7 +345,7 @@ datasets/conflict_resolution.jsonl
 | 对比实验章节 | 技术文档一节 | 9 月上旬 |
 | 麒麟适配测试记录 | 与 `docs/KYLIN_SDK.md`  checklist 对齐 | 答辩前 |
 
-比赛方案还要求：**至少 1 个真实场景应用案例** — 与6714f379 Demo 对齐，在报告中写同一场景的测试数据。
+比赛方案还要求：**至少 1 个真实场景应用案例** — 与frontend Demo 对齐，在报告中写同一场景的测试数据。
 
 截至 2026-08-08，已有 `preference_memory_entries.json` 和三类 ingestion Demo 样例；
 标准指标数据集、跑分脚本和报告当时尚未完成。**更新（2026-09-14）：** 现
@@ -359,16 +359,16 @@ datasets/conflict_resolution.jsonl
 
 | 测试内容 | 对接模块 | 所需内容 |
 |------------|----------|----------|
-| 偏好准确率 | **偏好记忆（26a9835a）** | extract 接口 + 样例 |
-| 检索召回率 / 延迟 | **知识检索（cb0aeabe）** | query/create 可用 + Milvus |
-| 延迟（Embedding） | **Embedding（efca9634）** | 麒麟真机联调 |
-| 冲突正确率 | **编排核心（efca9634）** | conflict_resolver 稳定 |
-| 入库/更新正确性 | **知识检索（cb0aeabe）** | update/delete 行为 |
-| 多源清洗 | **多源接入（3fba60e1）** | 四类数据源样例 |
-| 敏感/遗忘 | **安全遗忘（2abac5a6）** | filter + NL 解析 |
-| 记忆流转/分类 | **编排核心（efca9634）** | layer_manager + classifier |
-| Demo 一致性 | **前端模块（6714f379）** | 演示脚本与测试 query 统一 |
-| 架构/联调问题 | **编排核心（efca9634）** | 项目负责人 |
+| 偏好准确率 | **偏好记忆（preference）** | extract 接口 + 样例 |
+| 检索召回率 / 延迟 | **知识检索（knowledge）** | query/create 可用 + Milvus |
+| 延迟（Embedding） | **Embedding（core）** | 麒麟真机联调 |
+| 冲突正确率 | **编排核心（core）** | conflict_resolver 稳定 |
+| 入库/更新正确性 | **知识检索（knowledge）** | update/delete 行为 |
+| 多源清洗 | **多源接入（ingestion）** | 四类数据源样例 |
+| 敏感/遗忘 | **安全遗忘（security）** | filter + NL 解析 |
+| 记忆流转/分类 | **编排核心（core）** | layer_manager + classifier |
+| Demo 一致性 | **前端模块（frontend）** | 演示脚本与测试 query 统一 |
+| 架构/联调问题 | **编排核心（core）** | 项目负责人 |
 
 **建议：每周例会前跑一遍 `pytest tests/ -v`，把失败项对接给对应模块同学。**
 
@@ -389,7 +389,7 @@ datasets/conflict_resolution.jsonl
 ## 九、常见问题
 
 **Q：模块还没写完，能先测吗？**  
-可以。用 mock（cb0aeabe的 `milvus_client.py` 已支持）测流程；模块就绪后替换为真实调用，数据集不用改。
+可以。用 mock（knowledge的 `milvus_client.py` 已支持）测流程；模块就绪后替换为真实调用，数据集不用改。
 
 **Q：达不到 85% 怎么办？**  
 比赛方案写「未达基础指标需 **明确优化方向**」— 报告里如实写当前值 + 改进计划，不要编造数据。
@@ -408,9 +408,9 @@ datasets/conflict_resolution.jsonl
 |------|------|
 | `tests/test_metrics.py` | 4 项硬性指标 pytest |
 | `src/knowledge/memory_service/memory_schema.py` | 入库 JSON 格式 |
-| `src/knowledge/memory_service/README.md` | cb0aeabe CRUD 说明 |
+| `src/knowledge/memory_service/README.md` | knowledge CRUD 说明 |
 | `docs/KYLIN_SDK.md` | 麒麟 Embedding 适配 checklist |
 | `docs/ARCHITECTURE.md` | 全队架构 |
 | 项目根 `README.md` | 分工与数据流 |
 
-API / 联调问题 → **编排核心模块（efca9634）** | 业务细节 → 对应模块同学
+API / 联调问题 → **编排核心模块（core）** | 业务细节 → 对应模块同学

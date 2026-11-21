@@ -1,6 +1,6 @@
 """敏感索引加密工具（AES-GCM）。
 
-Owner: 2abac5a6
+Module: security
 
 密钥来源：环境变量 MOKOA_SECURITY_KEY 优先，兜底本地密钥文件 ~/.mokoa/security.key
 （首次自动生成，非 Windows 平台限制 0600 权限）。
