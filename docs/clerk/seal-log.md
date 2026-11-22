@@ -1,1 +1,3 @@
 - 20261121-185824 Linnea <2312809203@qq.com>: Initialize independent MOKOA team workspace
+- 20261122-143511 Linnea <2312809203@qq.com>: Resolve PR18 generated seal conflict after auditing merged TASK-005; preserve all other master task records; original seal stages retained in local git audit
+- 20261122-143601 Linnea <2312809203@qq.com>: Resolve PR20 generated seal conflict after auditing merged TASK-006; preserve TASK-005 and all current master records; original seal stages retained in local git audit
