@@ -28,19 +28,28 @@
 
 | 指标 | 目标 | baseline 数值 | 真机数值 | 是否达标 |
 |---|---|---|---|---|
-| 偏好提取准确率 | ≥ 85% | <填 recall_json> | <填 real_json> | <✅/❌> |
+| 偏好提取准确率（字段级 F1） | ≥ 85% | <填 recall_json> | <填 real_json> | <✅/❌> |
+| └ 偏好分类准确率（组件级，内部口径） | 内部指标 | <填 recall_json> | 同 baseline（分类与后端无关） | <✅/❌> |
 | 知识检索召回率（Recall@5） | ≥ 85% | <填 recall_json> | <填 real_json> | <✅/❌> |
 | 检索响应时间（P95） | ≤ 500ms | <填 p95> | <填 real_p95> | <✅/❌> |
 | 冲突处理正确率 | ≥ 88% | <填 conflict_json> | 同 baseline（规则无关后端） | <✅/❌> |
 
 > 说明：冲突处理正确率依赖 `ConflictResolver` 规则，与存储后端无关，真机与 baseline 一致。
+> 真机列仅填 `status=ran` 的结果；后端缺失时如实写「unavailable（缺测）」，不用 baseline 数字代替（TASK-005）。
+
+> 说明：冲突处理正确率依赖 `ConflictResolver` 规则，与存储后端无关，真机与 baseline 一致。
 
 ## 4. 分指标详述
 
-### 4.1 偏好提取准确率（≥85%）
-- 方法：MemoryClassifier 对标注语料分类，准确率 = 正确/总数
-- 样本量：<填 sample_size>
-- 结论：<填 value> ，<达标/未达标说明>
+### 4.1 偏好指标（≥85%，字段级抽取；分类为组件级内部口径）
+- 赛题口径（偏好提取准确率）：`PreferenceMemoryStore.extract()` 对
+  `datasets/preference_extraction.jsonl` 抽取偏好键值，按 `key=value` 精确匹配计
+  字段级 Precision / Recall / F1，passed 按 F1 判定；入口
+  `benchmarks/run_benchmarks.py::_run_preference_extraction`（复用 `scripts/pref_eval_dataset.py`）
+- 样本量：<填 sample_size>；完整匹配率 sample_exact_match_rate：<填>（单列，不上阈值）
+- 组件级内部口径（偏好分类准确率）：MemoryClassifier 对标注语料分类，正确/总数，
+  与抽取分列展示，不作为赛题数字
+- 结论：<填 P/R/F1> ，<达标/未达标说明>
 
 ### 4.2 知识检索召回率（≥85%，Recall@5 / Hit@1）
 - 方法：播种知识库 → 按 query 检索 top-5 → 检查相关记忆是否命中
