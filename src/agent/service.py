@@ -76,6 +76,9 @@ class ChatRequest(BaseModel):
     save_memory: bool = True
     # 召回条数：默认 5；下限 1 保证至少返回结果，上限 10 防止单次召回过多拖慢重排/撑爆上下文
     top_k: int = Field(default=5, ge=1, le=10)
+    # 会话恢复（TASK-018 / Issue #23）：提供时由服务端从会话库构建 history
+    # （排除被遗忘与未完成消息）并在成功回合后落库；缺省时行为完全不变
+    session_id: str | None = Field(default=None, max_length=128)
 
 
 class AgentState(TypedDict, total=False):
