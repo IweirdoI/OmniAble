@@ -57,6 +57,7 @@ git remote -v
   `src/agent/service.py`，再看 `tests/test_agent.py`、`tests/test_api.py`、`tests/test_api_validation.py`。
   工作流改造另读 [Agent 工作流实施设计](AGENT_WORKFLOW.md)，按其中任务边界与验收场景实施。
   文件工具与侧栏集成另见 [Agent 文件与网页工作区](AGENT_WORKSPACE.md)。
+  涉及语音无障碍、操作录制、离线插件、定时任务或代码解析时，先看 [Windows 桌面 Agent 扩展路线图](DESKTOP_AGENT_ROADMAP.md) 的任务依赖。
 - **编排、冲突、生命周期**：`src/core/orchestrator.py`、`factory.py`、`layer_manager.py`、
   `conflict_resolver.py`、`entry_adapter.py`；对应 `tests/test_core.py`、`test_consolidator.py`、
   `test_logic_fixes.py`、`test_knowledge_conflict_ordering.py`。
@@ -127,6 +128,11 @@ Vite 默认代理到 `http://127.0.0.1:18080`；只跑 API 时，启动脚本默
 不直接推主线、不强推、不用个人旧分支整份文件覆盖共享文件。
 仓库所有者 Linnea 在明确授权且账号确有管理员权限时可以直接合入；
 这项例外不自动授予其他成员，已有授权也不需重复询问。
+
+管理员本人权限与 Agent 实际请求所用的凭据是两件事。出现 `REVIEW_REQUIRED` 时，
+按 [合并受阻排查](COLLABORATION.md#合并受阻排查) 核验冲突、CI、审批及当前连接身份；
+若会话已有可用的管理员 GitHub 连接，验证后直接完成合入，不先要求用户手点网页。
+只有集成令牌且无管理员执行通道时，如实报告凭据限制，不能把 `--admin` 或本文件当作提权手段。
 
 修改完成后按范围验证：
 

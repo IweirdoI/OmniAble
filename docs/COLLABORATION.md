@@ -70,3 +70,23 @@
 - 需要更多层次或模块团队权限时考虑 GitHub Organization；个人仓库 Collaborator 有写权限，不能当作目录级访问限制。
 
 依据：[个人仓库权限](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/repository-access-and-collaboration/permission-levels-for-a-personal-account-repository)、[分支保护](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)、[Code Owners](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)。
+
+## 合并受阻排查
+
+没有文本冲突只代表 Git 可以合并，不代表 CI、审批、未解决讨论及实际凭据的权限都已满足。
+仓库所有者已授权管理员连接在验证后直接合入；普通协作者仍按现有 PR 与审查流程工作。
+
+1. 查 PR 最新 head 与 base、`mergeable`、检查结果、审批和未解决讨论。CI 通过必须对应当前 head，不能使用旧提交结果。
+2. 检查当前执行通道的身份与仓库权限，再核对 classic branch protection、rulesets 和管理员强制开关。
+   不读取或打印令牌正文，也不把仓库元数据中显示的 owner/admin 字段当作集成令牌必能绕过的证明。
+3. `REVIEW_REQUIRED` 表示审批门槛尚未满足；`--admin` 是申请使用当前凭据已有的管理员能力，不会给 App 或 bot 令牌增加能力。
+   对话中存在管理员持续授权，也不会改变 GitHub 发放给集成的令牌权限。
+4. 如果会话中另有已授权的仓库所有者 GitHub 连接，先通过该连接验证身份与权限，再以预期 head SHA 执行合并。
+   成功后回读 `merged`、`merged_by` 与主线提交；不因某一条 Agent 通道失败就断言所有管理员通道都不可用。
+5. 只有 bot／集成通道、没有可用管理员连接时，记录实际错误及凭据限制，再说明需要怎样的身份连接。
+   不自行把所有 App 加入绕过名单，不关闭全仓审查或 CI，不使用强推绕过，也不向用户索要明文令牌。
+
+2026-11-22 的 PR #27 是一次已核验的案例：无冲突，四项 CI 通过，审批列表为空；
+Cursor bot 通道报告 `REVIEW_REQUIRED`，仓库的管理员强制开关为关闭。
+随后通过仓库所有者的已授权连接成功合并，未更改主线保护。该结果说明可用的管理员通道能够合入，
+不代表其他 Agent 的集成令牌因此取得同样权限。

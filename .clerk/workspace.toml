@@ -13,9 +13,10 @@ auto_commit = false
 auto_push = false
 
 [sync]
-enabled = false
+enabled = true
 remote = "origin"
 branch = "master"
+write_fetch = true
 
 [ids.tasks]
 pattern = "TASK-{serial:3}"
