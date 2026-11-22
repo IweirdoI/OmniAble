@@ -41,6 +41,8 @@ Windows x64 协作者克隆本仓库后，在 PowerShell 执行：
 ./scripts/clerk.ps1 check
 ```
 
+`claim` 可用于 `todo`、`active`，以及 `done` 且 `claimant` 仍为空的补记（例如 PR 已合入但漏跑认领）。用交付者的 Git 姓名与邮箱执行 `claim`，不要手改 CSV，也不要把维护者验收身份写成认领者。
+
 然后将业务改动与任务记录提交个人分支，提 PR。维护者在 PR 已合并、验收完成后记录证据与真实提交：
 
 ```powershell
