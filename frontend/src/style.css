@@ -123,6 +123,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .live-state span, .live-state small { display: block; }
 .live-state span { font-size: 14px; color: #d6d7d2; }
 .live-state small { color: #7e8079; margin-top: 3px; font-size: 11px; }
+.memory-sync-status { display: grid; gap: 6px; margin: 0 20px 12px; padding: 0; list-style: none; }
+.memory-sync-status li { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.memory-sync-status small { color: #a4a69f; }
+.memory-sync-status button { flex-shrink: 0; }
 .memory-tabs { display: grid; grid-template-columns: repeat(5, 1fr); padding: 0 16px; border-bottom: 1px solid #30312e; }
 .memory-tabs button { position: relative; border: 0; background: transparent; color: #8f918a; padding: 13px 4px 15px; font-size: 15px; }
 .memory-tabs button:hover { color: #d9dad5; }

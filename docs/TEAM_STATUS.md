@@ -15,13 +15,16 @@
 | TASK-007 | [P1] Windows 桌面应用目标后端检索与并发性能验收，按瓶颈优化 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/6 | 20261122-183535 |
 | TASK-008 | [P1] 约束 SSE 后台线程生命周期、取消与并发资源 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/7 | 20261122-151536 |
 | TASK-009 | [P1] 修复 SSE 提前 EOF、部分失败及最终回答不一致 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/8 | 20261122-151543 |
-| TASK-010 | [P1] 显示记忆面板部分刷新失败，避免旧数据冒充已同步 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/9 | 20261121-215809 |
+| TASK-010 | [P1] 显示记忆面板部分刷新失败，避免旧数据冒充已同步 | 待审查 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/9 | 20261122-185507 |
 | TASK-011 | [P1] 确定聊天与记忆工作台视觉规范和关键页面方案 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/10 | 20261121-215645 |
 | TASK-012 | [P1] 落地工作台 UI 改版，恢复手机操作并完善键盘可用性 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/11 | 20261121-215812 |
 | TASK-013 | [P2] 贯通聊天、偏好画像和记忆查询的场景选择 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/12 | 20261121-215647 |
 | TASK-014 | [P2] 增加可分页的长期记忆浏览与筛选，独立于本轮聊天召回 | 进行中 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/13 | 20261122-161744 |
-| TASK-015 | [P1] 建立前端自动化回归 CI，覆盖聊天流式与响应式主流程 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/14 | 20261121-215649 |
+| TASK-015 | [P1] 建立前端自动化回归 CI，覆盖聊天流式与响应式主流程 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/14 | 20261122-185550 |
 | TASK-016 | [P1] 按设计完善 Agent 路由、执行预算与结果核验 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/16 | 20261122-151543 |
 | TASK-017 | [P1] 集成 Agent 文件工作区、变更预览与网页侧栏 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/19 | 20261122-151544 |
+| TASK-018 | [P1] Windows Agent 本地会话列表与重启恢复 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/23 | 20261122-185522 |
+| TASK-019 | [P1] Agent 上下文预算与长会话截断 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/24 | 20261122-185523 |
+| TASK-020 | [P1] Agent 文件变更的逐次用户确认 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/25 | 20261122-185525 |
 
 <!-- clerk:end tasks -->

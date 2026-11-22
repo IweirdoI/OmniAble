@@ -7,6 +7,7 @@ import { authHeaders, requestApi } from './ingestion.js'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { streamChat, applyChatEvent } from './chat-stream.js'
+import { createMemorySync, memoryPanels } from './memory-sync.js'
 
 // 把模型 markdown 文本安全渲染为 HTML（DOMPurify 消毒防 XSS）。流式场景下由 scheduleRender
 // 节流调用，避免每个 token 都对整篇重解析（O(n^2) 卡顿）。
@@ -94,11 +95,13 @@ createApp({
     const newChat = () => { agentHistory.value = []; messages.value = [] }
     const messages = ref([...initialMessages])
     const memories = ref([...demoMemories])
-    const preferences = ref([...demoPreferences])
-    const profile = ref({ features: [] })
-    const stats = ref(demoStats())
+    const panelState = reactive({})
+    const stats = computed(() => live.value ? panelState.stats.data : demoStats())
+    const preferences = computed(() => live.value ? panelState.history.data : demoPreferences)
+    const profile = computed(() => live.value ? panelState.profile.data : null)
     const latency = ref('演示数据')
-    const lastSynced = ref('尚未连接')
+    const panelLabels = { idle: '待同步', loading: '同步中', success: '已同步', error: '读取失败', stale: '更新失败 · 显示旧数据' }
+    const failedPanel = (key) => ['error', 'stale'].includes(panelState[key].status)
     const events = ref([
       { id: 1, type: 'preference', title: '识别到回答偏好', detail: 'response_language · v2', time: '刚刚' },
       { id: 2, type: 'memory', title: '沉淀项目上下文', detail: 'conversation · long', time: '2 分钟前' },
@@ -117,19 +120,16 @@ createApp({
     ]
 
     const activePreferences = computed(() => {
-      const features = profile.value?.features || []
-      if (features.length) {
-        return features.map((item) => ({
-          id: item.feature_id || item.preference_key,
-          key: item.preference_key,
-          value: item.value,
-          scene: item.scene_id || item.scope || 'global',
-          version: item.version || 1,
-          active: true,
-          confidence: item.confidence ?? 0,
-        }))
-      }
-      return preferences.value.filter((item) => item.active)
+      if (!live.value) return demoPreferences.filter((item) => item.active)
+      return (profile.value?.features ?? []).map((item) => ({
+        id: item.feature_id || item.preference_key,
+        key: item.preference_key,
+        value: item.value,
+        scene: item.scene_id || item.scope || 'global',
+        version: item.version || 1,
+        active: true,
+        confidence: item.confidence ?? 0,
+      }))
     })
 
     const statusText = computed(() => live.value ? '实时 API 已连接' : '演示数据模式')
@@ -172,16 +172,10 @@ createApp({
       agentHistory.value = []
       sessionKey.value++
       memories.value = []
-      preferences.value = []
-      profile.value = { features: [] }
-      stats.value = {
-        total_count: 0, total_preference_count: 0, total_knowledge_count: 0,
-        layers: { short: { count: 0 }, mid: { count: 0 }, long: { count: 0 }, milvus: { count: 0 } },
-      }
+      memorySync.reset()
       messages.value = [{ ...initialMessages[0] }]
       events.value = []
       latency.value = '尚未检索'
-      lastSynced.value = '尚未同步'
       forgetInstruction.value = ''
       forgetResult.value = '等待遗忘指令…'
     }
@@ -219,25 +213,30 @@ createApp({
       msg.html = renderMarkdown(msg.content)
     }
 
-    const loadDashboard = async ({ quiet = false } = {}) => {
-      if (!live.value) return
-      if (!user.value.trim()) { syncing.value = false; return }
+    const memorySync = createMemorySync(panelState, async (key, id) => {
+      const encodedUser = encodeURIComponent(id)
+      if (key === 'stats') return call(`/stats/${encodedUser}`, {}, 30000)
+      if (key === 'history') {
+        const result = await call(`/preferences/${encodedUser}?latest_only=false&top_k=100`, {}, 180000)
+        return result.items.map(mapPreference).sort((a, b) => b.version - a.version)
+      }
+      const result = await call(`/preferences/${encodedUser}/profile`, {}, 30000)
+      if (!Array.isArray(result.profile?.features)) throw new Error('画像响应无效')
+      return result.profile
+    }, now)
+
+    const loadDashboard = async ({ quiet = false, keys = memoryPanels.map(([key]) => key) } = {}) => {
+      if (!live.value || !user.value.trim()) return false
+      const requestSession = sessionKey.value
       syncing.value = true
-      const encodedUser = encodeURIComponent(user.value.trim())
-      const [statsResult, historyResult, profileResult] = await Promise.allSettled([
-        call(`/stats/${encodedUser}`, {}, 30000),
-        call(`/preferences/${encodedUser}?latest_only=false&top_k=100`, {}, 180000),
-        call(`/preferences/${encodedUser}/profile`, {}, 30000),
-      ])
-      if (encodedUser !== encodeURIComponent(user.value.trim()) || !live.value) return
-      if (statsResult.status === 'fulfilled') stats.value = statsResult.value
-      if (historyResult.status === 'fulfilled') preferences.value = historyResult.value.items.map(mapPreference).sort((a, b) => b.version - a.version)
-      if (profileResult.status === 'fulfilled') profile.value = profileResult.value.profile
-      lastSynced.value = now()
-      syncing.value = false
-      if (!quiet) {
-        const failed = [statsResult, historyResult, profileResult].filter((item) => item.status === 'rejected').length
-        tell(failed ? `数据已刷新，${failed} 项接口暂时不可用` : '记忆面板已同步')
+      try {
+        await memorySync.refresh(user.value.trim(), keys)
+        if (requestSession !== sessionKey.value || !live.value) return false
+        const failures = keys.filter(failedPanel).length
+        if (!quiet) tell(failures ? `${failures} 项同步失败，可在记忆面板重试` : '记忆数据已更新')
+        return failures === 0
+      } finally {
+        if (requestSession === sessionKey.value) syncing.value = false
       }
     }
 
@@ -247,11 +246,8 @@ createApp({
       if (live.value && !quiet) {
         sessionKey.value++
         live.value = false
-        stats.value = demoStats()
-        preferences.value = [...demoPreferences]
-        profile.value = { features: [] }
+        memorySync.reset()
         memories.value = [...demoMemories]
-        lastSynced.value = '尚未连接'
         tell('已切换为演示数据模式')
         return
       }
@@ -342,7 +338,10 @@ createApp({
             agentHistory.value = event.reset_history
               ? []
               : assistantMsg.status === 'completed' ? [...agentHistory.value, { role: 'user', content: text }, { role: 'assistant', content: assistantMsg.content }].slice(-20) : agentHistory.value
-            if (event.reset_history) messages.value = []
+            if (event.reset_history) {
+              messages.value = []
+              memorySync.reset()
+            }
             renderNow(assistantMsg)
             scrollToBottom()
           } else if (event.type === 'error') {
@@ -414,8 +413,9 @@ createApp({
         const deleted = new Set(result.deleted_ids)
         memories.value = memories.value.filter((item) => !deleted.has(item.id))
         pushEvent('forget', '执行安全遗忘', `${result.count} 条记忆已删除`)
-        await loadDashboard({ quiet: true })
-        tell('遗忘结果已同步')
+        memorySync.reset()
+        const refreshed = await loadDashboard({ quiet: true })
+        tell(refreshed ? '遗忘结果已同步' : '遗忘已处理，部分记忆数据未能刷新')
       } catch (error) {
         forgetResult.value = `遗忘失败：${error.message}`
         pushEvent('error', '安全遗忘失败', error.message)
@@ -471,7 +471,7 @@ createApp({
       connect({ quiet: true })
     })
 
-    return { dock, sidebarOpen, sidebarWide, workspaceTarget, workspaceRefresh, openWorkspace, openChatLink, toggleSidebar, stopMessage, runLabels, stageLabels, useMemory, saveMemory, newChat, user, userDraft, live, syncing, sending, ingesting, sessionKey, onIngestionBusy, onIngestionCompleted, modelSlow, activeTab, draft, messages, memories, preferences, stats, latency, lastSynced, events, forgetInstruction, forgetResult, toast, chatScroll, tabs, activePreferences, statusText, connect, loadDashboard, commitUser, onUserKeydown, sendMessage, handleComposerKeydown, openIngestion, usePrompt, prepareForget, forget, renderMarkdown }
+    return { dock, sidebarOpen, sidebarWide, workspaceTarget, workspaceRefresh, openWorkspace, openChatLink, toggleSidebar, stopMessage, runLabels, stageLabels, useMemory, saveMemory, newChat, user, userDraft, live, syncing, sending, ingesting, sessionKey, onIngestionBusy, onIngestionCompleted, modelSlow, activeTab, draft, messages, memories, preferences, stats, profile, latency, memoryPanels, panelState, panelLabels, failedPanel, events, forgetInstruction, forgetResult, toast, chatScroll, tabs, activePreferences, statusText, connect, loadDashboard, commitUser, onUserKeydown, sendMessage, handleComposerKeydown, openIngestion, usePrompt, prepareForget, forget, renderMarkdown }
   },
   template: `
     <div class="app-shell">
@@ -548,20 +548,32 @@ createApp({
           <div class="memory-shell" v-show="dock === 'memory'">
           <div class="memory-header">
             <div><span class="eyebrow">LIVE MEMORY</span><h2>实时记忆面板</h2></div>
-            <div class="live-state"><i :class="{ live }"></i><span>{{ live ? '实时同步' : '演示模式' }}<small>上次同步 {{ lastSynced }}</small></span></div>
+            <div class="live-state"><i :class="{ live }"></i><span>{{ live ? 'API 已连接' : '演示模式' }}</span></div>
           </div>
+          <ul v-if="live" class="memory-sync-status" aria-label="记忆数据同步状态">
+            <li v-for="[key, label] in memoryPanels" :key="key" :data-testid="'sync-' + key">
+              <span aria-live="polite">{{ label }}：{{ panelLabels[panelState[key].status] }}
+                <small v-if="panelState[key].updatedAt">· 上次成功 {{ panelState[key].updatedAt }}</small>
+              </span>
+              <button v-if="failedPanel(key)" :disabled="sending || syncing || ingesting"
+                :aria-label="'重试' + label" @click="loadDashboard({ keys: [key] })">重试</button>
+            </li>
+          </ul>
           <nav class="memory-tabs" aria-label="记忆面板导航">
             <button v-for="tab in tabs" :key="tab[0]" :data-testid="'tab-' + tab[0]" :class="{ active: activeTab === tab[0] }" @click="activeTab = tab[0]">{{ tab[1] }}</button>
           </nav>
           <div class="memory-content">
             <IngestionPanel v-show="activeTab === 'ingestion'" :key="sessionKey" :user="user" :live="live" :blocked="sending || syncing" @busy="onIngestionBusy" @completed="onIngestionCompleted" />
             <template v-if="activeTab === 'overview'">
+              <template v-if="stats">
               <div class="stat-grid"><div><span>总记忆</span><b>{{ stats.total_count }}</b><small>跨层统一视图</small></div><div><span>偏好记忆</span><b>{{ stats.total_preference_count }}</b><small>版本可追溯</small></div><div><span>知识记忆</span><b>{{ stats.total_knowledge_count }}</b><small>可供语义召回</small></div></div>
               <section class="side-section"><div class="section-title"><h3>记忆分层</h3><span>{{ live ? '来自 /stats' : '演示数据' }}</span></div><div class="layer-row"><span>短期记忆</span><div><i :style="{ width: Math.min(100, stats.layers.short.count / (stats.layers.short.capacity || 20) * 100) + '%' }"></i></div><b>{{ stats.layers.short.count }} / {{ stats.layers.short.capacity || '∞' }}</b></div><div class="layer-row"><span>中期记忆</span><div><i :style="{ width: Math.min(100, stats.layers.mid.count / (stats.layers.mid.capacity || 50) * 100) + '%' }"></i></div><b>{{ stats.layers.mid.count }} / {{ stats.layers.mid.capacity || '∞' }}</b></div><div class="layer-row"><span>长期待入库</span><div><i :style="{ width: Math.min(100, stats.layers.long.count * 10) + '%' }"></i></div><b>{{ stats.layers.long.count }}</b></div><div class="layer-row"><span>知识库</span><div><i :style="{ width: Math.min(100, stats.layers.milvus.count * 8) + '%' }"></i></div><b>{{ stats.layers.milvus.count }}</b></div></section>
+              </template>
+              <p v-else class="empty-state">暂未取得记忆统计</p>
               <section class="side-section"><div class="section-title"><h3>最近活动</h3><span>自动刷新</span></div><div class="event-item" v-for="event in events" :key="event.id"><i :class="event.type">{{ event.type === 'forget' ? '⌫' : event.type === 'preference' ? '◌' : event.type === 'error' ? '!' : '◇' }}</i><span><b>{{ event.title }}</b><small>{{ event.detail }}</small></span><time>{{ event.time }}</time></div></section>
             </template>
             <template v-else-if="activeTab === 'preferences'">
-              <div class="section-title sticky-title"><h3>当前生效偏好</h3><span>{{ activePreferences.length }} 项</span></div><div class="empty-state" v-if="!activePreferences.length">当前用户还没有生效偏好</div><article class="preference-card" data-testid="preference-card" v-for="item in activePreferences" :key="item.id || item.key"><div><code>{{ item.key }}</code><span>v{{ item.version }}</span></div><p>{{ item.value }}</p><footer><small>{{ item.scene }} · 置信度 {{ Math.round((item.confidence || 0) * 100) }}%</small><button @click="prepareForget(item, 'preference')">准备遗忘</button></footer></article><div class="section-title history-title"><h3>版本历史</h3><span>{{ preferences.length }} 条</span></div><div class="history-item" v-for="item in preferences" :key="(item.id || item.key) + '-' + item.version"><b>v{{ item.version }}</b><span><strong>{{ item.key }}</strong><small>{{ item.active ? '当前版本' : '已被替换' }} · {{ item.value }}</small></span></div>
+              <div class="section-title sticky-title"><h3>当前生效偏好</h3><span v-if="!live || profile">{{ activePreferences.length }} 项</span></div><p v-if="profile?.truncated">当前画像达到读取上限，共有 {{ profile.n_latest_available }} 条最新偏好记录。</p><div class="empty-state" v-if="!activePreferences.length">{{ live && !profile ? '暂未取得当前画像' : '当前用户还没有生效偏好' }}</div><article class="preference-card" data-testid="preference-card" v-for="item in activePreferences" :key="item.id || item.key"><div><code>{{ item.key }}</code><span>v{{ item.version }}</span></div><p>{{ item.value }}</p><footer><small>{{ item.scene }} · 置信度 {{ Math.round((item.confidence || 0) * 100) }}%</small><button @click="prepareForget(item, 'preference')">准备遗忘</button></footer></article><div class="section-title history-title"><h3>版本历史</h3><span v-if="preferences">{{ preferences.length }} 条</span></div><div class="empty-state" v-if="!preferences">暂未取得偏好历史</div><div class="history-item" v-for="item in preferences" :key="(item.id || item.key) + '-' + item.version"><b>v{{ item.version }}</b><span><strong>{{ item.key }}</strong><small>{{ item.active ? '当前版本' : '已被替换' }} · {{ item.value }}</small></span></div>
             </template>
             <template v-else-if="activeTab === 'memories'">
               <div class="section-title sticky-title"><h3>本轮召回记忆</h3><span>{{ latency }} · {{ memories.length }} 条</span></div><div class="empty-state" v-if="!memories.length">发送一条消息后，这里会显示真实召回结果</div><article class="memory-card" data-testid="memory-card" v-for="item in memories" :key="item.id"><div><code>{{ item.type }}</code><span>{{ item.layer }}</span><small>{{ item.id }}</small></div><p>{{ item.content }}</p><footer><span>{{ item.scene || '通用场景' }} · {{ item.source || '未知来源' }}</span><button @click="prepareForget(item)">准备遗忘</button></footer></article>
