@@ -43,5 +43,6 @@
 | TASK-035 | [P1] 验收断网桌面与无障碍端到端使用场景 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/43 | 20261122-204516 |
 | TASK-036 | [P2] 将录制和回放扩展到获准的 Windows 应用 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/44 | 20261122-204519 |
 | TASK-037 | [P2] 验证本地 MCP 工具能否复用插件权限 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/45 | 20261122-204521 |
+| TASK-038 | [P1] 优化 Windows recall 词面补召与 CPU 编码并发 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/47 | 20261122-215313 |
 
 <!-- clerk:end tasks -->
