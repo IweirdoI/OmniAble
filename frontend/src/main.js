@@ -49,7 +49,7 @@ const demoStats = () => ({
 })
 
 const initialMessages = [
-  { id: 1, role: 'assistant', content: '你好，我是麒忆助理。你可以直接问我问题，也可以告诉我需要长期记住或遗忘的内容。', time: '刚刚' },
+  { id: 1, role: 'assistant', content: '你好，我是 MOKOA 助理。你可以直接问我问题，也可以告诉我需要长期记住或遗忘的内容。', time: '刚刚' },
   { id: 2, role: 'user', content: '以后请用中文回答，并优先给出可以直接执行的步骤。', time: '刚刚' },
   { id: 3, role: 'assistant', content: '记住了。我会默认使用中文，并把可执行步骤放在前面。右侧已经同步生成的偏好记忆。', time: '刚刚' },
 ]
@@ -524,9 +524,9 @@ createApp({
           </div>
           <div class="chat-stream" ref="chatScroll">
             <div class="message-row" v-for="message in messages" :key="message.id" :class="message.role">
-              <div class="avatar">{{ message.role === 'assistant' ? '麒' : 'Z' }}</div>
+              <div class="avatar">{{ message.role === 'assistant' ? 'M' : '你' }}</div>
               <div class="message-wrap">
-                <div class="message-meta"><b>{{ message.role === 'assistant' ? '麒忆助理' : '你' }}</b><span>{{ message.time }}</span></div>
+                <div class="message-meta"><b>{{ message.role === 'assistant' ? 'MOKOA 助理' : '你' }}</b><span>{{ message.time }}</span></div>
                 <div class="bubble" @click="openChatLink" v-html="message.html || renderMarkdown(message.content)"></div>
                 <p class="run-status" data-testid="run-status" v-if="message.status" role="status">{{ runLabels[message.status] || message.status }}<span v-if="message.status === 'running' && message.stage"> · {{ stageLabels[message.stage] || message.stage }}</span></p>
                 <p class="run-failure" data-testid="run-failure" v-if="message.failure" role="alert">{{ message.failure }}</p>
@@ -550,7 +550,7 @@ createApp({
               </div>
             </div>
             <div class="message-row assistant" v-if="sending && !(messages.length && messages[messages.length - 1].role === 'assistant')">
-              <div class="avatar">麒</div><div class="message-wrap"><div class="message-meta"><b>麒忆助理</b><span>处理中</span></div><div class="bubble thinking"><i></i><i></i><i></i><span>{{ modelSlow ? '正在等待模型回答和记忆处理…' : '正在检索记忆并生成回答…' }}</span></div></div>
+              <div class="avatar">M</div><div class="message-wrap"><div class="message-meta"><b>MOKOA 助理</b><span>处理中</span></div><div class="bubble thinking"><i></i><i></i><i></i><span>{{ modelSlow ? '正在等待模型回答和记忆处理…' : '正在检索记忆并生成回答…' }}</span></div></div>
             </div>
           </div>
           <div class="prompt-chips">
