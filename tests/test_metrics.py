@@ -76,8 +76,8 @@ def _preference_classification_cases() -> list[tuple[str, str, str]]:
     ]
 
 
-def test_preference_extraction_accuracy() -> None:
-    """偏好提取准确率目标 >= 85%（组件级基线）。"""
+def test_preference_classification_accuracy() -> None:
+    """偏好分类准确率目标 >= 85%（MemoryClassifier 组件级口径，与字段级抽取分列）。"""
     classifier = MemoryClassifier()
     cases = _preference_classification_cases()
     correct = 0
@@ -92,8 +92,8 @@ def test_preference_extraction_accuracy() -> None:
     )
 
 
-def test_preference_extraction_reports_accuracy() -> None:
-    """记录准确率数值，供评测报告引用。"""
+def test_preference_classification_reports_accuracy() -> None:
+    """记录分类准确率数值，供评测报告引用。"""
     classifier = MemoryClassifier()
     cases = _preference_classification_cases()
     correct = sum(
@@ -417,3 +417,131 @@ def test_benchmark_metrics_cross_process_deterministic() -> None:
         f"固定基线召回 {first['recall_at_5']} < {RETRIEVAL_RECALL_TARGET}"
     )
     print(f"[评测] 跨进程一致性: seeds={seeds} 全部一致，Recall@5={first['recall_at_5']}")
+
+
+# ---------------------------------------------------------------------------
+# 6. 评测口径与缺测回归（TASK-005 / Issue #4）
+#    baseline 不冒充 real；缺测显式 unavailable 且不计为通过；
+#    延迟超标影响总体退出码；分类与字段级抽取分列。
+# ---------------------------------------------------------------------------
+
+
+def test_baseline_report_has_no_real_mode_metrics() -> None:
+    """baseline 报告不得包含 real 模式指标；真机状态为 not_requested。"""
+    import benchmarks.run_benchmarks as rb
+
+    report = rb._build_report(real=False)
+    assert report["mode"] == "baseline"
+    assert report["real_backend_status"] == "not_requested"
+    assert report["metrics"], "报告必须包含指标条目"
+    assert all(m.get("mode") == "baseline" for m in report["metrics"]), (
+        "baseline 模式下任何指标都不得标记为 real"
+    )
+    assert rb._overall_passed(report["metrics"]) is True
+
+
+def test_real_backend_unavailable_recorded_and_fails_overall(monkeypatch) -> None:
+    """原生后端不可达 → 显式 unavailable 缺测条目，不标 real/通过，整体失败。"""
+    import benchmarks.run_benchmarks as rb
+    from src.knowledge.memory_service import create_memory as create_memory_module
+    from src.knowledge.memory_service.milvus_client import MemoryBackendUnavailable
+
+    def boom(request, **kwargs):
+        raise MemoryBackendUnavailable("向量后端连接失败：<模拟缺测>")
+
+    monkeypatch.setattr(create_memory_module, "create_memory", boom)
+    metric = rb._run_real_retrieval()
+    assert metric["mode"] == "real"
+    assert metric["status"] == "unavailable"
+    assert metric["passed"] is False
+    assert metric.get("reason"), "缺测条目必须带脱敏原因"
+
+    report = rb._build_report(real=True)
+    assert report["real_backend_status"] == "unavailable"
+    assert rb._overall_passed(report["metrics"]) is False, "缺测必须让整体退出码失败"
+
+
+def test_real_backend_degradation_recorded(monkeypatch) -> None:
+    """embedding 降级（stub fallback）必须在真机指标中如实记录。"""
+    import benchmarks.run_benchmarks as rb
+    from src.embedding import embedding_interface as ei
+    from src.knowledge.memory_service import create_memory as create_memory_module
+    from src.knowledge.memory_service import embedding_client as embedding_client_module
+    from src.knowledge.memory_service import query_memory as query_memory_module
+    from src.knowledge.memory_service.memory_schema import (
+        CreateMemoryResponse,
+        QueryMemoryResponse,
+    )
+
+    class _StubProvider:
+        _fallback_mode = True
+        _model_name = "stub-hash"
+        dimension = 48
+
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            return [[0.0] * self.dimension for _ in texts]
+
+    stub = _StubProvider()
+    # EmbeddingClient 在模块命名空间绑定了 get_shared_embedding_backend，
+    # _real_backend_info 则从 embedding_interface 动态导入，两处都要替换。
+    monkeypatch.setattr(embedding_client_module, "get_shared_embedding_backend", lambda backend=None: stub)
+    monkeypatch.setattr(ei, "get_shared_embedding_backend", lambda backend=None: stub)
+    monkeypatch.setattr(
+        create_memory_module,
+        "create_memory",
+        lambda request, **kwargs: CreateMemoryResponse(memory_id="m", created=True),
+    )
+    monkeypatch.setattr(
+        query_memory_module,
+        "query_memory",
+        lambda request, **kwargs: QueryMemoryResponse(items=[], latency_ms=1.0),
+    )
+
+    metric = rb._run_real_retrieval()
+    assert metric["status"] == "ran", f"降级不是缺测：{metric.get('reason')}"
+    assert metric["mode"] == "real"
+    assert metric["fallback"] is True, "降级为确定性向量时必须记录 fallback"
+    assert metric["embedding"] == "stub-hash"
+    assert metric["embedding_dim"] == 48
+    assert metric["passed"] is False  # 空结果召回为 0，如实判失败
+
+
+def test_recall_pass_latency_fail_fails_overall() -> None:
+    """召回过线但延迟超标 → 总体失败（main 退出码口径，Issue #4）。"""
+    import benchmarks.run_benchmarks as rb
+
+    recall_pass_latency_fail = {
+        "name": "知识检索召回率",
+        "mode": "baseline",
+        "status": "ran",
+        "passed": True,
+        "latency_passed": False,
+    }
+    latency_ok = {**recall_pass_latency_fail, "latency_passed": True}
+    all_pass = {**latency_ok}
+    assert rb._overall_passed([recall_pass_latency_fail]) is False
+    assert rb._overall_passed([latency_ok]) is True
+    assert rb._overall_passed([{**all_pass, "passed": False}]) is False
+    assert rb._overall_passed([{**all_pass, "status": "unavailable"}]) is False
+
+
+def test_classification_and_extraction_metrics_are_separate() -> None:
+    """分类准确率与字段级抽取分列；抽取接入既有评测入口且金标不变。"""
+    import benchmarks.run_benchmarks as rb
+
+    classification = rb._run_preference_classification()
+    assert classification["name"] == "偏好分类准确率", "分类口径不得再叫『偏好提取准确率』"
+    assert classification["status"] == "ran"
+    assert "MemoryClassifier" in classification["backend"]
+
+    extraction = rb._run_preference_extraction()
+    assert extraction["name"] == "偏好抽取（字段级）"
+    assert extraction["status"] == "ran"
+    assert extraction["mode"] == "baseline"
+    for field in ("precision", "recall", "f1", "sample_exact_match_rate", "sample_size"):
+        assert field in extraction, f"缺少字段级口径字段：{field}"
+    assert extraction["passed"] == (extraction["f1"] >= PREFERENCE_ACCURACY_TARGET)
+    assert extraction["passed"] is True, (
+        f"rule 抽取在金标数据集上 F1={extraction['f1']} 未过线（不改金标，需修抽取）"
+    )
+    assert extraction["name"] != classification["name"]

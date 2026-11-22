@@ -4,25 +4,37 @@
 
 本文档说明：**评测内容、测试方法、模块对接关系、交付材料**。
 
-> **当前代码状态（2026-08-06）：** `tests/test_metrics.py` 中四项指标测试仍全部
-> `skip`；`benchmarks/` 目前已有 MemoryEntry 样例和ingestion三类 ingestion Demo。
-> 下文其余标准数据集、跑分脚本和结果目录均为
-> 规划项，不能作为已经完成的评测交付物。
+> **当前代码状态（2026-11-22）：** `tests/test_metrics.py` 指标测试均已启用；
+> `benchmarks/run_benchmarks.py`（组件级基线 + `--real` 真机模式）与
+> `run_dataset_eval.py`（数据集抽测）可运行，结果写入 `benchmarks/results/`
+> （gitignore，本地生成）。偏好指标已拆分为**分类准确率**（组件级）与
+> **字段级抽取 P/R/F1**（赛题口径，TASK-005）；每项指标记录后端、模型/维度、
+> fallback、样本数、版本与口径；原生后端缺失时显式 `unavailable` 缺测，
+> 延迟超标影响退出码（详见「模式与环境元数据语义」）。
 
 ---
 
 ## 一、测试模块核心任务
 
-比赛初评 **性能指标占 25 分**，本模块需使用 **标准化数据集 + 自动化脚本** 验证以下 4 项硬性指标，并写入提交用的 **效果验证报告**：
+比赛初评 **性能指标占 25 分**，本模块需使用 **标准化数据集 + 自动化脚本** 验证以下硬性指标，并写入提交用的 **效果验证报告**：
 
-| 指标 | 目标 | 测试文件 |
+| 指标 | 目标 | 测试/入口 |
 |------|------|----------|
-| 偏好提取准确率 | ≥ **85%** | `tests/test_metrics.py::test_preference_extraction_accuracy` |
+| 偏好提取准确率（字段级抽取） | ≥ **85%** | `benchmarks/run_benchmarks.py::_run_preference_extraction`（复用 `scripts/pref_eval_dataset.py`）；回归 `tests/test_metrics.py::test_classification_and_extraction_metrics_are_separate` |
+| └ 偏好分类准确率（组件级内部口径） | 内部指标 | `tests/test_metrics.py::test_preference_classification_accuracy`（原 `test_preference_extraction_accuracy`） |
 | 知识检索召回率 | ≥ **85%** | `tests/test_metrics.py::test_knowledge_retrieval_recall` |
 | 知识检索响应时间 | ≤ **500ms** | `tests/test_metrics.py::test_retrieval_latency` |
 | 知识冲突处理正确率 | ≥ **88%** | `tests/test_metrics.py::test_conflict_resolution_correctness` |
 
-除上述 4 项外，还需做 **功能测试**（各模块能否正常工作）和 **对比实验**（如：有/无冲突消解），一并写入技术文档。
+除上述指标外，还需做 **功能测试**（各模块能否正常工作）和 **对比实验**（如：有/无冲突消解），一并写入技术文档。
+
+### 模式与环境元数据语义（TASK-005 / Issue #4）
+
+- 报告顶层 `mode` 为请求模式（`baseline` / `--real`），`real_backend_status` 记录真机指标是否 `ran` / `unavailable` / `not_requested`；**每项指标各自携带 `mode`、`status`**。
+- 组件级基线恒为 `baseline`：确定性 crc32 向量 + 进程内客户端，只验证链路与口径，不代表语义检索质量。
+- `--real` 走 `create_memory` / `query_memory` 原生接口；后端依赖缺失或不可达时产出 `status=unavailable` 的缺测条目（附脱敏原因），**不标为通过、不让基线结果冒充真机成绩**。
+- 每项指标记录 `backend`（真实后端）、`embedding`（模型）、`embedding_dim`（维度）、`fallback`（是否降级为确定性向量）、`sample_size`、`method`（口径说明）；报告顶层 `environment` 记录 Python 版本与 git 提交。
+- 总体退出码由 `_overall_passed` 决定：任一指标 `passed=False`、`latency_passed=False` 或 `status=unavailable` 即整体失败。
 
 ---
 
@@ -31,21 +43,24 @@
 ```
 benchmarks/
 ├── README.md                 ← 本文件
-├── run_benchmarks.py         ← 【规划】一键跑全部指标，输出 report.json
-├── report_template.md        ← 【规划】效果验证报告模板
+├── run_benchmarks.py         ← 【已有】一键跑全部指标，输出 report_<ts>.json / summary_<ts>.md
+├── run_dataset_eval.py       ← 【已有】数据集驱动抽测（MS MARCO 检索 + 入库功能 + 编排冒烟）
+├── report_template.md        ← 【已有】效果验证报告模板
 ├── datasets/                 ← 标准测试数据集
 │   ├── preference_memory_entries.json ← 【已有】MemoryEntry 样例
 │   ├── ingestion_demo.jsonl           ← 【已有】三类 ingestion Demo 样例
-│   ├── preference_extraction.jsonl    ← 【规划】
-│   ├── knowledge_retrieval.jsonl      ← 【规划】
-│   ├── conflict_resolution.jsonl      ← 【规划】
+│   ├── ingestion_acceptance.jsonl     ← 【已有】ingestion 验收样例
+│   ├── preference_extraction.jsonl    ← 【已有】35 条字段级抽取金标
+│   ├── knowledge_retrieval.jsonl      ← 【已有】检索评测扩展语料
+│   ├── conflict_resolution.jsonl      ← 【已有】冲突消解评测样例
+│   ├── kylin_joint_retrieval.json     ← 【已有】麒麟联调检索样例
 │   ├── security_forget.jsonl          ← 【规划】
 │   └── ingestion_pipeline.jsonl       ← 【规划】
-└── results/                  ← 【规划】每次跑分输出（gitignore，本地生成）
-    └── report_20260729.json
+└── results/                  ← 【已有】每次跑分输出（gitignore，本地生成）
+    └── report_<时间戳>.json
 ```
 
-规划中的自动化入口：
+自动化入口：
 
 ```bash
 # 开发机联调
@@ -59,29 +74,28 @@ pytest tests/test_metrics.py -v
 
 ## 三、四项硬性指标：测什么、怎么测、找谁
 
-### 3.1 偏好提取准确率 ≥ 85%
+### 3.1 偏好指标：分类准确率与字段级抽取（≥ 85%）
 
-**测什么：** 从用户输入 / 行为数据中，系统能否正确提取偏好（操作习惯、输出风格、安全策略等）。
+**测什么：** 偏好指标拆为两个口径（TASK-005 / Issue #4），报告与测试中分列：
 
-**调用链：**
+| 口径 | 名称 | 内容 | 入口 |
+|------|------|------|------|
+| 组件级（内部） | 偏好分类准确率 | `MemoryClassifier` 对标注语料判 preference / knowledge | `tests/test_metrics.py::test_preference_classification_accuracy`、`run_benchmarks.py::_run_preference_classification` |
+| 赛题口径 | 偏好提取准确率（字段级） | `PreferenceMemoryStore.extract()` 对 `datasets/preference_extraction.jsonl` 抽取偏好键值，按 `key=value` 精确匹配计 **Precision / Recall / F1**；样本完整匹配率 `sample_exact_match_rate` 单列 | `run_benchmarks.py::_run_preference_extraction`（复用 `scripts/pref_eval_dataset.py` 的 `evaluate("rule", ...)`） |
+
+赛题「偏好提取准确率 ≥ 85%」由**字段级抽取的 F1** 承载；rule 模式离线可复现、
+不需要 LLM。LLM / fusion 模式的开放域评测仍走 `scripts/eval_preference_hf_dataset.py`
+与 `scripts/pref_eval_dataset.py --mode fusion`（需模型服务），不并入 baseline 跑分。
+金标数据集与阈值未改动。
+
+**调用链（字段级抽取）：**
 
 ```
-datasets/preference_extraction.jsonl
-  → ingestion（可选）→ preference 模块 extract
-  → 对比 expected_preferences 标注
+datasets/preference_extraction.jsonl（35 条金标）
+  → PreferenceMemoryStore.extract([RawRecord])（rule 模式）
+  → 对比 expected_preferences 标注（key=value 精确匹配）
+  → P/R/F1 + sample_exact_match_rate
 ```
-
-**对接：偏好记忆模块（preference）**
-
-| 需要preference提供 | 说明 |
-|----------------|------|
-| 稳定的 `extract()` 接口 | `src/preference/store.py` |
-| 5～10 条真实样例 | 清洗前后 JSON，用于数据集 |
-| 版本化/跨场景用例 | 同一偏好在不同 `scene_id` 下是否一致 |
-
-当前主线中的 `PreferenceMemoryStore.extract()` 仍直接返回空列表，且尚无
-`extract_from_text()`；因此本指标目前不能得到有效跑分。preference的完整提取实现仍位于
-`origin/feature/preference`，合并时需要先处理公共接口与配置冲突。
 
 **数据集格式示例**（`datasets/preference_extraction.jsonl`，一行一条）：
 
@@ -93,13 +107,15 @@ datasets/preference_extraction.jsonl
 这里的 `chat` 是偏好数据集标签；若样本先经过 `IngestionPipeline` 或 `/ingest`，
 必须映射为 ingestion 支持的 `conversation`。
 
-**准确率计算：**
+**计分口径：**
 
 ```
-准确率 = 正确提取的偏好条目数 / 标注偏好条目总数
+Precision = TP / (TP + FP)；Recall = TP / (TP + FN)；F1 = 2PR / (P + R)
+passed = F1 ≥ 0.85；sample_exact_match_rate 与 negative_samples_with_any_extract 单列，不参与阈值
 ```
 
-匹配方式可用：关键词包含、集合 F1、或 LLM-as-judge（需在报告里说明方法）。
+匹配方式：封闭集 `key=value` 精确匹配（动态键兜底 `habit.custom_*` 等同样计入）；
+开放域/语义对齐口径见 `scripts/eval_preference_hf_dataset.py`（LLM-judge），需在报告里注明所用模式。
 
 **相关代码：**
 

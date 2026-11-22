@@ -6,22 +6,39 @@ Module: testing | Requirement: (7) 量化评测
 复刻 tests/test_metrics.py 的组件级基线，并在此之上输出更完整的指标
 （Recall@5 / Hit@1 / P50 / P95）与可直接汇入效果验证报告的 JSON / Markdown。
 
+指标口径（TASK-005 / Issue #4）：
+  - 偏好分类准确率：MemoryClassifier 对标注语料的 preference/knowledge 分类，
+    组件级内部口径，与"偏好抽取"分列。
+  - 偏好抽取（字段级）：复用 scripts/pref_eval_dataset.py 的既有评测入口，
+    对 datasets/preference_extraction.jsonl 按 key=value 精确匹配计算
+    Precision / Recall / F1，样本完整匹配率单列；赛题"偏好提取准确率 ≥85%"
+    由该指标承载。金标数据集与阈值不变。
+
 两种运行模式：
   1) 默认（组件级基线）：确定性 hash embedding + 进程内向量客户端，无需真机，
      用于日常回归与 CI；结果标记为 baseline。
   2) --real：按 configs/default.yaml 的 storage/embedding 后端（真机应为 kylin）
      通过 create_memory / query_memory 原生接口播种并检索，得到真实召回/延迟。
      在麒麟 V11 宿主上先按 docs/测试结果.md 第 9 节导出 OS_AGENT_* 环境变量再运行。
+     原生后端缺失或不可达时，该指标显式记为 status=unavailable（缺测），
+     不标为通过，也不让基线结果冒充真机成绩。
 
 方法学声明：组件级基线用确定性向量，只验证「链路与指标口径正确」，
 不代表真实语义检索质量；真机数字以 --real 跑分为准。
+报告顶层 mode 为请求模式（baseline / real），real_backend_status 记录真机
+指标实际是否 ran / unavailable / not_requested；每项指标各自携带 mode 与
+status 字段。退出码：任一指标 passed=False、latency_passed=False 或
+status=unavailable 时整体失败（见 _overall_passed）。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import platform
 import statistics
+import subprocess
 import sys
 import time
 import zlib
@@ -74,6 +91,78 @@ def _percentile(values: list[float], p: float) -> float:
     hi = min(lo + 1, len(s) - 1)
     frac = k - lo
     return s[lo] * (1 - frac) + s[hi] * frac
+
+
+# ---------------------------------------------------------------------------
+# 工具：环境元数据与总体通过口径（TASK-005 / Issue #4）
+# ---------------------------------------------------------------------------
+
+
+def _git_commit() -> str | None:
+    """尽力读取当前提交哈希；无 git 或不在仓库时返回 None，不阻断跑分。"""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def _resolve_environment() -> dict:
+    """报告顶层环境块：记录配置解析的后端与组件级基线实际使用的后端。"""
+    from src.embedding.embedding_interface import resolve_embedding_backend_name
+
+    configured_backend: str | None = None
+    try:
+        configured_backend = resolve_embedding_backend_name()
+    except Exception:  # noqa: BLE001 - 环境探测失败不阻断跑分
+        configured_backend = None
+    return {
+        "python_version": platform.python_version(),
+        "git_commit": _git_commit(),
+        "configured_embedding_backend": configured_backend,
+        "embedding_backend": "deterministic-crc32-bigram（组件级基线专用）",
+        "embedding_dim": 48,
+        "memory_backend": "in-process InMemoryMilvusClient",
+        "semantic_fallback": False,
+        "note": "组件级基线：确定性向量只验证链路与指标口径，不代表语义检索质量",
+    }
+
+
+def _unavailable_metric(name: str, exc: Exception) -> dict:
+    """缺测指标条目：显式 unavailable，不计为通过（TASK-005 / Issue #4）。"""
+    return {
+        "name": name,
+        "mode": "real",
+        "status": "unavailable",
+        "passed": False,
+        "reason": f"{type(exc).__name__}: {str(exc)[:160]}",
+        "note": "原生后端不可用或依赖缺失：该指标缺测，不计为通过，不代表真机成绩",
+    }
+
+
+def _overall_passed(metrics: list[dict]) -> bool:
+    """总体通过口径：任一指标未通过 / 延迟超标 / 缺测，即整体失败。
+
+    main() 的退出码由此决定；历史版本只检查 passed 字段，遗漏了
+    latency_passed（召回过线但延迟超标时仍退出 0，Issue #4）。
+    """
+    for metric in metrics:
+        if metric.get("status") == "unavailable":
+            return False
+        if metric.get("passed") is False:
+            return False
+        if metric.get("latency_passed") is False:
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +292,8 @@ def _conflict_cases():
 # ---------------------------------------------------------------------------
 
 
-def _run_preference_accuracy() -> dict:
+def _run_preference_classification() -> dict:
+    """偏好分类准确率：MemoryClassifier 组件级口径，与字段级抽取分列。"""
     from src.common.models import DataSource
     from src.core.classifier import MemoryClassifier
 
@@ -216,12 +306,65 @@ def _run_preference_accuracy() -> dict:
             correct += 1
     acc = correct / len(cases)
     return {
-        "name": "偏好提取准确率",
+        "name": "偏好分类准确率",
+        "mode": "baseline",
+        "status": "ran",
         "value": round(acc, 4),
         "target": PREFERENCE_ACCURACY_TARGET,
         "passed": acc >= PREFERENCE_ACCURACY_TARGET,
         "sample_size": len(cases),
         "detail": f"{correct}/{len(cases)}",
+        "backend": "MemoryClassifier（规则分类）",
+        "embedding": "n/a（分类不涉及向量）",
+        "fallback": False,
+        "method": "组件级内部口径：MemoryClassifier 对标注语料判 preference/knowledge，"
+                  "与赛题『偏好提取准确率』（字段级抽取）分列，见 _run_preference_extraction",
+    }
+
+
+def _run_preference_extraction() -> dict:
+    """偏好抽取（字段级）：复用 scripts/pref_eval_dataset.py 的既有评测入口。
+
+    按 key=value 精确匹配计算字段级 Precision / Recall / F1，
+    样本完整匹配率单列；rule 模式离线可复现，不需要 LLM 服务。
+    """
+    name = "偏好抽取（字段级）"
+    try:
+        from scripts.pref_eval_dataset import evaluate
+    except Exception as exc:  # noqa: BLE001 - 依赖缺失显式缺测
+        return _unavailable_metric(name, exc)
+
+    try:
+        report = evaluate(
+            "rule",
+            DATASETS_DIR / "preference_extraction.jsonl",
+        )
+    except Exception as exc:  # noqa: BLE001 - 数据集缺失/损坏显式缺测
+        return _unavailable_metric(name, exc)
+
+    f1 = float(report["f1"])
+    return {
+        "name": name,
+        "mode": "baseline",
+        "status": "ran",
+        "precision": report["precision"],
+        "recall": report["recall"],
+        "f1": f1,
+        "sample_exact_match_rate": report["sample_exact_match_rate"],
+        "tp": report["tp"],
+        "fp": report["fp"],
+        "fn": report["fn"],
+        "negative_samples_with_any_extract": report["negative_samples_with_any_extract"],
+        "llm_calls": report["llm_calls"],
+        "target": PREFERENCE_ACCURACY_TARGET,
+        "passed": f1 >= PREFERENCE_ACCURACY_TARGET,
+        "sample_size": report["samples"],
+        "backend": "PreferenceMemoryStore.extract（rule 模式，无 LLM）",
+        "embedding": "n/a（规则抽取，不涉及向量）",
+        "fallback": False,
+        "method": "赛题『偏好提取准确率』口径：对 datasets/preference_extraction.jsonl 按"
+                  " key=value 精确匹配计字段级 P/R/F1（passed 按 F1 判定）；样本完整匹配"
+                  " sample_exact_match_rate 单列不上阈值；金标数据集与阈值未改动",
     }
 
 
@@ -237,7 +380,8 @@ def _make_normalized(content, source_type):
     )
 
 
-def _run_retrieval_recall(real: bool = False) -> dict:
+def _run_retrieval_recall() -> dict:
+    """知识检索召回率（组件级基线）：内存客户端 + 确定性向量，恒为 baseline。"""
     from src.knowledge.memory_service.in_memory_client import InMemoryMilvusClient
 
     documents, relevant = _retrieval_corpus()
@@ -262,18 +406,25 @@ def _run_retrieval_recall(real: bool = False) -> dict:
     recall = hits_at5 / n
     hit1 = hits_at1 / n
     return {
-        "name": "知识检索召回率",
+        "name": "知识检索召回率（组件级基线）",
+        "mode": "baseline",
+        "status": "ran",
         "recall_at_5": round(recall, 4),
         "hit_at_1": round(hit1, 4),
         "target": RETRIEVAL_RECALL_TARGET,
         "passed": recall >= RETRIEVAL_RECALL_TARGET,
         "sample_size": n,
+        "backend": "InMemoryMilvusClient（进程内）",
+        "embedding": "deterministic-crc32-bigram",
+        "embedding_dim": 48,
+        "fallback": False,
+        "method": "组件级基线：确定性向量 + 进程内余弦，只验证链路与口径；"
+                  "真机数字见 --real 模式的真机指标",
         "latency_p50_ms": round(_percentile(latencies, 50), 3),
         "latency_p95_ms": round(_percentile(latencies, 95), 3),
         "latency_avg_ms": round(statistics.fmean(latencies), 3),
         "latency_budget_ms": LATENCY_BUDGET_MS,
         "latency_passed": _percentile(latencies, 95) <= LATENCY_BUDGET_MS,
-        "mode": "real" if real else "baseline",
     }
 
 
@@ -292,12 +443,19 @@ def _run_latency() -> dict:
         client.search(query_vec, filters={"user_id": "bench"}, top_k=5)
     avg = (time.perf_counter() - start) * 1000 / iters
     return {
-        "name": "检索响应时间",
+        "name": "检索响应时间（组件级基线）",
+        "mode": "baseline",
+        "status": "ran",
         "avg_ms": round(avg, 3),
         "budget_ms": LATENCY_BUDGET_MS,
-        "passed": avg <= LATENCY_BUDGET_MS,
+        "latency_passed": avg <= LATENCY_BUDGET_MS,
         "iterations": iters,
-        "note": "组件级基线（内存向量）；真机 P95 见 _run_retrieval_recall(real=True)",
+        "backend": "InMemoryMilvusClient（进程内）",
+        "embedding": "deterministic-crc32-bigram",
+        "embedding_dim": 48,
+        "fallback": False,
+        "method": "组件级基线平均延迟；真机 P50/P95 见 --real 模式的真机检索指标",
+        "note": "历史版本用 passed 字段表达延迟达标，现统一为 latency_passed（Issue #4）",
     }
 
 
@@ -317,11 +475,17 @@ def _run_conflict_correctness() -> dict:
     acc = correct / len(cases)
     return {
         "name": "冲突处理正确率",
+        "mode": "baseline",
+        "status": "ran",
         "value": round(acc, 4),
         "target": CONFLICT_CORRECTNESS_TARGET,
         "passed": acc >= CONFLICT_CORRECTNESS_TARGET,
         "sample_size": len(cases),
         "detail": f"{correct}/{len(cases)}",
+        "backend": "ConflictResolver（规则，与存储后端无关）",
+        "embedding": "n/a（规则判定，不涉及向量）",
+        "fallback": False,
+        "method": "组件级口径：ConflictResolver 对 (old, new, expected) 用例判定；真机与基线一致",
     }
 
 
@@ -330,9 +494,40 @@ def _run_conflict_correctness() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _run_real_retrieval() -> dict | None:
-    """在配置的后端（真机应为 kylin）上播种并检索，产出真实召回/延迟。"""
+def _real_backend_info(dim: int | None) -> dict:
+    """探测 --real 实际使用的后端与 embedding 信息，用于如实上报。"""
+    from src.embedding.embedding_interface import get_shared_embedding_backend
+    from src.knowledge.memory_service.config import (
+        get_embedding_backend,
+        get_vector_dim,
+    )
+
+    backend_name = get_embedding_backend()
     try:
+        provider = get_shared_embedding_backend()
+    except Exception:  # noqa: BLE001 - 探测失败不阻断，交给缺测条目
+        provider = None
+    model_name = getattr(provider, "_model_name", None) if provider is not None else None
+    fallback = bool(getattr(provider, "_fallback_mode", False)) if provider is not None else None
+    if dim is None:
+        dim = int(getattr(provider, "dimension", get_vector_dim()))
+    return {
+        "backend": f"memory_service 原生接口（storage={backend_name}，真机应为 kylin）",
+        "embedding": model_name or backend_name,
+        "embedding_dim": int(dim) if dim is not None else None,
+        "fallback": fallback,
+    }
+
+
+def _run_real_retrieval() -> dict:
+    """在配置的后端（真机应为 kylin）上播种并检索，产出真实召回/延迟。
+
+    任何导入失败、依赖缺失或后端不可达都返回 status=unavailable 的缺测
+    条目（不崩溃、不静默丢弃、不计为通过；TASK-005 / Issue #4）。
+    """
+    name = "知识检索召回率(真机)"
+    try:
+        from src.knowledge.memory_service.embedding_client import EmbeddingClient
         from src.knowledge.memory_service.memory_schema import (
             CreateMemoryRequest,
             MemoryEntry,
@@ -343,50 +538,62 @@ def _run_real_retrieval() -> dict | None:
         )
         from src.knowledge.memory_service.create_memory import create_memory
         from src.knowledge.memory_service.query_memory import query_memory
-    except Exception as exc:  # pragma: no cover - 真机依赖
-        print(f"[warn] --real 模式依赖不可用，跳过真机检索：{exc}")
-        return None
+    except Exception as exc:  # noqa: BLE001 - 真机依赖缺失
+        return _unavailable_metric(name, exc)
 
     documents, relevant = _retrieval_corpus()
     user_id = "bench_real"
-    for idx, doc in enumerate(documents):
-        entry = MemoryEntry(
-            content=doc,
-            memory_type=MemoryTypeTag.TOOL_CALL,
-            task_type=TaskType.CODING,
-            source=MemorySource.MANUAL,
-            user_id=user_id,
-            confidence=0.9,
-        )
-        create_memory(CreateMemoryRequest(entry=entry))
+    try:
+        # 显式创建统一 embedding 入口并播种/检索复用；编码一次以记录真实维度
+        embedding = EmbeddingClient()
+        dim = len(embedding.embed(documents[0]))
+        for idx, doc in enumerate(documents):
+            entry = MemoryEntry(
+                content=doc,
+                memory_type=MemoryTypeTag.TOOL_CALL,
+                task_type=TaskType.CODING,
+                source=MemorySource.MANUAL,
+                user_id=user_id,
+                confidence=0.9,
+            )
+            create_memory(CreateMemoryRequest(entry=entry), embedding=embedding)
 
-    hits_at5 = 0
-    hits_at1 = 0
-    latencies: list[float] = []
-    for query, relevant_content in relevant:
-        resp = query_memory(
-            QueryMemoryRequest(user_id=user_id, query=query, top_k=5),
-        )
-        latencies.append(resp.latency_ms)
-        contents = [it.get("content", "") for it in resp.items]
-        if any(relevant_content in c for c in contents):
-            hits_at5 += 1
-        if contents and relevant_content in contents[0]:
-            hits_at1 += 1
+        hits_at5 = 0
+        hits_at1 = 0
+        latencies: list[float] = []
+        for query, relevant_content in relevant:
+            resp = query_memory(
+                QueryMemoryRequest(user_id=user_id, query=query, top_k=5),
+                embedding=embedding,
+            )
+            latencies.append(resp.latency_ms)
+            contents = [it.get("content", "") for it in resp.items]
+            if any(relevant_content in c for c in contents):
+                hits_at5 += 1
+            if contents and relevant_content in contents[0]:
+                hits_at1 += 1
+    except Exception as exc:  # noqa: BLE001 - 后端不可达 / 连接失败 → 显式缺测
+        return _unavailable_metric(name, exc)
+
     n = len(relevant)
     recall = hits_at5 / n
+    info = _real_backend_info(dim)
     return {
-        "name": "知识检索召回率(真机)",
+        "name": name,
+        "mode": "real",
+        "status": "ran",
         "recall_at_5": round(recall, 4),
         "hit_at_1": round(hits_at1 / n, 4),
         "target": RETRIEVAL_RECALL_TARGET,
         "passed": recall >= RETRIEVAL_RECALL_TARGET,
         "sample_size": n,
+        **info,
+        "method": "真机口径：create_memory/query_memory 原生接口 + 配置后端真实编码；"
+                  "fallback=True 时数字仅代表降级链路，不代表语义检索质量",
         "latency_p50_ms": round(_percentile(latencies, 50), 3),
         "latency_p95_ms": round(_percentile(latencies, 95), 3),
         "latency_budget_ms": LATENCY_BUDGET_MS,
         "latency_passed": _percentile(latencies, 95) <= LATENCY_BUDGET_MS,
-        "mode": "real",
     }
 
 
@@ -396,21 +603,28 @@ def _run_real_retrieval() -> dict | None:
 
 
 def _build_report(real: bool) -> dict:
+    environment = _resolve_environment()
     metrics = [
-        _run_preference_accuracy(),
-        _run_retrieval_recall(real=real),
+        _run_preference_classification(),
+        _run_preference_extraction(),
+        _run_retrieval_recall(),
         _run_latency(),
         _run_conflict_correctness(),
     ]
+    real_status = "not_requested"
     if real:
-        real_retrieval = _run_real_retrieval()
-        if real_retrieval:
-            metrics.append(real_retrieval)
+        real_metric = _run_real_retrieval()
+        metrics.append(real_metric)
+        real_status = str(real_metric.get("status", "ran"))
     return {
         "project": "麒忆智脑 / MOKOA",
         "requirement": "XA-202612 (7) 量化评测",
         "generated_at": datetime.now().isoformat(timespec="seconds"),
+        # mode 为请求模式；真机指标是否真正运行见 real_backend_status 与各指标的
+        # mode/status 字段（TASK-005：基线结果不再冒充 real，缺测显式记录）。
         "mode": "real" if real else "baseline",
+        "real_backend_status": real_status,
+        "environment": environment,
         "metrics": metrics,
         "thresholds": {
             "preference_accuracy": PREFERENCE_ACCURACY_TARGET,
@@ -422,14 +636,28 @@ def _build_report(real: bool) -> dict:
 
 
 def _render_summary(report: dict) -> str:
-    lines = ["# 量化评测结果摘要", "", f"- 生成时间：{report['generated_at']}", f"- 模式：{report['mode']}", ""]
+    lines = [
+        "# 量化评测结果摘要",
+        "",
+        f"- 生成时间：{report['generated_at']}",
+        f"- 模式：{report['mode']}（真机指标状态：{report.get('real_backend_status', 'n/a')}）",
+        f"- 环境：embedding={report['environment']['embedding_backend']}"
+        f" / dim={report['environment']['embedding_dim']}"
+        f" / memory={report['environment']['memory_backend']}",
+        f"- 提交：{report['environment'].get('git_commit') or '未知（无 git）'}",
+        "",
+    ]
     for m in report["metrics"]:
         name = m.get("name")
-        passed = m.get("passed")
-        mark = "[PASS]" if passed else "[FAIL]"
-        if "recall_at_5" in m:
+        mark = "[PASS]" if _overall_passed([m]) else "[FAIL]"
+        if m.get("status") == "unavailable":
+            lines.append(f"- **{name}**：缺测（unavailable）→ {mark}（{m.get('reason','')}）")
+        elif "recall_at_5" in m:
             lines.append(f"- **{name}**：Recall@5={m['recall_at_5']} / Hit@1={m['hit_at_1']} / "
                          f"P95={m.get('latency_p95_ms')}ms / 目标≥{m['target']} → {mark}")
+        elif "precision" in m:
+            lines.append(f"- **{name}**：P={m['precision']} / R={m['recall']} / F1={m['f1']} / "
+                         f"完整匹配={m.get('sample_exact_match_rate')} / 目标≥{m['target']} → {mark}")
         elif "avg_ms" in m:
             lines.append(f"- **{name}**：avg={m['avg_ms']}ms / 预算≤{m['budget_ms']}ms → {mark}")
         else:
@@ -453,8 +681,7 @@ def main() -> int:
 
     print(_render_summary(report))
     print(f"\n报告已写入：\n  {json_path}\n  {md_path}")
-    all_passed = all(m.get("passed") for m in report["metrics"])
-    return 0 if all_passed else 1
+    return 0 if _overall_passed(report["metrics"]) else 1
 
 
 if __name__ == "__main__":
