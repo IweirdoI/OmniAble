@@ -24,7 +24,7 @@
 | TASK-016 | [P1] 按设计完善 Agent 路由、执行预算与结果核验 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/16 | 20261122-151543 |
 | TASK-017 | [P1] 集成 Agent 文件工作区、变更预览与网页侧栏 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/19 | 20261122-151544 |
 | TASK-018 | [P1] Windows Agent 本地会话列表与重启恢复 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/23 | 20261122-185522 |
-| TASK-019 | [P1] Agent 上下文预算与长会话截断 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/24 | 20261122-185523 |
+| TASK-019 | [P1] Agent 上下文预算与长会话截断 | 待审查 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/24 | 20261122-192832 |
 | TASK-020 | [P1] Agent 文件变更的逐次用户确认 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/25 | 20261122-185525 |
 
 <!-- clerk:end tasks -->

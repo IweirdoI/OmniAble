@@ -660,6 +660,8 @@ class MemoryOrchestrator:
         self,
         user_id: str,
         scene_id: str | None = None,
+        *,
+        global_only: bool = False,
     ) -> dict:
         """从权威长期存储构建画像，避免候选索引领先于实际入库状态。
 
@@ -709,15 +711,23 @@ class MemoryOrchestrator:
 
         by_key: dict[str, MemoryItem] = {}
         priorities: dict[str, int] = {}
+
+        def profile_scope(item: MemoryItem) -> str:
+            inferred = "global" if self._preference_scene_scope(item.scene_id, item.metadata) == "global" else "scene"
+            return str(self._metadata_field(item.metadata, "scope") or inferred)
+
         for item in items:
             key = str(item.metadata.get("preference_key") or "").strip()
             if not key:
                 continue
-            scope = str(item.metadata.get("scope") or ("scene" if item.scene_id else "global"))
+            scope = profile_scope(item)
+            if global_only and scope == "scene":
+                continue
             if scene_id is not None and scope == "scene" and item.scene_id != scene_id:
                 continue
             priority = 2 if scene_id is not None and scope == "scene" else 1
-            if priority >= priorities.get(key, 0):
+            previous = by_key.get(key)
+            if previous is None or (priority, item.version) >= (priorities[key], previous.version):
                 by_key[key] = item
                 priorities[key] = priority
 
@@ -727,7 +737,7 @@ class MemoryOrchestrator:
             confidence = float(metadata.get("confidence", 0.0))
             observations = int(metadata.get("n_observations", 1) or 1)
             value = str(metadata.get("preference_value", ""))
-            scope = str(metadata.get("scope") or ("scene" if item.scene_id else "global"))
+            scope = profile_scope(item)
             rank_score = round(confidence * (1.0 + 0.05 * min(observations, 20)), 4)
             features.append(
                 {

@@ -17,6 +17,7 @@ from src.common.models import MemoryType, RetrievalQuery
 from src.core.factory import create_orchestrator
 from src.core.orchestrator import MemoryOrchestrator, ProcessInputResult
 from src.knowledge.memory_service.memory_schema import MemoryEntry
+from src.agent.context import ContextLimitExceeded
 from src.agent.runtime import RunTimedOut, get_stream_slots
 from src.agent.service import ChatRequest, MemoryAgent, ModelUnavailable
 from src.knowledge.memory_service.milvus_client import MemoryBackendUnavailable
@@ -75,6 +76,10 @@ def agent_chat(req: ChatRequest) -> dict[str, Any]:
     agent = MemoryAgent(orchestrator)
     try:
         return agent.chat(req)
+    except ContextLimitExceeded as exc:
+        return JSONResponse(status_code=422, content={
+            "detail": str(exc), "workflow": agent._workflow("failed", "context_budget"),
+        })
     except ModelUnavailable as exc:
         # Keep the legacy string detail while adding structured run state.
         content = {"detail": str(exc)}

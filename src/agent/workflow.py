@@ -49,6 +49,10 @@ class WorkflowBudget:
     heartbeat_seconds: float = 15.0     # SSE 心跳间隔（注释行，不进模型内容）
     queue_put_patience_seconds: float = 30.0   # 队列满时生产者等待消费者的耐心窗口
 
+    context_window_tokens: int = 32768
+    memory_context_tokens: int = 4500
+    tool_result_tokens: int = 4200
+
     def remaining_timeout(self, remaining_seconds: float, own_timeout: float) -> float:
         """HTTP / 抓取 / 子进程等调用的超时 = 自身上限与请求剩余时间的较小值。"""
         return max(0.05, min(own_timeout, remaining_seconds))
@@ -99,6 +103,9 @@ def load_workflow_budget() -> WorkflowBudget:
         heartbeat_seconds=_require_float(section, "heartbeat_seconds", 15.0, 1.0, 120.0),
         queue_put_patience_seconds=_require_float(
             section, "queue_put_patience_seconds", 30.0, 1.0, 300.0),
+        context_window_tokens=_require_int(section, "context_window_tokens", 32768, 4096, 1048576),
+        memory_context_tokens=_require_int(section, "memory_context_tokens", 4500, 256, 65536),
+        tool_result_tokens=_require_int(section, "tool_result_tokens", 4200, 256, 65536),
     )
 
 

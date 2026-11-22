@@ -44,6 +44,16 @@ test('partial output followed by error keeps text and exposes failure', async ()
   assert.equal(msg.status, 'failed')
 })
 
+test('budget warnings remain visible on a successful final response', async () => {
+  const msg = message()
+  const warning = '部分较早的对话未发送给模型。'
+  await streamChat({}, event => applyChatEvent(msg, event), { fetcher: response(
+    frame({ type: 'done', answer: '最终答案', context_warnings: [warning] })) })
+  assert.equal(msg.status, 'completed')
+  assert.equal(msg.content, '最终答案')
+  assert.deepEqual(msg.contextWarnings, [warning])
+})
+
 test('same-name tools match their actual call IDs', () => {
   const msg = message()
   for (const id of ['a', 'b']) applyChatEvent(msg, { type: 'tool_start', id, name: 'read_file' })

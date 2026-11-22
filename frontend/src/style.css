@@ -226,4 +226,5 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 
 .run-status { color: #bfcac0; font-size: 13px; margin: 8px 0; }
 .run-failure { color: #efb3b3; font-size: 14px; white-space: pre-wrap; }
+.context-warnings { color: #e2c88a; font-size: 13px; padding-left: 18px; }
 .workflow-phases { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-left: 18px; color: #a6aaa3; font-size: 12px; }

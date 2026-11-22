@@ -158,6 +158,9 @@ agent:
   # 执行预算与生命周期（src/agent/workflow.py / runtime.py，设计见 docs/AGENT_WORKFLOW.md）。
   # 资源保护初值，不是性能验收成绩；客户端请求不能提高额度，非法数值在启动时明确报错。
   workflow:
+    context_window_tokens: 32768     # 模型上下文窗口；含预留的 2000 输出 token
+    memory_context_tokens: 4500     # 参考记忆子预算，按 UTF-8 字节与协议余量估算
+    tool_result_tokens: 4200        # 单条工具正文上限，仍受整次模型请求预算约束
     max_tool_rounds: 2               # 工具请求轮次；第一版服务端上限 4
     max_calls_per_round: 4           # 单轮工具调用数上限
     max_total_tool_calls: 8          # 整个请求累计工具调用数

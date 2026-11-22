@@ -101,8 +101,10 @@ export function applyChatEvent(message, event) {
     message.status = event.workflow?.status || (event.type === 'error' ? 'failed' : 'completed')
     message.workflow = event.workflow
     message.memoryWrite = event.memory_write?.status
-    if (event.type === 'done') message.content = event.answer ?? message.content
-    else message.failure = event.message || '智能体执行失败'
+    if (event.type === 'done') {
+      message.content = event.answer ?? message.content
+      message.contextWarnings = event.context_warnings || []
+    } else message.failure = event.message || '智能体执行失败'
     for (const step of message.steps) if (step.status === 'running') step.status = 'interrupted'
     for (const phase of message.phases || []) if (phase.phase !== 'end') phase.phase = 'interrupted'
   }

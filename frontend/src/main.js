@@ -499,6 +499,9 @@ createApp({
                 <div class="bubble" @click="openChatLink" v-html="message.html || renderMarkdown(message.content)"></div>
                 <p class="run-status" data-testid="run-status" v-if="message.status" role="status">{{ runLabels[message.status] || message.status }}<span v-if="message.status === 'running' && message.stage"> · {{ stageLabels[message.stage] || message.stage }}</span></p>
                 <p class="run-failure" data-testid="run-failure" v-if="message.failure" role="alert">{{ message.failure }}</p>
+                <ul class="context-warnings" v-if="message.contextWarnings?.length" aria-label="上下文提示">
+                  <li v-for="warning in message.contextWarnings" :key="warning">{{ warning }}</li>
+                </ul>
                 <p class="run-status" v-if="message.memoryWrite">本轮记忆：{{ ({ accepted: '已接收，按记忆策略处理', rejected: '未通过保存策略', disabled: '未启用保存', skipped: '已跳过保存', failed: '保存失败', unknown: '结果待同步确认' })[message.memoryWrite] || message.memoryWrite }}</p>
                 <ol class="workflow-phases" v-if="message.phases && message.phases.length"><li v-for="phase in message.phases" :key="phase.name">{{ stageLabels[phase.name] || phase.name }} · {{ phase.phase === 'end' ? '完成' : phase.phase === 'interrupted' ? '已中断' : '处理中' }}</li></ol>
                 <ul v-if="message.workflow?.artifacts?.length"><li v-for="artifact in message.workflow.artifacts" :key="artifact.path"><button class="artifact-link" @click="openWorkspace(artifact.deleted ? 'changes' : 'file', artifact.path)">{{ artifact.deleted ? '已删除 · 查看变更' : '打开文件' }}：{{ artifact.path }}</button></li></ul>

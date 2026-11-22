@@ -101,3 +101,11 @@ SSE 保留旧事件，新增 run_started、stage、run_id、seq；终态唯一�
 停止按钮中断连接并显示“已请求停止”。取消前尚未开始的记忆写入不会启动；已经开始的操作可能完成，需同步确认，不能声称已撤销。同步调用无法强制安全杀线程，未退出的worker继续占并发额度，直至实际退出；事件循环不join等待该线程。无服务端聊天checkpoint或任务数据库。
 
 工作流回归：后端增加 tests/test_agent_workflow.py；前端执行 node --test tests/chat-stream.test.js tests/ingestion.test.js 及 npm run build。浏览器手动验证可启动 frontend/tests/serve_workflow_api.py，在frontend终端设VITE_API_TARGET=http://127.0.0.1:18088后运行Vite。这是隔离存储、memory/hash和替身模型夹具，提供“读取”“失败”“慢速”场景，不访问外部模型服务。
+
+## 模型上下文预算
+
+[TASK-019](https://github.com/IweirdoI/mokoa-windows/issues/24) 在每次模型调用前统一检查最终消息和工具定义。`agent.workflow.context_window_tokens` 默认 32,768，固定预留 2,000 输出 token。输入以 UTF-8 序列化字节和协议余量保守估算。请将窗口配置为部署模型的实际限制。`memory_context_tokens` 和 `tool_result_tokens` 分别限制参考记忆和单条工具正文。
+
+优先保留当前输入、最新工具调用及结果和最近对话轮次。旧工具轮次按整组裁剪。存不下最新工具轮次时，保留已核实结果并以 `partial` 结束。当前输入本身装不下时，同步返回 422，流式返回 `error`，原因均为 `context_budget`。正常终态的 `context_warnings` 提示历史、参考记忆或工具输出有省略，前端在对应回答下显示。
+
+模型只收到本轮生效的画像条目和去重的召回片段。未选场景时仅使用全局偏好。已选场景时对应偏好覆盖同键全局值。知识片段保留记忆 ID、来源及可用的文件名，不随模型负载发送完整存储记录。界面召回证据仍由现有返回字段提供。自动摘要是否需要由长会话实测决定，当前使用确定性裁剪。
