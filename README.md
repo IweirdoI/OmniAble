@@ -6,7 +6,7 @@
 
 团队任务已接入 [Clerk 协作指南](docs/CLERK.md)，共享状态见 [团队任务状态](docs/TEAM_STATUS.md)。协作者克隆后各自安装工具，配置和记录随 Git/PR 共享。
 
-新成员先看 [协作与邀请说明](docs/COLLABORATION.md)、[贡献指南](CONTRIBUTING.md) 和 [固定团队／比赛协作协议草案](docs/TEAM_AGREEMENT.md)。采用 Issue 认领 → 分支开发 → PR 审查 → 合并到 `master` 的流程，保留 Apache 2.0，新增贡献作 DCO 来源签署。比赛署名、费用与奖金由成员另行书面确认。
+新成员先看 [协作与邀请说明](docs/COLLABORATION.md)、[贡献指南](CONTRIBUTING.md) 和 [团队协作协议](docs/TEAM_AGREEMENT.md)。采用 Issue 认领 → 分支开发 → PR 审查 → 合并到 `master` 的流程，保留 Apache 2.0，新增贡献作 DCO 来源签署。署名、费用与奖金等权益安排由受影响成员另行书面确认。
 
 下文的历史模块分工、比赛信息和进度保留为项目背景，以模块角色代替旧成员账户；本次组队成员和任务以新确认的协议及 Issue 为准。贡献记录见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
 
@@ -23,7 +23,7 @@
 
 # 麒忆智脑 — OS Agent 记忆优化系统
 
-> **挑战杯 XA-202612** | 麒麟软件有限公司 | 自研 Memory Orchestrator 为核心
+> **华为 ICT 大赛 · 创新赛道 · Agent 赛题** | 自研 Memory Orchestrator 为核心
 
 ---
 
@@ -31,13 +31,13 @@
 
 为 **银河麒麟 OS Agent** 开发一套 **多源融合偏好与知识记忆** 模块（项目名称：**麒忆智脑**）。
 
-**不是**堆叠 Mem0 / MemoryOS / Cognee 等开源框架，**而是**自研 **Memory Orchestrator（记忆编排核心）**，参考 3 个开源项目的设计思路，实现比赛要求的 7 项功能。
+**不是**堆叠 Mem0 / MemoryOS / Cognee 等开源框架，**而是**自研 **Memory Orchestrator（记忆编排核心）**，参考 3 个开源项目的设计思路，实现 7 项核心能力。
 
 ---
 
-## 二、与比赛题目对照
+## 二、能力覆盖清单
 
-| 比赛要求 | 我们的实现 | 目录 | 协作模块 | 状态 |
+| 能力项 | 我们的实现 | 目录 | 协作模块 | 状态 |
 |----------|-----------|------|--------|------|
 | **(1) 多源接入 + 清洗 + 标准化 + 质量校验** | 四段式 ingestion 流水线（含 SQLite staging） | `src/ingestion/` | ingestion | 主链、默认脱敏、遗忘清理和手动保留期 purge 已完成；性能待验收 |
 | **(2) 偏好记忆：提取、版本化、跨场景** | preference 模块 + Orchestrator 分类 + entry_adapter | `src/preference/` | Linnea | 规则+LLM 提取已合入主线；**动态键兜底**（未知/长尾偏好不再静默丢弃，落为 `habit.custom_*` 等自由文本键）；LLM 后端无参优先本地 LM Studio；偏好 HF 数据集评测脚本已就绪；版本链/跨场景已接；真机 12/12 PASS |
@@ -47,7 +47,7 @@
 | **(6) 短/中/长期记忆流转** | layer_manager + mid_term 晋升 | `src/core/layer_manager.py` | core | 主链完成（heat 晋升、相似度去重、质量门控、`GET /stats`）；FLOW 重启持久化补测全 PASS |
 | **(7) 量化评测 + 测试报告** | tests + benchmarks | `tests/`, `benchmarks/` | testing | 4 项硬指标组件级基线已落地（`tests/test_metrics.py` + `benchmarks/run_benchmarks.py`）；真机/麒麟后端跑分待补 |
 
-**结论：没有跑题。** 架构与题目一一对应。需注意答辩时说明：
+**结论：能力与产品定位一致。** 两项关键说明：
 
 - **验收形态**：正式真机验收使用宿主机原生 FastAPI + 麒麟 Embedding SDK + 麒麟 AI 子系统向量引擎（`mokoa_kylin_sdk`，768 维，严格模式 `kylin_strict=1`），不再依赖 Milvus；Milvus 仅作兼容/可选档。开发/CI 仍可走进程内 mock 或 memory 后端。
 - **偏好 vs 知识**：Orchestrator 分类后，统一写入向量库，用 `memory_type` 字段区分（见 `memory_schema.py`）。
@@ -224,7 +224,7 @@ memory/
 
 ---
 
-## 八、性能指标（初评硬性要求）
+## 八、性能指标（硬性要求）
 
 | 指标 | 目标 | 负责人 |
 |------|------|--------|
@@ -300,7 +300,7 @@ python scripts/eval_preference_hf_dataset.py --mode fusion --semantic --refresh-
 
 ---
 
-## 十、待团队会议确认的事项
+## 十、已确认的技术决策（历史记录）
 
 - [x] **中转库**：使用ingestion负责的 SQLite staging；JSONL 由中转库按需导出（最终库为麒麟向量引擎）
 - [x] **存储后端**：验收形态确认为麒麟向量引擎（非 Milvus）；Milvus 仅兼容档

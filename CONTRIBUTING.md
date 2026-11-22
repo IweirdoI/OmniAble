@@ -2,7 +2,7 @@
 
 使用 AI Agent 的协作者，新对话先读 [AGENTS.md](AGENTS.md) 与 [Agent 开工指南](docs/AGENT_ONBOARDING.md)，再按本指南执行贡献流程。
 
-适用于 `IweirdoI/mokoa-windows` 的新贡献。README 以模块角色说明历史协作范围，不公开旧成员账户，也不自动成为新团队分工或署名排名。固定团队／比赛成员另行确认 [团队协议](docs/TEAM_AGREEMENT.md)。
+适用于 `IweirdoI/mokoa-windows` 的新贡献。README 以模块角色说明历史协作范围，不公开旧成员账户，也不自动成为新团队分工或署名排名。固定团队成员以可追溯行为确认 [团队协议](docs/TEAM_AGREEMENT.md)。
 
 ## 认领与开发
 

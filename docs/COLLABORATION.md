@@ -45,7 +45,7 @@
 协作规范：
 
 - [新版贡献指南](https://github.com/IweirdoI/mokoa-windows/blob/master/CONTRIBUTING.md)
-- [团队协议草案](https://github.com/IweirdoI/mokoa-windows/blob/master/docs/TEAM_AGREEMENT.md)
+- [团队协议](https://github.com/IweirdoI/mokoa-windows/blob/master/docs/TEAM_AGREEMENT.md)
 - [协作入口](https://github.com/IweirdoI/mokoa-windows/blob/master/docs/COLLABORATION.md)
 - [贡献记录](https://github.com/IweirdoI/mokoa-windows/blob/master/CONTRIBUTORS.md)
 - [Clerk 安装与使用](https://github.com/IweirdoI/mokoa-windows/blob/master/docs/CLERK.md)
