@@ -7,6 +7,7 @@ import { authHeaders, requestApi } from './ingestion.js'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { streamChat, applyChatEvent } from './chat-stream.js'
+import './workbench.css'
 import { createMemorySync, memoryPanels } from './memory-sync.js'
 
 // 把模型 markdown 文本安全渲染为 HTML（DOMPurify 消毒防 XSS）。流式场景下由 scheduleRender
@@ -66,18 +67,31 @@ createApp({
     const sessionKey = ref(0)
     const modelSlow = ref(false)
     const activeTab = ref('overview')
-    const dock = ref('workspace'), sidebarOpen = ref(true), sidebarWide = ref(false)
+    const dock = ref('workspace'), sidebarOpen = ref(!window.matchMedia('(max-width: 680px)').matches), sidebarWide = ref(false)
+    const menuOpen = ref(false)
+    let panelOpener = null
+    const closeMenu = async () => { menuOpen.value = false; await nextTick(); document.querySelector('.mobile-menu-button')?.focus() }
+    const openMenu = async () => { menuOpen.value = true; await nextTick(); document.querySelector('.top-actions input')?.focus() }
+    const closePanel = async () => { sidebarOpen.value = false; await nextTick(); (panelOpener?.isConnected && panelOpener.getClientRects().length ? panelOpener : document.querySelector('.mobile-menu-button') || document.querySelector('.chat-title'))?.focus() }
+    const showPanel = async (tab, opener) => {
+      panelOpener = opener || document.activeElement; menuOpen.value = false; dock.value = 'memory'; activeTab.value = tab; sidebarOpen.value = true
+      await nextTick(); document.querySelector(tab === 'forget' ? '.forget-intro h3' : '.ingestion-panel h3')?.focus()
+    }
     const workspaceTarget = ref(null), workspaceRefresh = ref(0)
     const openWorkspace = async (kind, path) => {
+      panelOpener = document.activeElement
       sidebarOpen.value = true; dock.value = 'workspace'
       workspaceTarget.value = { kind, path, at: Date.now() }
       await nextTick()
-      if (window.matchMedia('(max-width: 1180px)').matches) document.querySelector('.memory-panel')?.scrollIntoView({ behavior: 'smooth' })
+      if (window.matchMedia('(max-width: 680px)').matches) document.querySelector('.mobile-back')?.focus()
+      else if (window.matchMedia('(max-width: 1180px)').matches) document.querySelector('.memory-panel')?.scrollIntoView({ behavior: 'smooth' })
     }
     const toggleSidebar = async () => {
+      if (menuOpen.value) { panelOpener = document.querySelector('.mobile-menu-button'); menuOpen.value = false; dock.value = 'workspace' }
       sidebarOpen.value = !sidebarOpen.value
       await nextTick()
-      if (sidebarOpen.value && window.matchMedia('(max-width: 1180px)').matches) document.querySelector('.memory-panel')?.scrollIntoView({ behavior: 'smooth' })
+      if (sidebarOpen.value && window.matchMedia('(max-width: 680px)').matches) document.querySelector('.mobile-back')?.focus()
+      else if (sidebarOpen.value && window.matchMedia('(max-width: 1180px)').matches) document.querySelector('.memory-panel')?.scrollIntoView({ behavior: 'smooth' })
     }
     const openChatLink = (event) => {
       const link = event.target.closest('a[href]')
@@ -93,7 +107,7 @@ createApp({
     const useMemory = ref(true)
     const saveMemory = ref(true)
     const newChat = () => { agentHistory.value = []; messages.value = [] }
-    const messages = ref([...initialMessages])
+    const messages = ref([{ ...initialMessages[0] }])
     const memories = ref([...demoMemories])
     const panelState = reactive({})
     const stats = computed(() => live.value ? panelState.stats.data : demoStats())
@@ -118,6 +132,18 @@ createApp({
       ['memories', '记忆'],
       ['forget', '遗忘'],
     ]
+
+    const onTabKeydown = (event, index) => {
+      let next = index
+      if (event.key === 'ArrowRight') next = (index + 1) % tabs.length
+      else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length
+      else if (event.key === 'Home') next = 0
+      else if (event.key === 'End') next = tabs.length - 1
+      else return
+      event.preventDefault()
+      activeTab.value = tabs[next][0]
+      nextTick(() => document.querySelector(`[data-testid="tab-${tabs[next][0]}"]`)?.focus())
+    }
 
     const activePreferences = computed(() => {
       if (!live.value) return demoPreferences.filter((item) => item.active)
@@ -384,10 +410,7 @@ createApp({
     }
 
     const openIngestion = async () => {
-      dock.value = 'memory'; sidebarOpen.value = true
-      activeTab.value = 'ingestion'
-      await nextTick()
-      if (window.matchMedia('(max-width: 1050px)').matches) document.querySelector('.memory-panel')?.scrollIntoView({ behavior: 'smooth' })
+      await showPanel('ingestion', document.querySelector('[data-testid=open-ingestion]'))
     }
 
     const prepareForget = (item, kind = 'memory') => {
@@ -451,6 +474,13 @@ createApp({
         return
       }
       user.value = next
+      draft.value = ''
+      agentHistory.value = []
+      messages.value = [{ ...initialMessages[0] }]
+      forgetInstruction.value = ''
+      forgetResult.value = '等待遗忘指令…'
+      memories.value = []
+      events.value = []
       if (live.value) {
         clearLiveSession()
         await loadDashboard({ quiet })
@@ -471,25 +501,26 @@ createApp({
       connect({ quiet: true })
     })
 
-    return { dock, sidebarOpen, sidebarWide, workspaceTarget, workspaceRefresh, openWorkspace, openChatLink, toggleSidebar, stopMessage, runLabels, stageLabels, useMemory, saveMemory, newChat, user, userDraft, live, syncing, sending, ingesting, sessionKey, onIngestionBusy, onIngestionCompleted, modelSlow, activeTab, draft, messages, memories, preferences, stats, profile, latency, memoryPanels, panelState, panelLabels, failedPanel, events, forgetInstruction, forgetResult, toast, chatScroll, tabs, activePreferences, statusText, connect, loadDashboard, commitUser, onUserKeydown, sendMessage, handleComposerKeydown, openIngestion, usePrompt, prepareForget, forget, renderMarkdown }
+    return { onTabKeydown, menuOpen, closeMenu, openMenu, closePanel, showPanel, dock, sidebarOpen, sidebarWide, workspaceTarget, workspaceRefresh, openWorkspace, openChatLink, toggleSidebar, stopMessage, runLabels, stageLabels, useMemory, saveMemory, newChat, user, userDraft, live, syncing, sending, ingesting, sessionKey, onIngestionBusy, onIngestionCompleted, modelSlow, activeTab, draft, messages, memories, preferences, stats, profile, latency, memoryPanels, panelState, panelLabels, failedPanel, events, forgetInstruction, forgetResult, toast, chatScroll, tabs, activePreferences, statusText, connect, loadDashboard, commitUser, onUserKeydown, sendMessage, handleComposerKeydown, openIngestion, usePrompt, prepareForget, forget, renderMarkdown }
   },
   template: `
     <div class="app-shell">
       <header class="topbar">
-        <div class="brand-mark"><span>◇</span><div><b>麒忆智脑</b><small>OS Agent Memory</small></div></div>
-        <div class="top-actions">
+        <div class="brand-mark"><span>◇</span><div><b>MOKOA</b><small>你的记忆工作台</small></div></div>
+        <span class="mobile-status" role="status">{{ statusText }}</span><button class="mobile-menu-button" type="button" @click="menuOpen ? closeMenu() : openMenu()" :aria-expanded="menuOpen" aria-controls="workspace-menu">菜单</button>
+        <div id="workspace-menu" class="top-actions" :class="{ 'menu-open': menuOpen }" @keydown.esc.stop="closeMenu">
           <button class="sidebar-toggle" @click="toggleSidebar" :aria-expanded="sidebarOpen">{{ sidebarOpen ? '收起侧栏' : '打开工作区' }}</button>
           <label>用户 <input v-model.trim="userDraft" data-testid="user-input" aria-label="用户 ID" title="改完后按回车或点「同步」再切换用户" @keydown="onUserKeydown" @blur="commitUser({ quiet: true })" /></label>
+          <button class="mobile-menu-action" @click="showPanel('ingestion', $event.currentTarget)">接入</button><button class="mobile-menu-action" @click="showPanel('forget', $event.currentTarget)">遗忘</button><button class="mobile-menu-action" @click="closeMenu">返回聊天</button>
           <button class="sync-button" data-testid="sync-button" :disabled="syncing || ingesting || sending" @click="commitUser()">{{ syncing ? '同步中…' : '↻ 同步' }}</button>
           <button class="connection-button" data-testid="connection-button" :class="{ live }" :disabled="sending || syncing || ingesting" @click="connect()"><i></i>{{ statusText }}</button>
         </div>
       </header>
 
-      <main class="dual-layout" :class="{ 'sidebar-hidden': !sidebarOpen, 'sidebar-wide': sidebarOpen && sidebarWide }">
+      <main class="dual-layout" :class="{ 'sidebar-hidden': !sidebarOpen, 'sidebar-wide': sidebarOpen && sidebarWide, 'mobile-panel-open': sidebarOpen }">
         <section class="chat-panel">
           <div class="panel-heading">
-            <div><span class="eyebrow">MEMORY ASSISTANT</span><h1>和麒忆助理对话</h1><p>对话会参与记忆召回，并在右侧实时形成偏好与记忆记录。</p></div>
-            <div class="assistant-avatar">麒</div>
+            <div><h1 class="chat-title" tabindex="-1">对话</h1><p>与助理交流，或打开工作区查看记忆和文件。</p></div>
           </div>
           <div class="chat-stream" ref="chatScroll">
             <div class="message-row" v-for="message in messages" :key="message.id" :class="message.role">
@@ -527,11 +558,6 @@ createApp({
             <label><input type="checkbox" v-model="saveMemory" :disabled="sending" /> 保存本轮内容</label>
             <button @click="newChat" :disabled="sending">新对话</button>
           </div>
-          <div class="prompt-chips">
-            <button @click="usePrompt('根据我的偏好，给出一个 Python 项目搭建方案')">项目搭建建议</button>
-            <button @click="usePrompt('你记得我的哪些使用习惯？')">查看我的习惯</button>
-            <button @click="usePrompt('以后回答请更加简洁')">新增回答偏好</button>
-          </div>
           <form class="chat-composer" @submit.prevent="sendMessage">
             <textarea v-model="draft" data-testid="chat-input" @keydown="handleComposerKeydown" placeholder="输入问题，或告诉我需要记住的内容…" aria-label="对话输入"></textarea>
             <div>
@@ -545,25 +571,26 @@ createApp({
           </form>
         </section>
 
-        <aside class="memory-panel" v-show="sidebarOpen">
+        <aside class="memory-panel" v-show="sidebarOpen" @keydown.esc="closePanel">
+          <button class="mobile-back" @click="closePanel">← 返回聊天</button>
           <nav class="dock-tabs" aria-label="侧栏导航"><button :class="{active: dock === 'workspace'}" @click="dock = 'workspace'">▤ 工作区</button><button :class="{active: dock === 'memory'}" @click="dock = 'memory'">◇ 记忆</button><button class="dock-expand" @click="sidebarWide = !sidebarWide" :aria-label="sidebarWide ? '还原侧栏宽度' : '扩大侧栏'">{{ sidebarWide ? '↙' : '↗' }}</button></nav>
           <WorkspacePanel v-show="dock === 'workspace'" :visible="sidebarOpen && dock === 'workspace'" :target="workspaceTarget" :refresh-key="workspaceRefresh" />
           <div class="memory-shell" v-show="dock === 'memory'">
           <div class="memory-header">
-            <div><span class="eyebrow">LIVE MEMORY</span><h2>实时记忆面板</h2></div>
+            <div><span class="eyebrow">LIVE MEMORY</span><h2 tabindex="-1">实时记忆面板</h2></div>
             <div class="live-state"><i :class="{ live }"></i><span>{{ live ? 'API 已连接' : '演示模式' }}</span></div>
           </div>
           <ul v-if="live" class="memory-sync-status" aria-label="记忆数据同步状态">
             <li v-for="[key, label] in memoryPanels" :key="key" :data-testid="'sync-' + key">
               <span aria-live="polite">{{ label }}：{{ panelLabels[panelState[key].status] }}
-                <small v-if="panelState[key].updatedAt">· 上次成功 {{ panelState[key].updatedAt }}</small>
+                <small>· {{ panelState[key].updatedAt ? '上次成功 ' + panelState[key].updatedAt : '尚未成功同步' }}</small>
               </span>
               <button v-if="failedPanel(key)" :disabled="sending || syncing || ingesting"
                 :aria-label="'重试' + label" @click="loadDashboard({ keys: [key] })">重试</button>
             </li>
           </ul>
-          <nav class="memory-tabs" aria-label="记忆面板导航">
-            <button v-for="tab in tabs" :key="tab[0]" :data-testid="'tab-' + tab[0]" :class="{ active: activeTab === tab[0] }" @click="activeTab = tab[0]">{{ tab[1] }}</button>
+          <nav class="memory-tabs" role="tablist" aria-label="记忆面板导航">
+            <button v-for="(tab, index) in tabs" :key="tab[0]" role="tab" :data-testid="'tab-' + tab[0]" :class="{ active: activeTab === tab[0] }" :aria-selected="activeTab === tab[0]" :tabindex="activeTab === tab[0] ? 0 : -1" @keydown="onTabKeydown($event, index)" @click="activeTab = tab[0]">{{ tab[1] }}</button>
           </nav>
           <div class="memory-content">
             <IngestionPanel v-show="activeTab === 'ingestion'" :key="sessionKey" :user="user" :live="live" :blocked="sending || syncing" @busy="onIngestionBusy" @completed="onIngestionCompleted" />
@@ -576,19 +603,19 @@ createApp({
               <section class="side-section"><div class="section-title"><h3>最近活动</h3><span>自动刷新</span></div><div class="event-item" v-for="event in events" :key="event.id"><i :class="event.type">{{ event.type === 'forget' ? '⌫' : event.type === 'preference' ? '◌' : event.type === 'error' ? '!' : '◇' }}</i><span><b>{{ event.title }}</b><small>{{ event.detail }}</small></span><time>{{ event.time }}</time></div></section>
             </template>
             <template v-else-if="activeTab === 'preferences'">
-              <div class="section-title sticky-title"><h3>当前生效偏好</h3><span v-if="!live || profile">{{ activePreferences.length }} 项</span></div><p v-if="profile?.truncated">当前画像达到读取上限，共有 {{ profile.n_latest_available }} 条最新偏好记录。</p><div class="empty-state" v-if="!activePreferences.length">{{ live && !profile ? '暂未取得当前画像' : '当前用户还没有生效偏好' }}</div><article class="preference-card" data-testid="preference-card" v-for="item in activePreferences" :key="item.id || item.key"><div><code>{{ item.key }}</code><span>v{{ item.version }}</span></div><p>{{ item.value }}</p><footer><small>{{ item.scene }} · 置信度 {{ Math.round((item.confidence || 0) * 100) }}%</small><button @click="prepareForget(item, 'preference')">准备遗忘</button></footer></article><div class="section-title history-title"><h3>版本历史</h3><span v-if="preferences">{{ preferences.length }} 条</span></div><div class="empty-state" v-if="!preferences">暂未取得偏好历史</div><div class="history-item" v-for="item in preferences" :key="(item.id || item.key) + '-' + item.version"><b>v{{ item.version }}</b><span><strong>{{ item.key }}</strong><small>{{ item.active ? '当前版本' : '已被替换' }} · {{ item.value }}</small></span></div>
+              <div class="section-title sticky-title"><h3>{{ live && failedPanel('profile') ? '偏好（可能已过期）' : '当前生效偏好' }}</h3><span v-if="!live || profile">{{ activePreferences.length }} 项</span></div><p v-if="profile?.truncated">当前画像达到读取上限，共有 {{ profile.n_latest_available }} 条最新偏好记录。</p><div class="empty-state" v-if="!activePreferences.length">{{ live && !profile ? '暂未取得当前画像' : '当前用户还没有生效偏好' }}</div><article class="preference-card" data-testid="preference-card" v-for="item in activePreferences" :key="item.id || item.key"><div><code>{{ item.key }}</code><span>v{{ item.version }}</span></div><p>{{ item.value }}</p><footer><small>{{ item.scene }} · 置信度 {{ Math.round((item.confidence || 0) * 100) }}%</small><button @click="prepareForget(item, 'preference')">准备遗忘</button></footer></article><div class="section-title history-title"><h3>版本历史</h3><span v-if="preferences">{{ preferences.length }} 条</span></div><div class="empty-state" v-if="!preferences">暂未取得偏好历史</div><div class="history-item" v-for="item in preferences" :key="(item.id || item.key) + '-' + item.version"><b>v{{ item.version }}</b><span><strong>{{ item.key }}</strong><small>{{ live && failedPanel('history') ? '状态未确认' : item.active ? '当前版本' : '已被替换' }} · {{ item.value }}</small></span></div>
             </template>
             <template v-else-if="activeTab === 'memories'">
               <div class="section-title sticky-title"><h3>本轮召回记忆</h3><span>{{ latency }} · {{ memories.length }} 条</span></div><div class="empty-state" v-if="!memories.length">发送一条消息后，这里会显示真实召回结果</div><article class="memory-card" data-testid="memory-card" v-for="item in memories" :key="item.id"><div><code>{{ item.type }}</code><span>{{ item.layer }}</span><small>{{ item.id }}</small></div><p>{{ item.content }}</p><footer><span>{{ item.scene || '通用场景' }} · {{ item.source || '未知来源' }}</span><button @click="prepareForget(item)">准备遗忘</button></footer></article>
             </template>
             <template v-else-if="activeTab === 'forget'">
-              <div class="forget-intro"><span>SECURE FORGETTING</span><h3>安全遗忘</h3><p>用自然语言描述需要删除的记忆。只有后端真实删除成功后，右侧数据才会更新。</p></div><textarea class="forget-input" data-testid="forget-input" v-model="forgetInstruction" placeholder="例如：忘掉关于 Java 的偏好"></textarea><button class="danger-button" data-testid="forget-submit" :disabled="syncing || ingesting || sending" @click="forget">{{ syncing ? '处理中…' : '执行遗忘' }}</button><pre class="forget-result" data-testid="forget-result">{{ forgetResult }}</pre><div class="safety-note"><b>隐私提示</b><span>敏感信息由后端安全模块解析和清理；前端不会伪造成功结果。</span></div>
+              <div class="forget-intro"><span>SECURE FORGETTING</span><h3 tabindex="-1">安全遗忘</h3><p>用自然语言描述需要删除的记忆。只有后端真实删除成功后，右侧数据才会更新。</p></div><label for="forget-instruction">需要遗忘的内容</label><textarea id="forget-instruction" class="forget-input" data-testid="forget-input" v-model="forgetInstruction" placeholder="例如：忘掉关于 Java 的偏好"></textarea><button class="danger-button" data-testid="forget-submit" :disabled="syncing || ingesting || sending" @click="forget">{{ syncing ? '处理中…' : '执行遗忘' }}</button><pre class="forget-result" data-testid="forget-result">{{ forgetResult }}</pre><div class="safety-note"><b>隐私提示</b><span>敏感信息由后端安全模块解析和清理；前端不会伪造成功结果。</span></div>
             </template>
           </div>
           </div>
         </aside>
       </main>
-      <Transition><div class="toast" v-if="toast">{{ toast }}</div></Transition>
+      <Transition><div class="toast" role="status" v-if="toast">{{ toast }}</div></Transition>
     </div>
   `,
 }).mount('#app')

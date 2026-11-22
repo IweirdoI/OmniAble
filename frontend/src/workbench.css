@@ -1,0 +1,59 @@
+/* Workspace layout and accessible controls */
+:root { color: #f1f3f7; background: #101114; }
+body, .app-shell { background: #101114; }
+.topbar { background: #181a20; border-color: #343943; }
+.brand-mark > span { background: #8ab4f8; color: #101a2a; border-radius: 10px; }
+.dual-layout { grid-template-columns: minmax(0, 1.5fr) minmax(340px, .8fr); }
+.chat-panel { grid-template-rows: auto minmax(0, 1fr) auto auto; padding: 20px clamp(16px, 4vw, 64px); border-color: #343943; }
+.panel-heading h1 { font-size: 20px; }
+.panel-heading p { font-size: 14px; color: #b1b8c5; }
+.memory-panel, .workspace { background: #181a20; }
+.dock-tabs { background: #181a20; border-color: #343943; }
+.dock-tabs .active { background: #29354a; border-color: #526a90; color: #eaf2ff; }
+.message-wrap { max-width: min(88%, 760px); min-width: 0; }
+.bubble { overflow-wrap: anywhere; background: transparent; border-color: transparent; box-shadow: none; padding-left: 0; }
+.message-row.user .bubble { background: #29354a; border-color: #435a78; padding-left: 16px; }
+.bubble pre, .bubble table { max-width: 100%; overflow: auto; }
+.bubble table { display: block; }
+.chat-composer { background: #1c2029; border-color: #414958; }
+.chat-composer:focus-within { border-color: #8ab4f8; }
+.chat-composer button:not(.file-button) { background: #8ab4f8; color: #101a2a; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid #8ab4f8 !important; outline-offset: 2px; }
+.preference-card code, .memory-card code, .preference-card p, .memory-card p, .history-item { overflow-wrap: anywhere; word-break: break-word; }
+.forget-result { overflow: auto; overflow-wrap: anywhere; }
+@media (max-width: 1180px) {
+  .dual-layout, .dual-layout.sidebar-wide { grid-template-columns: 1fr; }
+  .chat-panel { min-height: calc(100dvh - 64px); }
+}
+@media (max-width: 680px) {
+  .topbar { position: relative; align-items: center; }
+  .top-actions { display: flex; width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+  .top-actions label, .top-actions .sync-button { display: flex; }
+  .top-actions input { max-width: none; width: 120px; }
+  .chat-panel { padding: 12px 14px 16px; min-height: calc(100dvh - 200px); }
+  .panel-heading p { display: none; }
+  .message-wrap { max-width: calc(100% - 48px); }
+  .chat-composer > div { flex-wrap: wrap; }
+  .memory-panel { height: 85dvh; min-height: 500px; }
+  .memory-tabs button, .dock-tabs button, .sidebar-toggle, .sync-button, .connection-button { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}
+
+.mobile-menu-button, .mobile-menu-action, .mobile-back { display: none; }
+@media (max-width: 680px) {
+  .topbar { min-height: 64px; flex-wrap: nowrap; }
+  .mobile-menu-button { display: block; margin-left: auto; min-height: 44px; border: 1px solid #414958; border-radius: 8px; background: #202633; color: #f1f3f7; padding: 8px 14px; }
+  .top-actions { display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 30; padding: 16px; background: #181a20; border-bottom: 1px solid #414958; box-shadow: 0 12px 24px #0008; }
+  .top-actions.menu-open { display: flex; }
+  .top-actions .mobile-menu-action { display: block; min-height: 44px; padding: 8px 12px; border: 1px solid #414958; border-radius: 8px; background: #202633; color: #f1f3f7; }
+  .chat-panel { min-height: calc(100dvh - 64px); }
+  .dual-layout.mobile-panel-open .chat-panel { display: none; }
+  .memory-panel { height: calc(100dvh - 64px); min-height: 0; grid-template-rows: auto auto minmax(0, 1fr); }
+  .mobile-back { display: block; min-height: 44px; text-align: left; background: #181a20; border: 0; border-bottom: 1px solid #343943; color: #dbe9ff; padding: 8px 16px; }
+  .memory-shell { grid-template-rows: auto auto auto minmax(0, 1fr); }
+}
+.mobile-status { display: none; }
+.memory-shell { grid-template-rows: auto auto auto minmax(0, 1fr); }
+@media (max-width: 680px) { .mobile-status { display: block; margin-left: auto; color: #b1b8c5; font-size: 12px; } .mobile-menu-button { margin-left: 8px; } }

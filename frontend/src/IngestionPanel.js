@@ -123,7 +123,7 @@ export default {
   },
   template: `
     <section class="ingestion-panel" aria-label="多源数据接入">
-      <div class="section-title"><h3>多源数据接入</h3><span>统一写入 · 实时反馈</span></div>
+      <div class="section-title"><h3 tabindex="-1">多源数据接入</h3><span>统一写入 · 实时反馈</span></div>
       <p class="ingest-intro">把文档、图片、工具经验和使用习惯交给记忆。处理结果会同步到对话和活动记录。</p>
       <p class="ingest-notice" v-if="!live">当前为演示模式。可以准备数据，连接 API 后才能提交；文件尚未上传。</p>
       <form @submit.prevent="submit" class="ingest-form">
