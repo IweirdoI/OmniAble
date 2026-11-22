@@ -12,7 +12,7 @@
 | TASK-004 | [P1] 固定 benchmark 哈希映射，消除跨进程跑分漂移 | 已完成 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/3 | 20261122-130750 |
 | TASK-005 | [P1] 修正 real 评测环境标记、缺测处理和偏好指标命名 | 已完成 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/4 | 20261122-151532 |
 | TASK-006 | [P1] 优化统计与偏好画像全量读取，建立规模和并发基线 | 已完成 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/5 | 20261122-144907 |
-| TASK-007 | [P1] Windows 桌面应用目标后端检索与并发性能验收，按瓶颈优化 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/6 | 20261122-183535 |
+| TASK-007 | [P1] Windows 桌面应用目标后端检索与并发性能验收，按瓶颈优化 | 待审查 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/6 | 20261122-211709 |
 | TASK-008 | [P1] 约束 SSE 后台线程生命周期、取消与并发资源 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/7 | 20261122-151536 |
 | TASK-009 | [P1] 修复 SSE 提前 EOF、部分失败及最终回答不一致 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/8 | 20261122-151543 |
 | TASK-010 | [P1] 显示记忆面板部分刷新失败，避免旧数据冒充已同步 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/9 | 20261122-185731 |

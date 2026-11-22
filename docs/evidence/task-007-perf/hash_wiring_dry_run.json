@@ -1,0 +1,154 @@
+{
+  "meta": {
+    "project": "麒忆智脑 / MOKOA",
+    "task": "TASK-007 / Issue #6（Windows 桌面应用目标后端性能验收）",
+    "generated_at": "2026-11-22T22:12:59",
+    "embedding_backend": "hash",
+    "memory_backend": "memory",
+    "formal": false,
+    "run_kind": "接线干跑"
+  },
+  "environment": {
+    "windows_version": "10.0.19044",
+    "machine": "AMD64",
+    "processor": "AMD64 Family 25 Model 117 Stepping 2, AuthenticAMD",
+    "total_ram_gb": 31.3,
+    "python_version": "3.12.10",
+    "git_commit": null,
+    "embedding_backend": "hash",
+    "embedding_model": "BAAI/bge-m3",
+    "embedding_dim": 1024,
+    "embedding_fallback": true,
+    "memory_backend": "memory",
+    "milvus_uri": "",
+    "model_load_s": 0.0,
+    "scale_encode_s": 0.09,
+    "scale_insert_s": 0.01
+  },
+  "dataset": {
+    "gold_corpus_docs": 14,
+    "gold_queries": 10,
+    "gold_corpus_source": "run_benchmarks._retrieval_corpus（内置 + knowledge_retrieval.jsonl 扩展）",
+    "scale_docs": 300,
+    "scale_created": 300,
+    "gold_created": 14,
+    "note": "金标语料与 run_benchmarks --real 同源，计分约定一致，未改动金标"
+  },
+  "staged_latency": {
+    "encode": {
+      "reps": 3,
+      "p50_ms": 0.124,
+      "p95_ms": 0.149,
+      "mean_ms": 0.131,
+      "raw_ms": [
+        0.152,
+        0.118,
+        0.124
+      ]
+    },
+    "storage": {
+      "reps": 3,
+      "p50_ms": 2.031,
+      "p95_ms": 2.107,
+      "mean_ms": 2.059,
+      "raw_ms": [
+        2.116,
+        2.029,
+        2.031
+      ]
+    },
+    "lexical_fetch": {
+      "reps": 3,
+      "p50_ms": 0.089,
+      "p95_ms": 0.131,
+      "mean_ms": 0.104,
+      "raw_ms": [
+        0.136,
+        0.087,
+        0.089
+      ]
+    },
+    "lexical_fetch_at_scale": {
+      "reps": 3,
+      "p50_ms": 0.202,
+      "p95_ms": 0.587,
+      "mean_ms": 0.343,
+      "raw_ms": [
+        0.63,
+        0.202,
+        0.197
+      ]
+    },
+    "rerank_profile_approx": {
+      "p50_ms": 6.925,
+      "p95_ms": 11.592,
+      "mean_ms": 8.014
+    },
+    "recall_total": {
+      "reps": 3,
+      "p50_ms": 9.08,
+      "p95_ms": 13.848,
+      "mean_ms": 10.204,
+      "raw_ms": [
+        9.08,
+        7.155,
+        14.378
+      ]
+    },
+    "recall_total_at_scale": {
+      "reps": 3,
+      "p50_ms": 329.695,
+      "p95_ms": 330.791,
+      "mean_ms": 325.787,
+      "raw_ms": [
+        330.913,
+        316.754,
+        329.695
+      ]
+    },
+    "chat": {
+      "status": "failed",
+      "http_status": 503
+    },
+    "note": "encode/storage/lexical_fetch 为直测；rerank_profile 为近似口径（recall_total − encode − storage，含重排、合并与扩展查询等其余环节，报告中标注为估算）；recall_total_at_scale 在规模语料范围测量"
+  },
+  "cold_start": {
+    "model_load_s": 0.0,
+    "first_recall_ms": 16.334,
+    "first_recall_items": 1
+  },
+  "recall_quality": {
+    "recall_at_5": 0.9,
+    "hit_at_1": 0.9,
+    "target": 0.85,
+    "sample_size": 10,
+    "scoring": "与 run_benchmarks --real 相同金标与计分约定",
+    "passed": null
+  },
+  "recall_latency_full": {
+    "p50_ms": 329.695,
+    "p95_ms": 330.791,
+    "max_ms": 330.913,
+    "budget_ms": 500,
+    "passed_p95": null,
+    "sample_size": 3,
+    "scope": "scale_user（300 条语料）"
+  },
+  "concurrency": {
+    "workers": 2,
+    "rounds": 2,
+    "ops": 4,
+    "wall_s": 1.47,
+    "ops_per_sec": 2.73,
+    "p50_ms": 690.496,
+    "p95_ms": 838.077,
+    "max_ms": 863.973,
+    "failure_rate": 0.0,
+    "failure_samples": []
+  },
+  "limitations": [
+    "词面补召拉取（lexical_fetch）为直测；重排合并与其他环节为估算残差（recall_total − encode − lexical_fetch − storage）",
+    "chat 需要可用模型服务，缺测时单列",
+    "memory 后端为进程内接线对照；milvus 模式单独验证持久化"
+  ]
+}

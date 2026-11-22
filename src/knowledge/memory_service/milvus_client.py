@@ -370,6 +370,9 @@ metadata 的特殊性：注意列表中包含 metadata（JSON类型）。
         schema.add_field("is_deleted", DataType.BOOL)
         schema.add_field("metadata", DataType.JSON)
         if self.client.has_collection(self.collection):
+            # 已存在的集合也必须 load：milvus-lite / 重启后集合处于 released
+            # 状态，不 load 直接 search 会报 code=101（TASK-007 持久化验收实测）。
+            self.client.load_collection(self.collection)
             return
         #定义表结构
 
