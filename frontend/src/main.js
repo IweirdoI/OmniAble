@@ -1,4 +1,4 @@
-import { computed, createApp, nextTick, onMounted, ref, reactive } from 'vue'
+import { computed, createApp, nextTick, onBeforeUnmount, onMounted, ref, reactive } from 'vue'
 import './style.css'
 import IngestionPanel from './IngestionPanel.js'
 import WorkspacePanel from './WorkspacePanel.js'
@@ -7,7 +7,10 @@ import { authHeaders, requestApi } from './ingestion.js'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { streamChat, applyChatEvent } from './chat-stream.js'
+import './workbench.css'
+import './plugins.css'
 import { createMemorySync, memoryPanels } from './memory-sync.js'
+import { pluginCatalog, pluginCapabilityLabels, filterPlugins, loadInstalledPluginIds, saveInstalledPluginIds } from './plugin-catalog.js'
 
 // 把模型 markdown 文本安全渲染为 HTML（DOMPurify 消毒防 XSS）。流式场景下由 scheduleRender
 // 节流调用，避免每个 token 都对整篇重解析（O(n^2) 卡顿）。
@@ -47,17 +50,21 @@ const demoStats = () => ({
   },
 })
 
-const initialMessages = [
-  { id: 1, role: 'assistant', content: '你好，我是麒忆助理。你可以直接问我问题，也可以告诉我需要长期记住或遗忘的内容。', time: '刚刚' },
-  { id: 2, role: 'user', content: '以后请用中文回答，并优先给出可以直接执行的步骤。', time: '刚刚' },
-  { id: 3, role: 'assistant', content: '记住了。我会默认使用中文，并把可执行步骤放在前面。右侧已经同步生成的偏好记忆。', time: '刚刚' },
-]
+const greetingMessage = {
+  id: 1,
+  role: 'assistant',
+  content: '你好，我是 OmniAble 助理。你可以直接问我问题，也可以告诉我需要长期记住或遗忘的内容。',
+  time: '刚刚',
+}
+const greeting = () => ({ ...greetingMessage })
+const EMPTY_FORGET = '尚未执行遗忘操作。'
 
 createApp({
   components: { IngestionPanel, WorkspacePanel },
   setup() {
+    const compactViewport = window.matchMedia('(max-width: 900px)')
     const user = ref('demo_user')
-    // Draft for the header field so typing does not sync / disable the input mid-keystroke.
+    // Draft for the header field so typing does not sync or disable the input mid-keystroke.
     const userDraft = ref(user.value)
     const live = ref(false)
     const syncing = ref(false)
@@ -66,18 +73,155 @@ createApp({
     const sessionKey = ref(0)
     const modelSlow = ref(false)
     const activeTab = ref('overview')
-    const dock = ref('workspace'), sidebarOpen = ref(true), sidebarWide = ref(false)
+    const dock = ref('memory')
+    const sidebarOpen = ref(!compactViewport.matches)
+    const sidebarWide = ref(false)
+    const menuOpen = ref(false)
+    const menuButton = ref(null)
+    const composer = ref(null)
+    const memoryContent = ref(null)
+    let panelOpener = null
+
+    const installedPluginIds = ref(loadInstalledPluginIds())
+    const installedPlugins = computed(() => pluginCatalog.filter(plugin => installedPluginIds.value.includes(plugin.id)))
+    const installedPluginCount = computed(() => installedPlugins.value.length)
+    const pluginQuery = ref('')
+    const pluginFilter = ref('all')
+    const activePluginId = ref('')
+    const activePlugin = computed(() => installedPlugins.value.find(plugin => plugin.id === activePluginId.value) || null)
+    const filteredPlugins = computed(() => filterPlugins(pluginCatalog, installedPluginIds.value, pluginQuery.value, pluginFilter.value))
+    const pluginFilters = [['all', '全部'], ['installed', '已安装'], ['available', '可用']]
+    const isPluginInstalled = (id) => installedPluginIds.value.includes(id)
+
+    const focusIfVisible = (element) => {
+      if (!element || !element.isConnected || !element.getClientRects().length) return false
+      element.focus({ preventScroll: true })
+      return true
+    }
+    const focusChat = async () => {
+      await nextTick()
+      document.querySelector('.chat-title')?.focus({ preventScroll: true })
+    }
+    const openMenu = async () => {
+      menuOpen.value = true
+      await nextTick()
+      document.getElementById('mobile-menu-title')?.focus({ preventScroll: true })
+    }
+    const closeMenu = async () => {
+      if (!menuOpen.value) return
+      menuOpen.value = false
+      await nextTick()
+      if (!focusIfVisible(menuButton.value)) await focusChat()
+    }
+    const returnToChat = async () => {
+      menuOpen.value = false
+      sidebarOpen.value = false
+      await nextTick()
+      if (!focusIfVisible(menuButton.value)) await focusChat()
+    }
+    const trapMenuFocus = (event) => {
+      if (!menuOpen.value || event.key !== 'Tab') return
+      const root = document.getElementById('workspace-menu')
+      if (!root) return
+      const nodes = [...root.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]')]
+        .filter(node => node.getClientRects().length)
+      if (!nodes.length) return
+      const first = nodes[0]
+      const last = nodes[nodes.length - 1]
+      const heading = document.getElementById('mobile-menu-title')
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === heading)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    const focusDataPanel = async (tab) => {
+      await nextTick()
+      document.querySelector('[data-panel-title="' + tab + '"]')?.focus({ preventScroll: true })
+    }
+    const showPanel = async (tab, opener) => {
+      panelOpener = opener || document.activeElement
+      menuOpen.value = false
+      dock.value = 'memory'
+      activeTab.value = tab
+      sidebarOpen.value = true
+      await focusDataPanel(tab)
+    }
+    const openDock = async (nextDock, opener) => {
+      panelOpener = opener || document.activeElement
+      menuOpen.value = false
+      dock.value = nextDock
+      sidebarOpen.value = true
+      if (nextDock === 'plugins') {
+        activePluginId.value = ''
+        pluginQuery.value = ''
+        pluginFilter.value = 'all'
+      }
+      if (nextDock === 'workspace') {
+        await nextTick()
+        document.getElementById('workspace-panel-title')?.focus({ preventScroll: true })
+      } else if (nextDock === 'plugins') {
+        await nextTick()
+        document.querySelector('[data-panel-title="plugins"]')?.focus({ preventScroll: true })
+      } else {
+        await focusDataPanel(activeTab.value)
+      }
+    }
+    const openPlugin = async (plugin, opener) => {
+      if (!plugin || !isPluginInstalled(plugin.id)) return
+      panelOpener = opener || document.activeElement
+      menuOpen.value = false
+      dock.value = 'plugins'
+      sidebarOpen.value = true
+      activePluginId.value = plugin.id
+      await nextTick()
+      document.getElementById('plugin-detail-title')?.focus({ preventScroll: true })
+    }
+    const backToPlugins = async () => {
+      activePluginId.value = ''
+      await nextTick()
+      document.querySelector('[data-panel-title="plugins"]')?.focus({ preventScroll: true })
+    }
+    const togglePlugin = (plugin) => {
+      const installed = isPluginInstalled(plugin.id)
+      installedPluginIds.value = installed
+        ? installedPluginIds.value.filter(id => id !== plugin.id)
+        : [...installedPluginIds.value, plugin.id]
+      if (installed && activePluginId.value === plugin.id) activePluginId.value = ''
+      saveInstalledPluginIds(installedPluginIds.value)
+      tell(installed ? `已移除插件：${plugin.name}` : `已安装插件：${plugin.name}`)
+    }
+    const selectDock = (nextDock) => { dock.value = nextDock }
+    const dockTabs = ['workspace', 'memory', 'plugins']
+    const onDockKeydown = (event, index) => {
+      let next = index
+      if (event.key === 'ArrowRight') next = (index + 1) % dockTabs.length
+      else if (event.key === 'ArrowLeft') next = (index + dockTabs.length - 1) % dockTabs.length
+      else if (event.key === 'Home') next = 0
+      else if (event.key === 'End') next = dockTabs.length - 1
+      else return
+      event.preventDefault()
+      selectDock(dockTabs[next])
+      nextTick(() => document.getElementById('dock-tab-' + dockTabs[next])?.focus())
+    }
+    const closePanel = async () => {
+      if (!sidebarOpen.value) return
+      sidebarOpen.value = false
+      await nextTick()
+      if (!focusIfVisible(panelOpener)) await focusChat()
+    }
+    const toggleSidebar = (opener) => sidebarOpen.value ? closePanel() : openDock(dock.value, opener)
+
     const workspaceTarget = ref(null), workspaceRefresh = ref(0)
     const openWorkspace = async (kind, path) => {
-      sidebarOpen.value = true; dock.value = 'workspace'
+      panelOpener = document.activeElement
+      sidebarOpen.value = true
+      dock.value = 'workspace'
       workspaceTarget.value = { kind, path, at: Date.now() }
       await nextTick()
-      if (window.matchMedia('(max-width: 1180px)').matches) document.querySelector('.memory-panel')?.scrollIntoView({ behavior: 'smooth' })
-    }
-    const toggleSidebar = async () => {
-      sidebarOpen.value = !sidebarOpen.value
-      await nextTick()
-      if (sidebarOpen.value && window.matchMedia('(max-width: 1180px)').matches) document.querySelector('.memory-panel')?.scrollIntoView({ behavior: 'smooth' })
+      document.getElementById('workspace-panel-title')?.focus({ preventScroll: true })
     }
     const openChatLink = (event) => {
       const link = event.target.closest('a[href]')
@@ -88,12 +232,12 @@ createApp({
         else { const path = fileLink(href); if (path) { event.preventDefault(); openWorkspace('file', path) } }
       } catch { event.preventDefault(); tell('链接格式无效') }
     }
+
     const draft = ref('')
     const agentHistory = ref([])
     const useMemory = ref(true)
     const saveMemory = ref(true)
-    const newChat = () => { agentHistory.value = []; messages.value = [] }
-    const messages = ref([...initialMessages])
+    const messages = ref([greeting()])
     const memories = ref([...demoMemories])
     const panelState = reactive({})
     const stats = computed(() => live.value ? panelState.stats.data : demoStats())
@@ -101,14 +245,18 @@ createApp({
     const profile = computed(() => live.value ? panelState.profile.data : null)
     const latency = ref('演示数据')
     const panelLabels = { idle: '待同步', loading: '同步中', success: '已同步', error: '读取失败', stale: '更新失败 · 显示旧数据' }
-    const failedPanel = (key) => ['error', 'stale'].includes(panelState[key].status)
+    const failedPanel = (key) => ['error', 'stale'].includes(panelState[key]?.status)
+    const panelLastSuccess = (key) => panelState[key]?.updatedAt ? '上次成功 ' + panelState[key].updatedAt : '尚未成功同步'
+    const panelStatusClass = (key) => 'state-' + (panelState[key]?.status || 'idle')
+    const failedPanelCount = computed(() => memoryPanels.filter(([key]) => failedPanel(key)).length)
     const events = ref([
       { id: 1, type: 'preference', title: '识别到回答偏好', detail: 'response_language · v2', time: '刚刚' },
       { id: 2, type: 'memory', title: '沉淀项目上下文', detail: 'conversation · long', time: '2 分钟前' },
     ])
     const forgetInstruction = ref('')
-    const forgetResult = ref('等待遗忘指令…')
+    const forgetResult = ref(EMPTY_FORGET)
     const toast = ref('')
+    const announcement = ref('')
     const chatScroll = ref(null)
 
     const tabs = [
@@ -118,6 +266,31 @@ createApp({
       ['memories', '记忆'],
       ['forget', '遗忘'],
     ]
+
+    const conversationTitle = computed(() => {
+      const first = messages.value.find(message => message.role === 'user')
+      if (!first) return '新对话'
+      const text = first.content
+        .replace(/```[\s\S]*?```/g, '代码片段')
+        .replace(/[#>*_`~]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+      if (!text) return '代码片段'
+      return text.length > 18 ? text.slice(0, 18) + '…' : text
+    })
+    const conversationMeta = computed(() => messages.value.length ? '临时会话 · ' + messages.value.length + ' 条消息' : '尚未开始')
+
+    const onTabKeydown = (event, index) => {
+      let next = index
+      if (event.key === 'ArrowRight') next = (index + 1) % tabs.length
+      else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length
+      else if (event.key === 'Home') next = 0
+      else if (event.key === 'End') next = tabs.length - 1
+      else return
+      event.preventDefault()
+      activeTab.value = tabs[next][0]
+      nextTick(() => document.querySelector(`[data-testid="tab-${tabs[next][0]}"]`)?.focus())
+    }
 
     const activePreferences = computed(() => {
       if (!live.value) return demoPreferences.filter((item) => item.active)
@@ -136,8 +309,10 @@ createApp({
 
     const tell = (message) => {
       toast.value = message
+      announcement.value = ''
+      nextTick(() => { announcement.value = message })
       window.clearTimeout(tell.timer)
-      tell.timer = window.setTimeout(() => { toast.value = '' }, 2600)
+      tell.timer = window.setTimeout(() => { toast.value = '' }, 2800)
     }
 
     const fetchWithTimeout = requestApi
@@ -167,17 +342,16 @@ createApp({
 
     const now = () => new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(new Date())
 
-    // Clear user-specific and demo content before displaying a live session.
     const clearLiveSession = () => {
       agentHistory.value = []
       sessionKey.value++
       memories.value = []
       memorySync.reset()
-      messages.value = [{ ...initialMessages[0] }]
+      messages.value = [greeting()]
       events.value = []
       latency.value = '尚未检索'
       forgetInstruction.value = ''
-      forgetResult.value = '等待遗忘指令…'
+      forgetResult.value = EMPTY_FORGET
     }
 
     const pushEvent = (type, title, detail) => {
@@ -233,7 +407,7 @@ createApp({
         await memorySync.refresh(user.value.trim(), keys)
         if (requestSession !== sessionKey.value || !live.value) return false
         const failures = keys.filter(failedPanel).length
-        if (!quiet) tell(failures ? `${failures} 项同步失败，可在记忆面板重试` : '记忆数据已更新')
+        if (!quiet) tell(failures ? `${failures} 项同步失败，可在对应面板重试` : '记忆数据已更新')
         return failures === 0
       } finally {
         if (requestSession === sessionKey.value) syncing.value = false
@@ -248,6 +422,12 @@ createApp({
         live.value = false
         memorySync.reset()
         memories.value = [...demoMemories]
+        messages.value = [greeting()]
+        agentHistory.value = []
+        events.value = []
+        forgetInstruction.value = ''
+        forgetResult.value = EMPTY_FORGET
+        draft.value = ''
         tell('已切换为演示数据模式')
         return
       }
@@ -298,7 +478,7 @@ createApp({
       if (!live.value) {
         await new Promise((resolve) => window.setTimeout(resolve, 350))
         const reply = text.includes('忘')
-          ? '你可以在右侧打开“遗忘”，确认需要删除的范围。演示模式不会伪造删除成功。'
+          ? '你可以在辅助面板打开“遗忘”，确认需要删除的范围。演示模式不会伪造删除成功。'
           : '我会结合已保存的偏好和记忆来回答。当前是演示模式，连接本地 API 后将显示真实召回与写入结果。'
         messages.value.push({ id: Date.now() + 1, role: 'assistant', content: reply, time: now() })
         pushEvent('conversation', '完成一轮演示对话', '连接 API 后将实时写入')
@@ -377,23 +557,31 @@ createApp({
         sendMessage()
       }
     }
-
+    const onComposerFocus = () => {
+      window.setTimeout(() => composer.value?.scrollIntoView({ block: 'nearest' }), 120)
+    }
     const usePrompt = (prompt) => {
       draft.value = prompt
-      nextTick(() => document.querySelector('.chat-composer textarea')?.focus())
+      nextTick(() => composer.value?.focus())
+    }
+    const onPluginUse = async (prompt) => {
+      usePrompt(prompt)
+      tell('快捷指令已插入输入框')
+      if (compactViewport.matches) {
+        sidebarOpen.value = false
+        await nextTick()
+        composer.value?.focus()
+      }
     }
 
-    const openIngestion = async () => {
-      dock.value = 'memory'; sidebarOpen.value = true
-      activeTab.value = 'ingestion'
-      await nextTick()
-      if (window.matchMedia('(max-width: 1050px)').matches) document.querySelector('.memory-panel')?.scrollIntoView({ behavior: 'smooth' })
-    }
-
-    const prepareForget = (item, kind = 'memory') => {
+    const openIngestion = () => showPanel('ingestion', document.querySelector('[data-testid=open-ingestion]'))
+    const prepareForget = async (item, kind = 'memory') => {
+      panelOpener = document.activeElement
       forgetInstruction.value = kind === 'preference' ? `忘掉关于 ${item.key} 的偏好` : `忘掉记忆 ${item.id}`
-      dock.value = 'memory'; sidebarOpen.value = true
+      dock.value = 'memory'
+      sidebarOpen.value = true
       activeTab.value = 'forget'
+      await focusDataPanel('forget')
     }
 
     const forget = async () => {
@@ -409,13 +597,13 @@ createApp({
       try {
         const result = await call('/forget', { method: 'POST', body: JSON.stringify({ user_id: user.value.trim(), instruction }) }, 180000)
         forgetResult.value = `已处理：${result.instruction}\n删除数量：${result.count}\n删除 ID：${result.deleted_ids.length ? result.deleted_ids.join(', ') : '无'}`
-        newChat()
+        newChat({ announce: false, focus: false })
         const deleted = new Set(result.deleted_ids)
         memories.value = memories.value.filter((item) => !deleted.has(item.id))
         pushEvent('forget', '执行安全遗忘', `${result.count} 条记忆已删除`)
         memorySync.reset()
         const refreshed = await loadDashboard({ quiet: true })
-        tell(refreshed ? '遗忘结果已同步' : '遗忘已处理，部分记忆数据未能刷新')
+        tell(refreshed ? '遗忘已处理，记忆数据已刷新' : '遗忘已处理，部分记忆数据未能刷新')
       } catch (error) {
         forgetResult.value = `遗忘失败：${error.message}`
         pushEvent('error', '安全遗忘失败', error.message)
@@ -438,7 +626,23 @@ createApp({
       if (!value && live.value) await loadDashboard({ quiet: true })
     }
 
-    const commitUser = async ({ quiet = false } = {}) => {
+    const resetUserState = () => {
+      draft.value = ''
+      agentHistory.value = []
+      messages.value = [greeting()]
+      memories.value = []
+      events.value = []
+      forgetInstruction.value = ''
+      forgetResult.value = EMPTY_FORGET
+      workspaceTarget.value = null
+      latency.value = '尚未检索'
+      memorySync.reset()
+      sessionKey.value++
+      if (chatScroll.value) chatScroll.value.scrollTop = 0
+      if (memoryContent.value) memoryContent.value.scrollTop = 0
+    }
+
+    const switchUser = async () => {
       if (sending.value || ingesting.value || syncing.value) return
       const next = userDraft.value.trim()
       if (!next) {
@@ -447,55 +651,185 @@ createApp({
         return
       }
       if (next === user.value.trim()) {
-        if (live.value) await loadDashboard({ quiet })
+        if (!live.value) return tell('当前为演示模式；连接 API 后可同步真实数据')
+        await loadDashboard({ quiet: false })
         return
       }
       user.value = next
+      resetUserState()
       if (live.value) {
         clearLiveSession()
-        await loadDashboard({ quiet })
+        const refreshed = await loadDashboard({ quiet: true })
+        tell(refreshed ? `已切换到 ${next}，记忆数据已同步` : `已切换到 ${next}，部分记忆数据未能同步`)
       } else {
-        sessionKey.value++
+        tell(`已切换到 ${next}（演示模式）`)
       }
+    }
+
+    const syncCurrent = async () => {
+      if (!live.value) return tell('当前为演示模式；连接 API 后可同步真实数据')
+      if (userDraft.value.trim() !== user.value.trim()) return tell('用户 ID 已修改，请先点“切换用户”')
+      await loadDashboard({ quiet: false })
     }
 
     const onUserKeydown = (event) => {
       if (event.key === 'Enter') {
         event.preventDefault()
-        commitUser()
+        switchUser()
       }
     }
 
+    const newChat = async ({ announce = true, focus = true } = {}) => {
+      if (sending.value) return
+      agentHistory.value = []
+      messages.value = []
+      activeController?.abort()
+      if (focus) {
+        await nextTick()
+        composer.value?.focus()
+      }
+      if (announce) tell('已开始新对话')
+    }
+
+    const syncViewport = () => {
+      const height = window.visualViewport?.height || window.innerHeight
+      document.documentElement.style.setProperty('--app-height', `${Math.round(height)}px`)
+    }
+    const onViewportChange = () => {
+      if (!compactViewport.matches) menuOpen.value = false
+      syncViewport()
+    }
+
     onMounted(() => {
+      syncViewport()
+      window.visualViewport?.addEventListener('resize', onViewportChange)
+      window.visualViewport?.addEventListener('scroll', onViewportChange)
+      window.addEventListener('resize', onViewportChange)
+      compactViewport.addEventListener?.('change', onViewportChange)
       scrollToBottom()
       connect({ quiet: true })
     })
+    onBeforeUnmount(() => {
+      window.visualViewport?.removeEventListener('resize', onViewportChange)
+      window.visualViewport?.removeEventListener('scroll', onViewportChange)
+      window.removeEventListener('resize', onViewportChange)
+      compactViewport.removeEventListener?.('change', onViewportChange)
+    })
 
-    return { dock, sidebarOpen, sidebarWide, workspaceTarget, workspaceRefresh, openWorkspace, openChatLink, toggleSidebar, stopMessage, runLabels, stageLabels, useMemory, saveMemory, newChat, user, userDraft, live, syncing, sending, ingesting, sessionKey, onIngestionBusy, onIngestionCompleted, modelSlow, activeTab, draft, messages, memories, preferences, stats, profile, latency, memoryPanels, panelState, panelLabels, failedPanel, events, forgetInstruction, forgetResult, toast, chatScroll, tabs, activePreferences, statusText, connect, loadDashboard, commitUser, onUserKeydown, sendMessage, handleComposerKeydown, openIngestion, usePrompt, prepareForget, forget, renderMarkdown }
+    return {
+      menuOpen, menuButton, openMenu, closeMenu, returnToChat, trapMenuFocus,
+      dock, selectDock, openDock, sidebarOpen, sidebarWide, toggleSidebar, closePanel, onDockKeydown,
+      workspaceTarget, workspaceRefresh, openWorkspace, openChatLink,
+      stopMessage, runLabels, stageLabels, useMemory, saveMemory, newChat,
+      user, userDraft, live, syncing, sending, ingesting, sessionKey,
+      onIngestionBusy, onIngestionCompleted, modelSlow, activeTab, onTabKeydown,
+      draft, messages, memories, preferences, stats, profile, latency, memoryPanels,
+      panelState, panelLabels, failedPanel, panelLastSuccess, panelStatusClass, failedPanelCount,
+      events, forgetInstruction, forgetResult, toast, announcement, chatScroll, memoryContent,
+      tabs, activePreferences, statusText, connect, loadDashboard, switchUser, syncCurrent,
+      onUserKeydown, sendMessage, handleComposerKeydown, onComposerFocus, composer,
+      openIngestion, usePrompt, prepareForget, forget, renderMarkdown,
+      showPanel, conversationTitle, conversationMeta, focusChat,
+      pluginCatalog, pluginCapabilityLabels, installedPlugins, installedPluginCount,
+      pluginQuery, pluginFilter, pluginFilters, filteredPlugins, isPluginInstalled,
+      activePlugin, openPlugin, backToPlugins, togglePlugin, onPluginUse,
+    }
   },
   template: `
     <div class="app-shell">
       <header class="topbar">
-        <div class="brand-mark"><span>◇</span><div><b>麒忆智脑</b><small>OS Agent Memory</small></div></div>
-        <div class="top-actions">
-          <button class="sidebar-toggle" @click="toggleSidebar" :aria-expanded="sidebarOpen">{{ sidebarOpen ? '收起侧栏' : '打开工作区' }}</button>
-          <label>用户 <input v-model.trim="userDraft" data-testid="user-input" aria-label="用户 ID" title="改完后按回车或点「同步」再切换用户" @keydown="onUserKeydown" @blur="commitUser({ quiet: true })" /></label>
-          <button class="sync-button" data-testid="sync-button" :disabled="syncing || ingesting || sending" @click="commitUser()">{{ syncing ? '同步中…' : '↻ 同步' }}</button>
-          <button class="connection-button" data-testid="connection-button" :class="{ live }" :disabled="sending || syncing || ingesting" @click="connect()"><i></i>{{ statusText }}</button>
+        <button class="brand-mark" type="button" @click="returnToChat" aria-label="OmniAble 记忆工作台，返回对话">
+          <span class="brand-glyph" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="8.15" stroke="currentColor" stroke-width="1.9" />
+              <path d="M8.35 16.15 12 7.55l3.65 8.6M9.7 13.2h4.6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </span>
+          <span class="brand-copy"><b class="brand-name"><span>Omni</span><span class="brand-able">Able</span></b><small>记忆工作台</small></span>
+        </button>
+        <span class="mobile-status" role="status"><i :class="{ live }"></i>{{ statusText }}</span>
+        <span class="sr-only" data-testid="active-user">{{ user }}</span>
+        <button ref="menuButton" class="mobile-menu-button" type="button" @click="menuOpen ? closeMenu() : openMenu()" :aria-expanded="menuOpen" aria-controls="workspace-menu" :aria-label="menuOpen ? '关闭菜单' : '打开菜单'">{{ menuOpen ? '关闭' : '菜单' }}</button>
+        <div id="workspace-menu" class="top-actions" :class="{ 'menu-open': menuOpen }" :role="menuOpen ? 'dialog' : null" :aria-modal="menuOpen ? 'true' : null" :aria-labelledby="menuOpen ? 'mobile-menu-title' : null" @keydown.esc.stop="closeMenu" @keydown="trapMenuFocus">
+          <div class="menu-head"><h2 id="mobile-menu-title" tabindex="-1">菜单</h2><button class="menu-close" type="button" @click="closeMenu">关闭</button></div>
+          <div class="user-switcher">
+            <label class="user-field" for="user-id"><span>用户 ID</span><input id="user-id" v-model.trim="userDraft" data-testid="user-input" autocomplete="username" spellcheck="false" @keydown="onUserKeydown" /></label>
+            <button class="secondary-button" type="button" data-testid="user-switch" :disabled="sending || syncing || ingesting" @click="switchUser">切换用户</button>
+          </div>
+          <p class="current-user"><span>当前用户</span><b>{{ user }}</b></p>
+          <div class="topbar-controls">
+            <button class="secondary-button sync-button" data-testid="sync-button" :disabled="!live || syncing || ingesting || sending" @click="syncCurrent">{{ syncing ? '同步中…' : '↻ 同步' }}</button>
+            <button class="connection-button" data-testid="connection-button" :class="{ live }" :disabled="sending || syncing || ingesting" @click="connect()"><i aria-hidden="true"></i>{{ statusText }}</button>
+          </div>
+          <div class="mobile-menu-actions">
+            <button type="button" @click="openDock('workspace', $event.currentTarget)"><span class="menu-icon" aria-hidden="true">▤</span><span><b>工作区</b><small>文件、变更与网页</small></span></button>
+            <button type="button" @click="openDock('plugins', $event.currentTarget)"><span class="menu-icon" aria-hidden="true">▦</span><span><b>插件</b><small>{{ installedPluginCount }} 个已启用</small></span></button>
+            <button type="button" @click="showPanel('overview', $event.currentTarget)"><span class="menu-icon" aria-hidden="true">◇</span><span><b>记忆总览</b><small>同步、统计与偏好</small></span></button>
+            <button type="button" @click="showPanel('ingestion', $event.currentTarget)"><span class="menu-icon" aria-hidden="true">↥</span><span><b>接入</b><small>上传文件或录入记忆</small></span></button>
+            <button type="button" @click="showPanel('forget', $event.currentTarget)"><span class="menu-icon" aria-hidden="true">⌫</span><span><b>遗忘</b><small>确认范围后删除记忆</small></span></button>
+            <button class="menu-return" type="button" @click="returnToChat">← 返回聊天</button>
+          </div>
         </div>
+        <div class="menu-backdrop" v-if="menuOpen" @click="closeMenu" aria-hidden="true"></div>
       </header>
 
-      <main class="dual-layout" :class="{ 'sidebar-hidden': !sidebarOpen, 'sidebar-wide': sidebarOpen && sidebarWide }">
-        <section class="chat-panel">
-          <div class="panel-heading">
-            <div><span class="eyebrow">MEMORY ASSISTANT</span><h1>和麒忆助理对话</h1><p>对话会参与记忆召回，并在右侧实时形成偏好与记忆记录。</p></div>
-            <div class="assistant-avatar">麒</div>
+      <main class="dual-layout" :inert="menuOpen" :class="{ 'sidebar-hidden': !sidebarOpen, 'sidebar-wide': sidebarOpen && sidebarWide, 'mobile-panel-open': sidebarOpen }">
+        <nav class="session-rail" aria-label="会话与工作台导航">
+          <div class="rail-heading"><span>会话</span><button class="rail-new" type="button" @click="newChat()">＋ 新对话</button></div>
+          <div class="rail-sessions">
+            <button class="session-item active" type="button" @click="focusChat" aria-current="true">
+              <span class="session-mark" aria-hidden="true"></span>
+              <span class="session-copy"><b>{{ conversationTitle }}</b><small>{{ conversationMeta }}</small></span>
+            </button>
           </div>
-          <div class="chat-stream" ref="chatScroll">
-            <div class="message-row" v-for="message in messages" :key="message.id" :class="message.role">
-              <div class="avatar">{{ message.role === 'assistant' ? '麒' : 'Z' }}</div>
+          <div class="rail-section">
+            <span class="rail-label">工作台</span>
+            <button type="button" :class="{ active: sidebarOpen && dock === 'workspace' }" :aria-pressed="sidebarOpen && dock === 'workspace'" @click="openDock('workspace', $event.currentTarget)"><span class="rail-icon" aria-hidden="true">▤</span><span><b>工作区</b><small>文件、变更与网页</small></span></button>
+            <button type="button" :class="{ active: sidebarOpen && dock === 'memory' }" :aria-pressed="sidebarOpen && dock === 'memory'" @click="openDock('memory', $event.currentTarget)"><span class="rail-icon" aria-hidden="true">◇</span><span><b>记忆</b><small>总览、偏好与遗忘</small></span></button>
+          </div>
+          <div class="rail-section rail-extension">
+            <span class="rail-label">扩展</span>
+            <button type="button" :class="{ active: sidebarOpen && dock === 'plugins' }" :aria-pressed="sidebarOpen && dock === 'plugins'" @click="openDock('plugins', $event.currentTarget)"><span class="rail-icon" aria-hidden="true">▦</span><span><b>插件</b><small>{{ installedPluginCount }} 个已启用</small></span><span v-if="installedPluginCount" class="rail-count">{{ installedPluginCount }}</span></button>
+            <button v-for="plugin in installedPlugins" :key="plugin.id" type="button" class="rail-plugin" :class="{ active: sidebarOpen && dock === 'plugins' && activePlugin?.id === plugin.id }" :aria-pressed="sidebarOpen && dock === 'plugins' && activePlugin?.id === plugin.id" @click="openPlugin(plugin, $event.currentTarget)"><span class="rail-icon plugin-rail-glyph" :class="'tone-' + plugin.tone" aria-hidden="true">{{ plugin.glyph }}</span><span><b>{{ plugin.name }}</b><small>已启用插件</small></span></button>
+          </div>
+          <div class="rail-footer">
+            <span class="rail-mode" :class="{ live }"><i aria-hidden="true"></i>{{ live ? '实时数据' : '演示数据' }}</span>
+            <small>{{ user }}</small>
+          </div>
+        </nav>
+
+        <section class="chat-panel" aria-labelledby="chat-title">
+          <header class="chat-header">
+            <div class="chat-heading">
+              <span class="section-kicker">临时会话</span>
+              <h1 class="chat-title" id="chat-title" tabindex="-1">对话</h1>
+              <p>消息只在本次打开期间保留，可随时打开工作区或记忆面板。</p>
+            </div>
+            <div class="chat-header-actions">
+              <button class="secondary-button new-chat-button" type="button" :disabled="sending" @click="newChat()">＋ 新对话</button>
+              <button class="ghost-button panel-toggle" type="button" :aria-expanded="sidebarOpen" @click="toggleSidebar($event.currentTarget)">{{ sidebarOpen ? '收起面板' : '打开面板' }}</button>
+            </div>
+          </header>
+
+          <div class="chat-stream" ref="chatScroll" aria-label="对话消息">
+            <div class="chat-empty" v-if="!messages.length">
+              <span class="empty-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="8.15" stroke="currentColor" stroke-width="1.9" />
+                  <path d="M8.35 16.15 12 7.55l3.65 8.6M9.7 13.2h4.6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </span>
+              <h2>今天想记住什么？</h2>
+              <p>开始一段对话，或先整理一条明确的偏好。当前为{{ live ? '实时 API' : '演示数据' }}模式。</p>
+              <div class="empty-actions">
+                <button type="button" @click="usePrompt('根据我的偏好，给出一个可以直接执行的步骤清单')">梳理我的偏好</button>
+                <button type="button" @click="usePrompt('你记得我的哪些使用习惯？')">查看已有记忆</button>
+                <button type="button" @click="openIngestion">接入一份资料</button>
+              </div>
+            </div>
+            <article class="message-row" v-for="message in messages" :key="message.id" :class="message.role">
               <div class="message-wrap">
-                <div class="message-meta"><b>{{ message.role === 'assistant' ? '麒忆助理' : '你' }}</b><span>{{ message.time }}</span></div>
+                <div class="message-meta"><b>{{ message.role === 'assistant' ? 'OmniAble 助理' : '你' }}</b><span>{{ message.time }}</span></div>
                 <div class="bubble" @click="openChatLink" v-html="message.html || renderMarkdown(message.content)"></div>
                 <p class="run-status" data-testid="run-status" v-if="message.status" role="status">{{ runLabels[message.status] || message.status }}<span v-if="message.status === 'running' && message.stage"> · {{ stageLabels[message.stage] || message.stage }}</span></p>
                 <p class="run-failure" data-testid="run-failure" v-if="message.failure" role="alert">{{ message.failure }}</p>
@@ -504,7 +838,7 @@ createApp({
                 </ul>
                 <p class="run-status" v-if="message.memoryWrite">本轮记忆：{{ ({ accepted: '已接收，按记忆策略处理', rejected: '未通过保存策略', disabled: '未启用保存', skipped: '已跳过保存', failed: '保存失败', unknown: '结果待同步确认' })[message.memoryWrite] || message.memoryWrite }}</p>
                 <ol class="workflow-phases" v-if="message.phases && message.phases.length"><li v-for="phase in message.phases" :key="phase.name">{{ stageLabels[phase.name] || phase.name }} · {{ phase.phase === 'end' ? '完成' : phase.phase === 'interrupted' ? '已中断' : '处理中' }}</li></ol>
-                <ul v-if="message.workflow?.artifacts?.length"><li v-for="artifact in message.workflow.artifacts" :key="artifact.path"><button class="artifact-link" @click="openWorkspace(artifact.deleted ? 'changes' : 'file', artifact.path)">{{ artifact.deleted ? '已删除 · 查看变更' : '打开文件' }}：{{ artifact.path }}</button></li></ul>
+                <ul class="artifact-list" v-if="message.workflow?.artifacts?.length"><li v-for="artifact in message.workflow.artifacts" :key="artifact.path"><button class="artifact-link" @click="openWorkspace(artifact.deleted ? 'changes' : 'file', artifact.path)">{{ artifact.deleted ? '已删除 · 查看变更' : '打开文件' }}：{{ artifact.path }}</button></li></ul>
                 <div class="tool-steps" v-if="message.steps && message.steps.length">
                   <div class="tool-step" v-for="step in message.steps" :key="step.id || step.name">
                     <span class="tool-dot" :class="step.status"></span>
@@ -517,78 +851,156 @@ createApp({
                   </div>
                 </div>
               </div>
+            </article>
+            <div class="suggestion-row" v-if="messages.length === 1 && !sending">
+              <span>下一步</span>
+              <button type="button" @click="usePrompt('根据我的偏好，给出一个可以直接执行的步骤清单')">梳理偏好</button>
+              <button type="button" @click="openDock('memory', $event.currentTarget)">查看记忆</button>
+              <button type="button" @click="openIngestion">接入资料</button>
             </div>
             <div class="message-row assistant" v-if="sending && !(messages.length && messages[messages.length - 1].role === 'assistant')">
-              <div class="avatar">麒</div><div class="message-wrap"><div class="message-meta"><b>麒忆助理</b><span>处理中</span></div><div class="bubble thinking"><i></i><i></i><i></i><span>{{ modelSlow ? '正在等待模型回答和记忆处理…' : '正在检索记忆并生成回答…' }}</span></div></div>
+              <div class="message-wrap"><div class="message-meta"><b>OmniAble 助理</b><span>处理中</span></div><div class="bubble thinking"><i></i><i></i><i></i><span>{{ modelSlow ? '正在等待模型回答和记忆处理…' : '正在检索记忆并生成回答…' }}</span></div></div>
             </div>
           </div>
-          <div class="prompt-chips">
-            <label><input type="checkbox" v-model="useMemory" :disabled="sending" /> 使用记忆</label>
-            <label><input type="checkbox" v-model="saveMemory" :disabled="sending" /> 保存本轮内容</label>
-            <button @click="newChat" :disabled="sending">新对话</button>
-          </div>
-          <div class="prompt-chips">
-            <button @click="usePrompt('根据我的偏好，给出一个 Python 项目搭建方案')">项目搭建建议</button>
-            <button @click="usePrompt('你记得我的哪些使用习惯？')">查看我的习惯</button>
-            <button @click="usePrompt('以后回答请更加简洁')">新增回答偏好</button>
-          </div>
-          <form class="chat-composer" @submit.prevent="sendMessage">
-            <textarea v-model="draft" data-testid="chat-input" @keydown="handleComposerKeydown" placeholder="输入问题，或告诉我需要记住的内容…" aria-label="对话输入"></textarea>
-            <div>
-              <span>Enter 发送 · 可上传 PDF / Word / 图片</span>
-              <div class="composer-actions">
-                <button type="button" class="file-button" data-testid="open-ingestion" @click="openIngestion">＋ 多源接入</button>
-                <button v-if="sending" type="button" data-testid="chat-stop" @click="stopMessage">停止</button>
-                <button data-testid="chat-send" :disabled="!draft.trim() || sending || syncing || ingesting">{{ sending ? '处理中' : '发送 ↑' }}</button>
+
+          <div class="composer-zone">
+            <div class="composer-options">
+              <label><input type="checkbox" v-model="useMemory" :disabled="sending" /> 使用记忆</label>
+              <label><input type="checkbox" v-model="saveMemory" :disabled="sending" /> 保存本轮内容</label>
+            </div>
+            <form class="chat-composer" @submit.prevent="sendMessage">
+              <label class="sr-only" for="chat-input">对话输入</label>
+              <textarea id="chat-input" ref="composer" v-model="draft" data-testid="chat-input" @keydown="handleComposerKeydown" @focus="onComposerFocus" placeholder="输入问题，或告诉我需要记住的内容…"></textarea>
+              <div class="composer-footer">
+                <span class="composer-hint">Enter 发送 · Shift+Enter 换行</span>
+                <div class="composer-actions">
+                  <button type="button" class="file-button" data-testid="open-ingestion" @click="openIngestion">＋ 接入资料</button>
+                  <button v-if="sending" type="button" class="ghost-button stop-button" data-testid="chat-stop" @click="stopMessage">停止</button>
+                  <button class="send-button" data-testid="chat-send" :disabled="!draft.trim() || sending || syncing || ingesting">{{ sending ? '处理中' : '发送 ↑' }}</button>
+                </div>
               </div>
-            </div>
-          </form>
+            </form>
+          </div>
         </section>
 
-        <aside class="memory-panel" v-show="sidebarOpen">
-          <nav class="dock-tabs" aria-label="侧栏导航"><button :class="{active: dock === 'workspace'}" @click="dock = 'workspace'">▤ 工作区</button><button :class="{active: dock === 'memory'}" @click="dock = 'memory'">◇ 记忆</button><button class="dock-expand" @click="sidebarWide = !sidebarWide" :aria-label="sidebarWide ? '还原侧栏宽度' : '扩大侧栏'">{{ sidebarWide ? '↙' : '↗' }}</button></nav>
-          <WorkspacePanel v-show="dock === 'workspace'" :visible="sidebarOpen && dock === 'workspace'" :target="workspaceTarget" :refresh-key="workspaceRefresh" />
-          <div class="memory-shell" v-show="dock === 'memory'">
-          <div class="memory-header">
-            <div><span class="eyebrow">LIVE MEMORY</span><h2>实时记忆面板</h2></div>
-            <div class="live-state"><i :class="{ live }"></i><span>{{ live ? 'API 已连接' : '演示模式' }}</span></div>
-          </div>
-          <ul v-if="live" class="memory-sync-status" aria-label="记忆数据同步状态">
-            <li v-for="[key, label] in memoryPanels" :key="key" :data-testid="'sync-' + key">
-              <span aria-live="polite">{{ label }}：{{ panelLabels[panelState[key].status] }}
-                <small v-if="panelState[key].updatedAt">· 上次成功 {{ panelState[key].updatedAt }}</small>
-              </span>
-              <button v-if="failedPanel(key)" :disabled="sending || syncing || ingesting"
-                :aria-label="'重试' + label" @click="loadDashboard({ keys: [key] })">重试</button>
-            </li>
-          </ul>
-          <nav class="memory-tabs" aria-label="记忆面板导航">
-            <button v-for="tab in tabs" :key="tab[0]" :data-testid="'tab-' + tab[0]" :class="{ active: activeTab === tab[0] }" @click="activeTab = tab[0]">{{ tab[1] }}</button>
+        <aside class="memory-panel" v-show="sidebarOpen" aria-labelledby="context-panel-title">
+          <header class="context-head">
+            <button class="context-back" type="button" @click="closePanel">← 返回聊天</button>
+            <div class="context-heading"><span class="section-kicker">辅助面板</span><h2 id="context-panel-title" tabindex="-1">{{ dock === 'workspace' ? '文件与网页' : dock === 'plugins' ? '扩展' : '记忆' }}</h2></div>
+            <button v-if="dock === 'memory'" class="dock-expand" type="button" :aria-label="sidebarWide ? '还原面板宽度' : '扩宽面板'" :title="sidebarWide ? '还原面板宽度' : '扩宽面板'" @click="sidebarWide = !sidebarWide">{{ sidebarWide ? '⤡' : '⤢' }}</button>
+            <button class="icon-button context-close" type="button" data-testid="context-close" aria-label="关闭辅助面板" @click="closePanel">×</button>
+          </header>
+          <nav class="dock-tabs" role="tablist" aria-label="辅助面板">
+            <button type="button" role="tab" id="dock-tab-workspace" aria-controls="dock-panel-workspace" :aria-selected="dock === 'workspace'" :tabindex="dock === 'workspace' ? 0 : -1" :class="{ active: dock === 'workspace' }" @keydown="onDockKeydown($event, 0)" @click="selectDock('workspace')">工作区</button>
+            <button type="button" role="tab" id="dock-tab-memory" aria-controls="dock-panel-memory" :aria-selected="dock === 'memory'" :tabindex="dock === 'memory' ? 0 : -1" :class="{ active: dock === 'memory' }" @keydown="onDockKeydown($event, 1)" @click="selectDock('memory')">记忆</button>
+            <button type="button" role="tab" id="dock-tab-plugins" aria-controls="dock-panel-plugins" :aria-selected="dock === 'plugins'" :tabindex="dock === 'plugins' ? 0 : -1" :class="{ active: dock === 'plugins' }" @keydown="onDockKeydown($event, 2)" @click="selectDock('plugins')">插件 <span class="dock-count">{{ installedPluginCount }}</span></button>
           </nav>
-          <div class="memory-content">
-            <IngestionPanel v-show="activeTab === 'ingestion'" :key="sessionKey" :user="user" :live="live" :blocked="sending || syncing" @busy="onIngestionBusy" @completed="onIngestionCompleted" />
-            <template v-if="activeTab === 'overview'">
-              <template v-if="stats">
-              <div class="stat-grid"><div><span>总记忆</span><b>{{ stats.total_count }}</b><small>跨层统一视图</small></div><div><span>偏好记忆</span><b>{{ stats.total_preference_count }}</b><small>版本可追溯</small></div><div><span>知识记忆</span><b>{{ stats.total_knowledge_count }}</b><small>可供语义召回</small></div></div>
-              <section class="side-section"><div class="section-title"><h3>记忆分层</h3><span>{{ live ? '来自 /stats' : '演示数据' }}</span></div><div class="layer-row"><span>短期记忆</span><div><i :style="{ width: Math.min(100, stats.layers.short.count / (stats.layers.short.capacity || 20) * 100) + '%' }"></i></div><b>{{ stats.layers.short.count }} / {{ stats.layers.short.capacity || '∞' }}</b></div><div class="layer-row"><span>中期记忆</span><div><i :style="{ width: Math.min(100, stats.layers.mid.count / (stats.layers.mid.capacity || 50) * 100) + '%' }"></i></div><b>{{ stats.layers.mid.count }} / {{ stats.layers.mid.capacity || '∞' }}</b></div><div class="layer-row"><span>长期待入库</span><div><i :style="{ width: Math.min(100, stats.layers.long.count * 10) + '%' }"></i></div><b>{{ stats.layers.long.count }}</b></div><div class="layer-row"><span>知识库</span><div><i :style="{ width: Math.min(100, stats.layers.milvus.count * 8) + '%' }"></i></div><b>{{ stats.layers.milvus.count }}</b></div></section>
-              </template>
-              <p v-else class="empty-state">暂未取得记忆统计</p>
-              <section class="side-section"><div class="section-title"><h3>最近活动</h3><span>自动刷新</span></div><div class="event-item" v-for="event in events" :key="event.id"><i :class="event.type">{{ event.type === 'forget' ? '⌫' : event.type === 'preference' ? '◌' : event.type === 'error' ? '!' : '◇' }}</i><span><b>{{ event.title }}</b><small>{{ event.detail }}</small></span><time>{{ event.time }}</time></div></section>
-            </template>
-            <template v-else-if="activeTab === 'preferences'">
-              <div class="section-title sticky-title"><h3>当前生效偏好</h3><span v-if="!live || profile">{{ activePreferences.length }} 项</span></div><p v-if="profile?.truncated">当前画像达到读取上限，共有 {{ profile.n_latest_available }} 条最新偏好记录。</p><div class="empty-state" v-if="!activePreferences.length">{{ live && !profile ? '暂未取得当前画像' : '当前用户还没有生效偏好' }}</div><article class="preference-card" data-testid="preference-card" v-for="item in activePreferences" :key="item.id || item.key"><div><code>{{ item.key }}</code><span>v{{ item.version }}</span></div><p>{{ item.value }}</p><footer><small>{{ item.scene }} · 置信度 {{ Math.round((item.confidence || 0) * 100) }}%</small><button @click="prepareForget(item, 'preference')">准备遗忘</button></footer></article><div class="section-title history-title"><h3>版本历史</h3><span v-if="preferences">{{ preferences.length }} 条</span></div><div class="empty-state" v-if="!preferences">暂未取得偏好历史</div><div class="history-item" v-for="item in preferences" :key="(item.id || item.key) + '-' + item.version"><b>v{{ item.version }}</b><span><strong>{{ item.key }}</strong><small>{{ item.active ? '当前版本' : '已被替换' }} · {{ item.value }}</small></span></div>
-            </template>
-            <template v-else-if="activeTab === 'memories'">
-              <div class="section-title sticky-title"><h3>本轮召回记忆</h3><span>{{ latency }} · {{ memories.length }} 条</span></div><div class="empty-state" v-if="!memories.length">发送一条消息后，这里会显示真实召回结果</div><article class="memory-card" data-testid="memory-card" v-for="item in memories" :key="item.id"><div><code>{{ item.type }}</code><span>{{ item.layer }}</span><small>{{ item.id }}</small></div><p>{{ item.content }}</p><footer><span>{{ item.scene || '通用场景' }} · {{ item.source || '未知来源' }}</span><button @click="prepareForget(item)">准备遗忘</button></footer></article>
-            </template>
-            <template v-else-if="activeTab === 'forget'">
-              <div class="forget-intro"><span>SECURE FORGETTING</span><h3>安全遗忘</h3><p>用自然语言描述需要删除的记忆。只有后端真实删除成功后，右侧数据才会更新。</p></div><textarea class="forget-input" data-testid="forget-input" v-model="forgetInstruction" placeholder="例如：忘掉关于 Java 的偏好"></textarea><button class="danger-button" data-testid="forget-submit" :disabled="syncing || ingesting || sending" @click="forget">{{ syncing ? '处理中…' : '执行遗忘' }}</button><pre class="forget-result" data-testid="forget-result">{{ forgetResult }}</pre><div class="safety-note"><b>隐私提示</b><span>敏感信息由后端安全模块解析和清理；前端不会伪造成功结果。</span></div>
-            </template>
-          </div>
+          <div class="context-body">
+            <div id="dock-panel-workspace" class="dock-panel" role="tabpanel" aria-labelledby="dock-tab-workspace" v-show="dock === 'workspace'">
+              <WorkspacePanel :key="'workspace-' + user" :visible="sidebarOpen && dock === 'workspace'" :target="workspaceTarget" :refresh-key="workspaceRefresh" />
+            </div>
+            <div id="dock-panel-memory" class="dock-panel memory-shell" role="tabpanel" aria-labelledby="dock-tab-memory" v-show="dock === 'memory'">
+              <section class="memory-sync" aria-label="记忆数据同步状态">
+                <div class="sync-heading"><h3>数据同步</h3><span v-if="live">{{ failedPanelCount ? failedPanelCount + ' 项需重试' : '各面板独立更新' }}</span><span v-else>演示模式不读取 API</span></div>
+                <ul v-if="live" class="sync-list">
+                  <li v-for="[key, label] in memoryPanels" :key="key" :data-testid="'sync-' + key" :class="panelStatusClass(key)">
+                    <span class="sync-dot" aria-hidden="true"></span>
+                    <div class="sync-copy"><b>{{ label }}</b><small aria-live="polite">{{ panelLabels[panelState[key].status] }} · {{ panelLastSuccess(key) }}</small></div>
+                    <button v-if="failedPanel(key)" class="text-button" type="button" :disabled="sending || syncing || ingesting" :aria-label="'重试' + label" @click="loadDashboard({ keys: [key] })">重试</button>
+                  </li>
+                </ul>
+                <p v-else class="sync-demo">当前展示演示数据，连接 API 后可分别查看统计、偏好历史和画像的同步状态。</p>
+              </section>
+              <nav class="memory-tabs" role="tablist" aria-label="记忆面板导航">
+                <button v-for="(tab, index) in tabs" :key="tab[0]" type="button" role="tab" :id="'tab-' + tab[0]" aria-controls="memory-content" :data-testid="'tab-' + tab[0]" :class="{ active: activeTab === tab[0] }" :aria-selected="activeTab === tab[0]" :tabindex="activeTab === tab[0] ? 0 : -1" @keydown="onTabKeydown($event, index)" @click="activeTab = tab[0]">{{ tab[1] }}</button>
+              </nav>
+              <div class="memory-content" id="memory-content" ref="memoryContent" role="tabpanel" :aria-labelledby="'tab-' + activeTab">
+                <IngestionPanel v-show="activeTab === 'ingestion'" :key="sessionKey" :user="user" :live="live" :blocked="sending || syncing" @busy="onIngestionBusy" @completed="onIngestionCompleted" />
+                <section class="panel-section" v-if="activeTab === 'overview'">
+                  <header class="panel-section-head"><div><span class="section-kicker">记忆状态</span><h2 class="panel-title" data-panel-title="overview" tabindex="-1">总览</h2></div><span class="section-meta">{{ live ? '来自 /stats' : '演示数据' }}</span></header>
+                  <div class="stale-banner" v-if="live && failedPanel('stats')"><div><b>统计数据未更新</b><span>{{ panelLastSuccess('stats') }}；以下内容可能已过期，不代表当前状态。</span></div><button class="text-button" type="button" :disabled="syncing" @click="loadDashboard({ keys: ['stats'] })">重试统计</button></div>
+                  <template v-if="stats">
+                    <div class="stat-grid"><article class="stat-card"><span>总记忆</span><strong>{{ stats.total_count }}</strong><small>跨层统一视图</small></article><article class="stat-card"><span>偏好记忆</span><strong>{{ stats.total_preference_count }}</strong><small>版本可追溯</small></article><article class="stat-card"><span>知识记忆</span><strong>{{ stats.total_knowledge_count }}</strong><small>可供语义召回</small></article></div>
+                    <section class="side-section"><div class="section-title"><h3>记忆分层</h3><span>{{ live ? '当前快照' : '演示数据' }}</span></div><div class="layer-list"><div class="layer-row"><span>短期记忆</span><div><i :style="{ width: Math.min(100, stats.layers.short.count / (stats.layers.short.capacity || 20) * 100) + '%' }"></i></div><b>{{ stats.layers.short.count }} / {{ stats.layers.short.capacity || '∞' }}</b></div><div class="layer-row"><span>中期记忆</span><div><i :style="{ width: Math.min(100, stats.layers.mid.count / (stats.layers.mid.capacity || 50) * 100) + '%' }"></i></div><b>{{ stats.layers.mid.count }} / {{ stats.layers.mid.capacity || '∞' }}</b></div><div class="layer-row"><span>长期待入库</span><div><i :style="{ width: Math.min(100, stats.layers.long.count * 10) + '%' }"></i></div><b>{{ stats.layers.long.count }}</b></div><div class="layer-row"><span>知识库</span><div><i :style="{ width: Math.min(100, stats.layers.milvus.count * 8) + '%' }"></i></div><b>{{ stats.layers.milvus.count }}</b></div></div></section>
+                  </template>
+                  <div class="empty-state" v-else><b>暂未取得记忆统计</b><span>确认 API 已连接后重试；这里不会显示 0 或旧数据代替失败结果。</span><button class="text-button" type="button" :disabled="!live || syncing" @click="loadDashboard({ keys: ['stats'] })">重新读取统计</button></div>
+                  <section class="side-section activity-section"><div class="section-title"><h3>最近活动</h3><span>本次打开期间</span></div><div class="event-list" v-if="events.length"><div class="event-item" v-for="event in events" :key="event.id"><i :class="event.type" aria-hidden="true">{{ event.type === 'forget' ? '⌫' : event.type === 'preference' ? '◌' : event.type === 'error' ? '!' : '◇' }}</i><span><b>{{ event.title }}</b><small>{{ event.detail }}</small></span><time>{{ event.time }}</time></div></div><div class="empty-inline" v-else>还没有活动记录。发送消息或同步记忆后会显示在这里。</div></section>
+                </section>
+                <section class="panel-section" v-else-if="activeTab === 'preferences'">
+                  <header class="panel-section-head"><div><span class="section-kicker">偏好</span><h2 class="panel-title" data-panel-title="preferences" tabindex="-1">{{ live && failedPanel('profile') ? '偏好（未确认）' : '当前偏好' }}</h2></div><span class="section-meta">{{ live && profile ? activePreferences.length + ' 项' : live ? '待同步' : activePreferences.length + ' 项演示' }}</span></header>
+                  <div class="stale-banner" v-if="live && (failedPanel('profile') || failedPanel('history'))"><div><b>偏好数据未全部更新</b><span>当前画像：{{ panelLabels[panelState.profile.status] }} · {{ panelLastSuccess('profile') }}；历史：{{ panelLabels[panelState.history.status] }}。未成功更新的数据已标记为未确认。</span></div><button class="text-button" type="button" :disabled="syncing" @click="loadDashboard({ keys: ['profile', 'history'] })">重试偏好</button></div>
+                  <div class="empty-state" v-if="live && !profile"><b>暂未取得当前偏好</b><span>{{ failedPanel('profile') ? '读取失败，未展示旧画像。可重试继续。' : '正在等待画像同步。' }}</span><button class="text-button" type="button" v-if="failedPanel('profile')" :disabled="syncing" @click="loadDashboard({ keys: ['profile'] })">重试画像</button></div>
+                  <div class="empty-state" v-else-if="!activePreferences.length"><b>当前用户还没有生效偏好</b><span>在对话中说明你的习惯，或通过“接入”录入一条配置。</span></div>
+                  <article class="preference-card" data-testid="preference-card" v-for="item in activePreferences" :key="item.id || item.key"><header><code>{{ item.key }}</code><span class="version-chip">v{{ item.version }}</span></header><p>{{ item.value }}</p><footer><small>{{ item.scene }} · 置信度 {{ Math.round((item.confidence || 0) * 100) }}%</small><button class="text-button" type="button" @click="prepareForget(item, 'preference')">准备遗忘</button></footer></article>
+                  <div class="section-title history-title"><h3>版本历史</h3><span v-if="preferences">{{ preferences.length }} 条{{ live && failedPanel('history') ? ' · 未确认' : '' }}</span></div>
+                  <div class="empty-state" v-if="!preferences"><b>暂未取得偏好历史</b><span>{{ live ? '读取失败或当前没有历史版本。' : '连接 API 后可查看版本历史。' }}</span></div>
+                  <div class="history-list" v-else><article class="history-item" v-for="item in preferences" :key="(item.id || item.key) + '-' + item.version"><b>v{{ item.version }}</b><span><strong>{{ item.key }}</strong><small>{{ live && failedPanel('history') ? '状态未确认' : item.active ? '当前版本' : '已被替换' }} · {{ item.value }}</small></span></article></div>
+                </section>
+                <section class="panel-section" v-else-if="activeTab === 'memories'">
+                  <header class="panel-section-head"><div><span class="section-kicker">本轮召回</span><h2 class="panel-title" data-panel-title="memories" tabindex="-1">记忆</h2></div><span class="section-meta">{{ latency }} · {{ memories.length }} 条</span></header>
+                  <p class="panel-caption">这里只显示当前这轮对话实际召回的记忆，不是全部长期记忆。</p>
+                  <div class="empty-state" v-if="!memories.length"><b>还没有本轮召回</b><span>发送一条消息后，这里会显示真实召回结果。演示数据不会冒充实时召回。</span></div>
+                  <article class="memory-card" data-testid="memory-card" v-for="item in memories" :key="item.id"><header><code>{{ item.type }}</code><span>{{ item.layer }}</span><small>{{ item.id }}</small></header><p>{{ item.content }}</p><footer><span>{{ item.scene || '通用场景' }} · {{ item.source || '未知来源' }}</span><button class="text-button" type="button" @click="prepareForget(item)">准备遗忘</button></footer></article>
+                </section>
+                <section class="panel-section" v-else-if="activeTab === 'forget'">
+                  <header class="panel-section-head"><div><span class="section-kicker">安全操作</span><h2 class="panel-title forget-intro" data-panel-title="forget" tabindex="-1">遗忘</h2></div><span class="section-meta">删除后不可撤销</span></header>
+                  <p class="panel-caption">用自然语言描述需要删除的记忆。只有后端真实删除成功后，面板数据才会更新。</p>
+                  <div class="forget-scope"><span>当前用户</span><b>{{ user }}</b><span>· 操作会经后端安全模块解析</span></div>
+                  <label class="field-label" for="forget-instruction">需要遗忘的内容</label>
+                  <textarea id="forget-instruction" class="forget-input" data-testid="forget-input" v-model="forgetInstruction" placeholder="例如：忘掉关于 Java 的偏好"></textarea>
+                  <button class="danger-button" data-testid="forget-submit" :disabled="syncing || ingesting || sending" @click="forget">{{ syncing ? '处理中…' : '执行遗忘' }}</button>
+                  <pre class="forget-result" data-testid="forget-result" aria-live="polite">{{ forgetResult }}</pre>
+                  <div class="safety-note"><b>隐私提示</b><span>敏感信息由后端安全模块解析和清理；前端不会伪造成功结果，也不会保留遗忘前的旧偏好快照。</span></div>
+                </section>
+              </div>
+            </div>
+            <div id="dock-panel-plugins" class="dock-panel plugin-shell" role="tabpanel" aria-labelledby="dock-tab-plugins" v-show="dock === 'plugins'">
+              <section v-if="!activePlugin" class="plugin-manager" aria-labelledby="plugin-manager-title">
+                <header class="panel-section-head">
+                  <div><span class="section-kicker">插件中心</span><h2 id="plugin-manager-title" class="panel-title" data-panel-title="plugins" tabindex="-1">插件</h2></div>
+                  <span class="section-meta">{{ installedPluginCount }} / {{ pluginCatalog.length }} 已启用</span>
+                </header>
+                <p class="panel-caption">把可复用的小工具装进工作台。插件可以贡献输入模板、导出动作或独立面板。</p>
+                <div class="plugin-toolbar">
+                  <label class="plugin-search" for="plugin-search"><span class="sr-only">搜索插件或能力</span><input id="plugin-search" v-model="pluginQuery" type="search" placeholder="搜索插件或能力…" autocomplete="off" /></label>
+                  <div class="plugin-filters" role="group" aria-label="筛选插件">
+                    <button v-for="[value, label] in pluginFilters" :key="value" type="button" :class="{ active: pluginFilter === value }" :aria-pressed="pluginFilter === value" @click="pluginFilter = value">{{ label }}</button>
+                  </div>
+                </div>
+                <div class="plugin-list" v-if="filteredPlugins.length">
+                  <article v-for="plugin in filteredPlugins" :key="plugin.id" class="plugin-card" :class="{ installed: isPluginInstalled(plugin.id) }" :data-testid="'plugin-card-' + plugin.id">
+                    <span class="plugin-icon" :class="'tone-' + plugin.tone" aria-hidden="true">{{ plugin.glyph }}</span>
+                    <div class="plugin-card-body">
+                      <header><h3>{{ plugin.name }}</h3><span class="plugin-version">v{{ plugin.version }}</span></header>
+                      <p>{{ plugin.description }}</p>
+                      <div class="plugin-tags"><span v-for="capability in plugin.capabilities" :key="capability">{{ pluginCapabilityLabels[capability] }}</span></div>
+                      <footer>
+                        <small>{{ plugin.author }} · {{ isPluginInstalled(plugin.id) ? '已启用' : '未安装' }}</small>
+                        <div class="plugin-actions">
+                          <button v-if="isPluginInstalled(plugin.id)" class="text-button" type="button" @click="openPlugin(plugin, $event.currentTarget)">打开</button>
+                          <button class="plugin-toggle" type="button" :class="{ installed: isPluginInstalled(plugin.id) }" @click="togglePlugin(plugin)">{{ isPluginInstalled(plugin.id) ? '移除' : '安装' }}</button>
+                        </div>
+                      </footer>
+                    </div>
+                  </article>
+                </div>
+                <div class="empty-state" v-else><b>没有匹配的插件</b><span>换一个关键词，或切换到“全部”查看本地扩展。</span></div>
+                <div class="plugin-storage-note"><b>本地扩展位</b><span>当前只加载随应用构建的插件，启用状态保存在本机；远程安装、权限审批和后端插件接口尚未接入。</span></div>
+              </section>
+              <section v-else class="plugin-detail" aria-labelledby="plugin-detail-title">
+                <button class="plugin-back" type="button" @click="backToPlugins">← 插件列表</button>
+                <header class="plugin-detail-head">
+                  <span class="plugin-icon" :class="'tone-' + activePlugin.tone" aria-hidden="true">{{ activePlugin.glyph }}</span>
+                  <div><span class="section-kicker">{{ activePlugin.author }} · v{{ activePlugin.version }}</span><h2 id="plugin-detail-title" tabindex="-1">{{ activePlugin.name }}</h2><p>{{ activePlugin.description }}</p></div>
+                </header>
+                <component :is="activePlugin.component" :messages="messages" :memories="memories" :user="user" @use="onPluginUse" />
+              </section>
+            </div>
           </div>
         </aside>
       </main>
-      <Transition><div class="toast" v-if="toast">{{ toast }}</div></Transition>
+      <Transition><div class="toast" aria-hidden="true" v-if="toast">{{ toast }}</div></Transition>
+      <p class="sr-only" aria-live="polite">{{ announcement }}</p>
     </div>
   `,
 }).mount('#app')

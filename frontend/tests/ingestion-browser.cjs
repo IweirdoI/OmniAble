@@ -24,6 +24,8 @@ const base = process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5186';
     await page.getByRole('button', { name: '实时 API 已连接', exact: true }).waitFor();
     const uid = 'ingestion_ui_' + Date.now();
     await page.getByTestId('user-input').fill('  ' + uid + '  ');
+    await page.getByTestId('user-switch').click();
+    await page.waitForFunction(expected => document.querySelector('[data-testid=active-user]')?.textContent === expected, uid);
     await page.waitForFunction(() => !document.querySelector('[data-testid=sync-button]').disabled);
     await page.getByTestId('open-ingestion').click();
     await page.getByTestId('ingest-files').setInputFiles([
@@ -95,9 +97,10 @@ const base = process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5186';
 
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.getByTestId('user-input').fill('other_user_' + Date.now());
+    await page.getByTestId('user-switch').click();
+    await page.waitForFunction(() => !document.querySelector('[data-testid=sync-button]').disabled);
     assert.equal(await page.getByTestId('ingest-result').count(), 0);
     assert.equal(await page.getByTestId('upload-item').count(), 0);
-    await page.waitForFunction(() => !document.querySelector('[data-testid=user-input]').disabled);
     check('switching users clears upload queue and result history');
 
     // Inject only transport/promotion failures to verify partial-outcome UI.
