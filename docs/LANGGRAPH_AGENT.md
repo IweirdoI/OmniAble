@@ -46,6 +46,8 @@ $env:AGENT_TIMEOUT_SECONDS = '60'
 默认关闭可选工具，固定记忆检索始终执行，避免本地小模型不支持工具调用而无法聊天。
 基础工具随 AGENT_ENABLE_TOOLS 开启，包括记忆检索、受限目录内的文件读取/搜索/写入及计算。终端命令和联网抓取另需 AGENT_ENABLE_EXEC_TOOL、AGENT_ENABLE_WEB_TOOL 显式开启；终端还要求 AGENT_EXEC_ALLOWED_COMMANDS 精确命令许可，不等于桌面操作能力。
 
+文件读取、写入、编辑和可恢复删除可与侧栏联动；侧栏启用、版本冲突、恢复记录和网页嵌入边界见 [Agent 文件与网页工作区](AGENT_WORKSPACE.md)。工作区 API 可在不启用模型工具时单独开启。
+
 ## 接口与评测
 
 请求示例：

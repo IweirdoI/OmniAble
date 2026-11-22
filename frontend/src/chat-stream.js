@@ -93,7 +93,7 @@ export function applyChatEvent(message, event) {
     message.phases ||= []
     message.phases = [...message.phases.filter(p => p.name !== event.stage), { name: event.stage, phase: event.phase }]
   } else if (event.type === 'tool_start') {
-    message.steps.push({ id: event.id, name: event.name, status: 'running', result: '' })
+    message.steps.push({ id: event.id, name: event.name, args: event.args || {}, status: 'running', result: '' })
   } else if (event.type === 'tool_result') {
     const step = message.steps.find(s => event.id ? s.id === event.id : s.name === event.name && s.status === 'running')
     if (step) { step.status = event.ok ? 'done' : 'failed'; step.result = event.content || '' }

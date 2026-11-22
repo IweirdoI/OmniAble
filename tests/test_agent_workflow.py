@@ -67,6 +67,18 @@ def test_routes(text, route):
     assert route_request(text) == route
 
 
+def test_delete_file_is_verified_and_does_not_forget_memory(memory, tmp_path, monkeypatch):
+    monkeypatch.setenv('AGENT_EXEC_CWD', str(tmp_path))
+    (tmp_path / 'remove.txt').write_text('synthetic', encoding='utf-8')
+    model = Model({'tool_calls': [call('delete_file', {'path': 'remove.txt'})]}, {'content': '文件已删除'})
+    result = MemoryAgent(memory, model).chat(request('删除 remove.txt', save_memory=False))
+    assert result['workflow']['route'] == 'tool_task'
+    assert result['workflow']['status'] == 'completed'
+    assert result['workflow']['artifacts'] == [{'path': 'remove.txt', 'deleted': True}]
+    assert not (tmp_path / 'remove.txt').exists()
+    memory.forget.assert_not_called()
+
+
 @pytest.mark.parametrize("stream", [False, True])
 def test_forget_and_clarification_share_routes(memory, stream):
     for text, expected in [("请忘掉关于 Java 的偏好", "completed"), ("忘掉那个，再帮我写一个报告", "needs_clarification")]:

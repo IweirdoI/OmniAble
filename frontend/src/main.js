@@ -1,6 +1,8 @@
 import { computed, createApp, nextTick, onMounted, ref, reactive } from 'vue'
 import './style.css'
 import IngestionPanel from './IngestionPanel.js'
+import WorkspacePanel from './WorkspacePanel.js'
+import { fileLink } from './workspace.js'
 import { authHeaders, requestApi } from './ingestion.js'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -51,7 +53,7 @@ const initialMessages = [
 ]
 
 createApp({
-  components: { IngestionPanel },
+  components: { IngestionPanel, WorkspacePanel },
   setup() {
     const user = ref('demo_user')
     // Draft for the header field so typing does not sync / disable the input mid-keystroke.
@@ -63,6 +65,28 @@ createApp({
     const sessionKey = ref(0)
     const modelSlow = ref(false)
     const activeTab = ref('overview')
+    const dock = ref('workspace'), sidebarOpen = ref(true), sidebarWide = ref(false)
+    const workspaceTarget = ref(null), workspaceRefresh = ref(0)
+    const openWorkspace = async (kind, path) => {
+      sidebarOpen.value = true; dock.value = 'workspace'
+      workspaceTarget.value = { kind, path, at: Date.now() }
+      await nextTick()
+      if (window.matchMedia('(max-width: 1180px)').matches) document.querySelector('.memory-panel')?.scrollIntoView({ behavior: 'smooth' })
+    }
+    const toggleSidebar = async () => {
+      sidebarOpen.value = !sidebarOpen.value
+      await nextTick()
+      if (sidebarOpen.value && window.matchMedia('(max-width: 1180px)').matches) document.querySelector('.memory-panel')?.scrollIntoView({ behavior: 'smooth' })
+    }
+    const openChatLink = (event) => {
+      const link = event.target.closest('a[href]')
+      if (!link || event.ctrlKey || event.metaKey || event.shiftKey) return
+      const href = link.getAttribute('href')
+      try {
+        if (/^https?:\/\//i.test(href)) { event.preventDefault(); openWorkspace('web', href) }
+        else { const path = fileLink(href); if (path) { event.preventDefault(); openWorkspace('file', path) } }
+      } catch { event.preventDefault(); tell('链接格式无效') }
+    }
     const draft = ref('')
     const agentHistory = ref([])
     const useMemory = ref(true)
@@ -302,6 +326,7 @@ createApp({
           if (requestSession !== sessionKey.value) return
           ensureMsg()
           applyChatEvent(assistantMsg, event)
+          if (event.type === 'tool_result' || event.type === 'done' || event.type === 'error') workspaceRefresh.value++
           if (event.type === 'token') {
             scheduleRender(assistantMsg)
           } else if (event.type === 'done') {
@@ -360,6 +385,7 @@ createApp({
     }
 
     const openIngestion = async () => {
+      dock.value = 'memory'; sidebarOpen.value = true
       activeTab.value = 'ingestion'
       await nextTick()
       if (window.matchMedia('(max-width: 1050px)').matches) document.querySelector('.memory-panel')?.scrollIntoView({ behavior: 'smooth' })
@@ -367,6 +393,7 @@ createApp({
 
     const prepareForget = (item, kind = 'memory') => {
       forgetInstruction.value = kind === 'preference' ? `忘掉关于 ${item.key} 的偏好` : `忘掉记忆 ${item.id}`
+      dock.value = 'memory'; sidebarOpen.value = true
       activeTab.value = 'forget'
     }
 
@@ -444,20 +471,21 @@ createApp({
       connect({ quiet: true })
     })
 
-    return { stopMessage, runLabels, stageLabels, useMemory, saveMemory, newChat, user, userDraft, live, syncing, sending, ingesting, sessionKey, onIngestionBusy, onIngestionCompleted, modelSlow, activeTab, draft, messages, memories, preferences, stats, latency, lastSynced, events, forgetInstruction, forgetResult, toast, chatScroll, tabs, activePreferences, statusText, connect, loadDashboard, commitUser, onUserKeydown, sendMessage, handleComposerKeydown, openIngestion, usePrompt, prepareForget, forget, renderMarkdown }
+    return { dock, sidebarOpen, sidebarWide, workspaceTarget, workspaceRefresh, openWorkspace, openChatLink, toggleSidebar, stopMessage, runLabels, stageLabels, useMemory, saveMemory, newChat, user, userDraft, live, syncing, sending, ingesting, sessionKey, onIngestionBusy, onIngestionCompleted, modelSlow, activeTab, draft, messages, memories, preferences, stats, latency, lastSynced, events, forgetInstruction, forgetResult, toast, chatScroll, tabs, activePreferences, statusText, connect, loadDashboard, commitUser, onUserKeydown, sendMessage, handleComposerKeydown, openIngestion, usePrompt, prepareForget, forget, renderMarkdown }
   },
   template: `
     <div class="app-shell">
       <header class="topbar">
         <div class="brand-mark"><span>◇</span><div><b>麒忆智脑</b><small>OS Agent Memory</small></div></div>
         <div class="top-actions">
+          <button class="sidebar-toggle" @click="toggleSidebar" :aria-expanded="sidebarOpen">{{ sidebarOpen ? '收起侧栏' : '打开工作区' }}</button>
           <label>用户 <input v-model.trim="userDraft" data-testid="user-input" aria-label="用户 ID" title="改完后按回车或点「同步」再切换用户" @keydown="onUserKeydown" @blur="commitUser({ quiet: true })" /></label>
           <button class="sync-button" data-testid="sync-button" :disabled="syncing || ingesting || sending" @click="commitUser()">{{ syncing ? '同步中…' : '↻ 同步' }}</button>
           <button class="connection-button" data-testid="connection-button" :class="{ live }" :disabled="sending || syncing || ingesting" @click="connect()"><i></i>{{ statusText }}</button>
         </div>
       </header>
 
-      <main class="dual-layout">
+      <main class="dual-layout" :class="{ 'sidebar-hidden': !sidebarOpen, 'sidebar-wide': sidebarOpen && sidebarWide }">
         <section class="chat-panel">
           <div class="panel-heading">
             <div><span class="eyebrow">MEMORY ASSISTANT</span><h1>和麒忆助理对话</h1><p>对话会参与记忆召回，并在右侧实时形成偏好与记忆记录。</p></div>
@@ -468,18 +496,20 @@ createApp({
               <div class="avatar">{{ message.role === 'assistant' ? '麒' : 'Z' }}</div>
               <div class="message-wrap">
                 <div class="message-meta"><b>{{ message.role === 'assistant' ? '麒忆助理' : '你' }}</b><span>{{ message.time }}</span></div>
-                <div class="bubble" v-html="message.html || renderMarkdown(message.content)"></div>
+                <div class="bubble" @click="openChatLink" v-html="message.html || renderMarkdown(message.content)"></div>
                 <p class="run-status" data-testid="run-status" v-if="message.status" role="status">{{ runLabels[message.status] || message.status }}<span v-if="message.status === 'running' && message.stage"> · {{ stageLabels[message.stage] || message.stage }}</span></p>
                 <p class="run-failure" data-testid="run-failure" v-if="message.failure" role="alert">{{ message.failure }}</p>
                 <p class="run-status" v-if="message.memoryWrite">本轮记忆：{{ ({ accepted: '已接收，按记忆策略处理', rejected: '未通过保存策略', disabled: '未启用保存', skipped: '已跳过保存', failed: '保存失败', unknown: '结果待同步确认' })[message.memoryWrite] || message.memoryWrite }}</p>
                 <ol class="workflow-phases" v-if="message.phases && message.phases.length"><li v-for="phase in message.phases" :key="phase.name">{{ stageLabels[phase.name] || phase.name }} · {{ phase.phase === 'end' ? '完成' : phase.phase === 'interrupted' ? '已中断' : '处理中' }}</li></ol>
-                <ul v-if="message.workflow?.artifacts?.length"><li v-for="artifact in message.workflow.artifacts" :key="artifact.path">已核实文件：{{ artifact.path }}</li></ul>
+                <ul v-if="message.workflow?.artifacts?.length"><li v-for="artifact in message.workflow.artifacts" :key="artifact.path"><button class="artifact-link" @click="openWorkspace(artifact.deleted ? 'changes' : 'file', artifact.path)">{{ artifact.deleted ? '已删除 · 查看变更' : '打开文件' }}：{{ artifact.path }}</button></li></ul>
                 <div class="tool-steps" v-if="message.steps && message.steps.length">
                   <div class="tool-step" v-for="step in message.steps" :key="step.id || step.name">
                     <span class="tool-dot" :class="step.status"></span>
                     <span class="tool-name">{{ step.name }}</span>
                     <code class="tool-args" v-if="step.args && Object.keys(step.args).length">{{ JSON.stringify(step.args) }}</code>
                     <span class="tool-state" :class="step.status">{{ step.status === 'running' ? '运行中' : step.status === 'done' ? '完成' : step.status === 'interrupted' ? '已中断' : '失败' }}</span>
+                    <button v-if="step.args?.path" class="tool-open" @click="openWorkspace(step.name === 'delete_file' ? 'changes' : 'file', step.args.path)">在侧栏查看</button>
+                    <button v-if="step.args?.url" class="tool-open" @click="openWorkspace('web', step.args.url)">打开网页</button>
                     <pre class="tool-output" v-if="step.result">{{ step.result }}</pre>
                   </div>
                 </div>
@@ -512,7 +542,10 @@ createApp({
           </form>
         </section>
 
-        <aside class="memory-panel">
+        <aside class="memory-panel" v-show="sidebarOpen">
+          <nav class="dock-tabs" aria-label="侧栏导航"><button :class="{active: dock === 'workspace'}" @click="dock = 'workspace'">▤ 工作区</button><button :class="{active: dock === 'memory'}" @click="dock = 'memory'">◇ 记忆</button><button class="dock-expand" @click="sidebarWide = !sidebarWide" :aria-label="sidebarWide ? '还原侧栏宽度' : '扩大侧栏'">{{ sidebarWide ? '↙' : '↗' }}</button></nav>
+          <WorkspacePanel v-show="dock === 'workspace'" :visible="sidebarOpen && dock === 'workspace'" :target="workspaceTarget" :refresh-key="workspaceRefresh" />
+          <div class="memory-shell" v-show="dock === 'memory'">
           <div class="memory-header">
             <div><span class="eyebrow">LIVE MEMORY</span><h2>实时记忆面板</h2></div>
             <div class="live-state"><i :class="{ live }"></i><span>{{ live ? '实时同步' : '演示模式' }}<small>上次同步 {{ lastSynced }}</small></span></div>
@@ -536,6 +569,7 @@ createApp({
             <template v-else-if="activeTab === 'forget'">
               <div class="forget-intro"><span>SECURE FORGETTING</span><h3>安全遗忘</h3><p>用自然语言描述需要删除的记忆。只有后端真实删除成功后，右侧数据才会更新。</p></div><textarea class="forget-input" data-testid="forget-input" v-model="forgetInstruction" placeholder="例如：忘掉关于 Java 的偏好"></textarea><button class="danger-button" data-testid="forget-submit" :disabled="syncing || ingesting || sending" @click="forget">{{ syncing ? '处理中…' : '执行遗忘' }}</button><pre class="forget-result" data-testid="forget-result">{{ forgetResult }}</pre><div class="safety-note"><b>隐私提示</b><span>敏感信息由后端安全模块解析和清理；前端不会伪造成功结果。</span></div>
             </template>
+          </div>
           </div>
         </aside>
       </main>

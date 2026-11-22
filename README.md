@@ -17,6 +17,8 @@
 现有聊天页已接入 `POST /agent/chat`，支持模型回答、记忆召回与摄取、遗忘以及关闭记忆的对照测试。
 安装依赖后启动模型服务和 API；Windows 启动、云端模型配置、麒麟迁移及验证步骤见 [LangGraph 接入说明](docs/LANGGRAPH_AGENT.md)。
 
+聊天旁可打开文件、编辑与恢复删除、查看累计变更及浏览网页，启用方式和权限边界见 [Agent 工作区](docs/AGENT_WORKSPACE.md)。
+
 
 
 # 麒忆智脑 — OS Agent 记忆优化系统

@@ -481,8 +481,9 @@ def test_search_content_sandbox():
     assert _search_content("[bad(", path="src/agent")[0] is False
 
 
-def test_write_and_edit_file_sandbox():
+def test_write_and_edit_file_sandbox(tmp_path, monkeypatch):
     import os
+    monkeypatch.setenv('AGENT_EXEC_CWD', str(tmp_path))
     target = "tmp_agent_write_test.txt"
     try:
         # 写入新文件
@@ -510,8 +511,9 @@ def test_write_and_edit_file_sandbox():
         assert _write_file("../esc.txt", "x")[0] is False
         assert _edit_file("../esc.txt", "x", "y")[0] is False
     finally:
-        if os.path.exists(target):
-            os.remove(target)
+        full = tmp_path / target
+        if os.path.exists(full):
+            os.remove(full)
 
 
 def test_new_basic_tools_registered_and_run(memory):

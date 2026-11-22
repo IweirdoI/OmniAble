@@ -26,6 +26,16 @@ orchestrator: MemoryOrchestrator = create_orchestrator()
 
 app = FastAPI(title="Kylin OS Agent Memory API", version="0.3.0")
 
+from api.workspace import router as workspace_router
+from src.agent.workspace import WorkspaceError
+
+app.include_router(workspace_router)
+
+
+@app.exception_handler(WorkspaceError)
+async def workspace_error(request, exc):
+    return JSONResponse(status_code=exc.status, content={"detail": str(exc)})
+
 
 @app.exception_handler(SemanticDetectionUnavailable)
 async def privacy_unavailable(request, exc):

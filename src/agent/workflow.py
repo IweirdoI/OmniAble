@@ -114,6 +114,9 @@ def route_request(message: str) -> str:
     """
     text = message.strip()
     command = re.match(r"^(?:请)?(?:帮我)?(?:忘掉|忘记|删除|清除|删掉)\s*(.*)", text)
+    # Filesystem deletion is an Agent task, never a memory-forgetting command.
+    if command and re.search(r"文件|目录|[/\\]|\b[\w-]+\.[a-zA-Z0-9]{1,12}\b", command[1]):
+        return "tool_task"
     if command:
         target = command[1].strip(" 。！!？?")
         if (not target or target in {"那个", "这个", "它", "一些", "一些内容", "之前那条"}
