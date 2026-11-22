@@ -8,6 +8,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# 控制台切 UTF-8：默认 GBK 控制台下 smoke 与依赖输出的中文会显示乱码（TASK-002 复核）。
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch { }
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 

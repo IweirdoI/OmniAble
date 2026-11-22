@@ -16,14 +16,14 @@ Hash 向量没有语义。报告里如果写了 Windows BGE 的数字，必须�
 
 ## 日常
 
-需要 Python 3.12。
+前置：Python 3.12；`scripts/clerk.ps1` 依赖 PATH 里的 `git`（只装 GitHub Desktop 时其自带 git 不在 PATH，clerk 会报「identity is missing」的误导错误，先装独立 Git 或把 git 加入 PATH）；前端联调需要 Node.js。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1
 powershell -ExecutionPolicy Bypass -File scripts\dev_windows.ps1
 ```
 
-第一条会创建 `.venv`，安装 `requirements-windows.txt`，必要时复制 `.env`，并用 memory + hash 跑 `scripts/smoke_e2e.py`。第二条在 http://127.0.0.1:8000 启动 API。
+第一条会创建 `.venv`，安装 `requirements-windows.txt`，必要时复制 `.env`，并用 memory + hash 跑 `scripts/smoke_e2e.py`。第二条在 http://127.0.0.1:8000 启动 API。注意：前端 Vite 代理默认指向 18080，要与前端联调请直接用 `dev_windows.ps1 -Port 18080`，不要按「默认端口起服务 → 前端代理报错」的顺序排查接口。
 
 同一终端里要手动带上环境时：
 
@@ -33,6 +33,8 @@ powershell -ExecutionPolicy Bypass -File scripts\dev_windows.ps1
 ```
 
 `windows_env.ps1` 只改当前窗口：UTF-8、`PYTHONPATH`、记忆后端 `memory`、向量后端 `hash`。
+
+提示：默认控制台是 GBK 编码，`curl -d "…中文…"` 会报 body 解析错误（TASK-002 复核）。测中文载荷请用 UTF-8 文件 `curl --data-binary @payload.json`，或改用 PowerShell `Invoke-RestMethod`。
 
 ## 语义检索
 
