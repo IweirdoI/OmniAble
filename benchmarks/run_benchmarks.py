@@ -24,6 +24,7 @@ import json
 import statistics
 import sys
 import time
+import zlib
 from datetime import datetime
 from pathlib import Path
 
@@ -49,11 +50,16 @@ DATASETS_DIR = ROOT / "benchmarks" / "datasets"
 
 
 def _hash_embedding(text: str, dim: int = 48) -> list[float]:
+    """确定性字符哈希向量，与 tests/test_metrics.py 的 crc32 基线同源。
+
+    必须使用进程间稳定的哈希（zlib.crc32），不能用内置 hash()——
+    后者受 PYTHONHASHSEED 影响，独立进程结果不同，跑分会漂移（Issue #3）。
+    """
     vec = [0.0] * dim
     normalized = text.lower()
     for i in range(len(normalized) - 1):
         pair = normalized[i : i + 2]
-        vec[abs(hash(pair)) % dim] += 1.0
+        vec[zlib.crc32(pair.encode("utf-8")) % dim] += 1.0
     return vec
 
 
@@ -143,7 +149,7 @@ def _memory_item(content, *, source_type="conversation", confidence=0.9, updated
     if updated_at is not None:
         kwargs["updated_at"] = updated_at
     return MemoryItem(
-        id=f"m-{abs(hash(content)) % 100000}",
+        id=f"m-{zlib.crc32(content.encode('utf-8')) % 100000}",
         memory_type=MemoryType.PREFERENCE,
         layer=MemoryLayer.LONG,
         content=content,
