@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""规模与并发基线 — TASK-006 / Issue #5 Phase 1（证据采集，不含优化实现）.
+"""规模与并发基线 — TASK-006 / Issue #5（优化前后可复跑对比）.
 
 对 memory_stats / get_preference_profile / recall(词面补召) 三条热点路径，
 在固定虚构数据上测量 100 / 1k / 10k 规模与多用户并发下的：
@@ -180,12 +180,13 @@ def insert_records(client, records: list[dict]) -> None:
 
 
 class CountingClient:
-    """计数代理：统计存储适配器调用次数（后端调用次数口径）。"""
+    """计数代理：按方法统计存储适配器调用次数（后端调用次数口径）。"""
+
+    TRACKED = ("search", "count", "get_by_id", "update", "delete", "delete_by_filters")
 
     def __init__(self, inner):
         self._inner = inner
-        self.calls = {"search": 0, "get_by_id": 0, "update": 0,
-                      "delete": 0, "delete_by_filters": 0}
+        self.calls = {name: 0 for name in self.TRACKED}
         self._lock = threading.Lock()
 
     def _tick(self, name: str):
@@ -195,6 +196,10 @@ class CountingClient:
     def search(self, *args, **kwargs):
         self._tick("search")
         return self._inner.search(*args, **kwargs)
+
+    def count(self, *args, **kwargs):
+        self._tick("count")
+        return self._inner.count(*args, **kwargs)
 
     def get_by_id(self, *args, **kwargs):
         self._tick("get_by_id")
@@ -214,6 +219,11 @@ class CountingClient:
 
     def __getattr__(self, name):
         return getattr(self._inner, name)
+
+
+def _calls_delta(client: CountingClient, before: dict[str, int]) -> dict[str, float]:
+    """按方法返回调用次数增量，并归一化为每次调用的均值由调用方处理。"""
+    return {name: client.calls.get(name, 0) - before.get(name, 0) for name in client.calls}
 
 
 # ---------------------------------------------------------------------------
@@ -247,8 +257,9 @@ def _measure(fn, *, reps: int, warmup: int = 2) -> dict:
     }
 
 
-def _backend_calls(client: CountingClient) -> int:
-    return sum(client.calls.values())
+def _format_calls(delta: dict[str, float]) -> str:
+    parts = [f"{name}×{value}" for name, value in delta.items() if value]
+    return " ".join(parts) if parts else "0"
 
 
 # ---------------------------------------------------------------------------
@@ -299,15 +310,21 @@ def run_scale(
             office["kv"] == expected["latest_kv"]
         )
 
-    # ---- 延迟 / 内存 / 后端调用 ----
+    # ---- 延迟 / 内存 / 后端调用（按方法记录，归一化为每次调用的均值）----
     probe_user = users[0]
     stats_ops = reps + warmup
     calls_before = dict(client.calls)
     stats_latency = _measure(lambda: orchestrator.memory_stats(probe_user), reps=reps, warmup=warmup)
-    stats_calls = round((_backend_calls(client) - sum(calls_before.values())) / stats_ops, 2)
+    stats_delta = {
+        name: round((value - calls_before.get(name, 0)) / stats_ops, 2)
+        for name, value in client.calls.items()
+    }
     calls_before = dict(client.calls)
     profile_latency = _measure(lambda: orchestrator.get_preference_profile(probe_user), reps=reps, warmup=warmup)
-    profile_calls = round((_backend_calls(client) - sum(calls_before.values())) / stats_ops, 2)
+    profile_delta = {
+        name: round((value - calls_before.get(name, 0)) / stats_ops, 2)
+        for name, value in client.calls.items()
+    }
 
     recall_query = f"如何部署罕见关键词 qxyz{scale} 并排查超时"  # 含未命中词面 → 触发词面补召
     recall_ops = max(reps - 2, 3) + 1
@@ -321,7 +338,10 @@ def run_scale(
         reps=max(reps - 2, 3),
         warmup=1,
     )
-    recall_calls = round((_backend_calls(client) - sum(calls_before.values())) / recall_ops, 2)
+    recall_delta = {
+        name: round((value - calls_before.get(name, 0)) / recall_ops, 2)
+        for name, value in client.calls.items()
+    }
     strategy = orchestrator.recall(
         __import__("src.common.models", fromlist=["RetrievalQuery"]).RetrievalQuery(
             query=recall_query, user_id=probe_user, top_k=5,
@@ -384,9 +404,9 @@ def run_scale(
             "recall_lexical": recall_latency,
         },
         "backend_calls_per_op": {
-            "memory_stats": stats_calls,
-            "get_preference_profile": profile_calls,
-            "recall_lexical": recall_calls,
+            "memory_stats": stats_delta,
+            "get_preference_profile": profile_delta,
+            "recall_lexical": recall_delta,
             "recall_strategy": strategy,
         },
         "concurrency": concurrency,
@@ -402,9 +422,9 @@ def run_scale(
 def run_truncation_probe(*, total_latest: int = 10_500, seed: int = 7) -> dict:
     """构造 total_latest 条 is_latest=True 的单用户偏好（键互不相同）。
 
-    profile 路径 top_k=10_000：当前实现为「先过滤后截断」，过滤后超出
-    top_k 的最新记录会被静默丢弃 → 画像键数少于真值且无任何告警。
-    本探针量化这一静默漏数，作为 Phase 2 引入 truncated 标志的证据。
+    profile 路径 top_k=10_000：实现为「先过滤后截断」，过滤后超出 top_k
+    的最新记录不会进入画像。Phase 2 后截断不再静默——画像显式携带
+    truncated / n_latest_available / profile_top_k 字段（TASK-006）。
     """
     from src.core.orchestrator import MemoryOrchestrator
     from src.knowledge.memory_service.in_memory_client import InMemoryMilvusClient
@@ -438,18 +458,20 @@ def run_truncation_probe(*, total_latest: int = 10_500, seed: int = 7) -> dict:
 
     profile = orchestrator.get_preference_profile(user_id)
     observed_keys = profile["n_features"]
-    # stats 路径 top_k=100_000：本规模应精确计数（机制相同、上限不同）
+    # stats 路径走 count 聚合：本规模应精确计数
     stats = orchestrator.memory_stats(user_id)
     return {
         "total_latest_preferences": total_latest,
-        "profile_top_k": 10_000,
+        "profile_top_k": profile.get("profile_top_k"),
         "expected_features": total_latest,
         "observed_features": observed_keys,
-        "silent_missed_keys": max(total_latest - observed_keys, 0),
+        "missed_keys_beyond_top_k": max(total_latest - observed_keys, 0),
+        "truncated_flag": profile.get("truncated"),
+        "n_latest_available": profile.get("n_latest_available"),
         "stats_count": stats.milvus.count,
         "stats_exact": stats.milvus.count == total_latest,
-        "note": "stats 上限为 100_000，同等静默截断机制在超过该上限时生效；"
-                "本规模未触发 stats 截断，profile 截断已量化",
+        "note": "Phase 2 后截断显式暴露（truncated/n_latest_available）；"
+                "调用方可据此分页或提示，不再静默漏数",
     }
 
 
@@ -471,7 +493,7 @@ def _git_commit() -> str | None:
 
 def _render_md(report: dict) -> str:
     lines = [
-        "# 规模与并发基线（TASK-006 / Issue #5 Phase 1）",
+        "# 规模与并发基线（TASK-006 / Issue #5）",
         "",
         f"- 生成时间：{report['meta']['generated_at']}",
         f"- 后端：{report['meta']['backend']}（仅接线证据，不代表 Milvus/麒麟性能）",
@@ -491,7 +513,7 @@ def _render_md(report: dict) -> str:
             ("recall_lexical", f"recall 词面补召（{calls.get('recall_strategy', '?')}）"),
         ):
             m = lat[name]
-            call_note = calls.get(name, "-")
+            call_note = _format_calls(calls.get(name, {})) if isinstance(calls.get(name), dict) else calls.get(name, "-")
             lines.append(f"| {label} | {m['p50_ms']} | {m['p95_ms']} | {m['mean_ms']} | "
                          f"{m['peak_alloc_delta_mb']} | {call_note} |")
         ok = section["correctness"]["all_ok"]
@@ -507,11 +529,13 @@ def _render_md(report: dict) -> str:
 
     probe = report.get("truncation_probe")
     if probe:
-        lines.append("## 截断探针（超上限静默漏数证据）")
+        lines.append("## 截断探针（超上限不得静默漏数）")
         lines.append("")
-        lines.append(f"- 最新偏好 {probe['total_latest_preferences']} 条（键互不相同），profile top_k={probe['profile_top_k']}")
+        lines.append(f"- 最新偏好 {probe['total_latest_preferences']} 条（键互不相同），profile top_k={probe.get('profile_top_k')}")
         lines.append(f"- 期望特征数 {probe['expected_features']}，实际 {probe['observed_features']}，"
-                     f"**静默丢失 {probe['silent_missed_keys']} 个键（无任何告警）**")
+                     f"超出 top_k {probe.get('missed_keys_beyond_top_k')} 个键")
+        lines.append(f"- 截断显式暴露：truncated={probe.get('truncated_flag')}，"
+                     f"n_latest_available={probe.get('n_latest_available')}（不再静默）")
         lines.append(f"- stats 计数：{probe['stats_count']}（精确：{probe['stats_exact']}）")
         lines.append("")
     lines.append("> 局限性：InMemoryMilvusClient + hash 向量，仅验证链路与口径；"
@@ -538,7 +562,7 @@ def main() -> int:
     report: dict = {
         "meta": {
             "project": "麒忆智脑 / MOKOA",
-            "task": "TASK-006 / Issue #5 Phase 1（规模与并发基线）",
+            "task": "TASK-006 / Issue #5（规模与并发基线，优化前后可复跑对比）",
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "seed": args.seed,
             "backend": "InMemoryMilvusClient + hash embedding（接线证据）",
@@ -573,7 +597,8 @@ def main() -> int:
         print("[probe] profile top_k 截断探针 ...", flush=True)
         probe = run_truncation_probe()
         report["truncation_probe"] = probe
-        print(f"        静默丢失键数 = {probe['silent_missed_keys']}", flush=True)
+        print(f"        超出 top_k 键数 = {probe['missed_keys_beyond_top_k']}, "
+              f"truncated 标志 = {probe['truncated_flag']}", flush=True)
 
     out_dir = _ROOT / args.out
     out_dir.mkdir(parents=True, exist_ok=True)

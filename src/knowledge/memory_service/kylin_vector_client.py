@@ -133,10 +133,10 @@ class _SdkTransport:
     def upsert(self, *, collection_name, data):
         return self.bridge.call("upsert", collection=collection_name, rows=data, fields=self.schema.fields)
 
-    def query(self, *, collection_name, filter, output_fields, limit):
+    def query(self, *, collection_name, filter, output_fields, limit=None):
         rows = self.bridge.call("query", collection=collection_name, filter=filter, output_fields=output_fields)
         # Client-side cap only. SDK does not expose server limit/offset.
-        return rows[:limit]
+        return rows if limit is None else rows[:limit]
 
     def search(self, *, collection_name, data, filter, limit, output_fields, search_params):
         if len(data) != 1 or search_params.get("metric_type") != "COSINE":
@@ -150,6 +150,22 @@ class _SdkTransport:
 
 class KylinVectorClient(MilvusClient):
     """Reuse row mapping, filters, full-row upsert and soft/hard delete logic."""
+
+    def count(self, filters):
+        """Count an uncapped ID projection through the existing SDK query ABI.
+
+        The current bridge has no validated count(*) aggregation. This avoids
+        transferring content but still reads all matching IDs; it is not a
+        server-side aggregate or a native performance acceptance result.
+        """
+        self._ensure_connected()
+        rows = self.client.query(
+            collection_name=self.collection,
+            filter=self._build_expr({"is_deleted": False, **filters}),
+            output_fields=["memory_id"],
+        )
+        return len(rows)
+
     def __init__(self, *, collection: str, vector_dim: int, library: str | None = None,
                  endpoint: str = "", timeout_ms: int = 5000):
         if vector_dim <= 0:

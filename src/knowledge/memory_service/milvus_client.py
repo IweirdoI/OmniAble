@@ -126,36 +126,83 @@ metadata 的特殊性：注意列表中包含 metadata（JSON类型）。
         embedding: list[float] | None,
         filters: dict[str, Any],
         top_k: int = 5,
+        *,
+        output_fields: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        """字段投影：output_fields=None 时保持全字段（向后兼容）。
+
+        TASK-006：画像路径只需元数据字段，投影避免把大 content 拉给调用方。
+        """
         self._ensure_connected()
         merged_filters = {"is_deleted": False, **filters}
         expr = self._build_expr(merged_filters)
+        fields = list(output_fields) if output_fields is not None else list(self._OUTPUT_FIELDS)
+        # Logical profile fields such as scope/n_observations live in the JSON
+        # metadata column, not in the explicit Milvus/SDK schema.
+        stored_fields = set(self._OUTPUT_FIELDS) | {"embedding"}
+        query_fields = list(dict.fromkeys(
+            field if field in stored_fields else "metadata" for field in fields
+        ))
+
+        def public_hit(row):
+            if output_fields is None:
+                return self._public_record(row)
+            nested = row.get("metadata") or {}
+            projected = {}
+            for field in fields:
+                if field in row:
+                    projected[field] = row[field]
+                elif field in nested:
+                    projected[field] = nested[field]
+            return self._public_record(projected)
 
         if embedding is None:
             rows = self.client.query(
                 collection_name=self.collection,
                 filter=expr,
-                output_fields=self._OUTPUT_FIELDS,
+                output_fields=query_fields,
                 limit=top_k,
             )
-            return [self._public_record(row) for row in rows]
+            return [public_hit(row) for row in rows]
 
         results = self.client.search(
             collection_name=self.collection,
             data=[embedding],
             filter=expr,
             limit=top_k,
-            output_fields=self._OUTPUT_FIELDS,
+            output_fields=query_fields,
             search_params={"metric_type": "COSINE", "params": {}},
         )
 
         items: list[dict[str, Any]] = []
         for hit in results[0] if results else []:
             entity = hit.get("entity", {})
-            item = self._public_record(entity)
+            item = public_hit(entity)
             item["score"] = hit.get("distance")     #score是相似度分数
             items.append(item)
         return items
+
+    def count(self, filters: dict[str, Any]) -> int:
+        """服务端 count(*) 聚合计数（不含已删除记录），过滤语义与 search 一致。
+
+        TASK-006：供 memory_stats 等统计路径替代全量拉取后 Python 计数。
+        count(*) 输出在 pymilvus 2.x query 上可用；Milvus Lite / 麒麟向量引擎
+        的兼容性以真实后端实测为准（Windows 开发环境未安装 milvus_lite）。
+        """
+        self._ensure_connected()
+        merged_filters = {"is_deleted": False, **filters}
+        expr = self._build_expr(merged_filters)
+        rows = self.client.query(
+            collection_name=self.collection,
+            filter=expr,
+            output_fields=["count(*)"],
+        )
+        if not rows:
+            return 0
+        value = rows[0].get("count(*)") if isinstance(rows[0], dict) else None
+        if value is None:
+            raise MemoryBackendUnavailable("Invalid count(*) response from memory backend")
+        return int(value)
 
     def get_by_id(self, memory_id: str, *, include_embedding: bool = False) -> dict[str, Any] | None:
         self._ensure_connected()
