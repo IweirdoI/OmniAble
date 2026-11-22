@@ -50,7 +50,7 @@ from src.preference.llm_client import SiliconFlowClient  # noqa: E402
 def build_llm_client(endpoint: str = "remote") -> SiliconFlowClient:
     """按 endpoint 构造抽取/判卷用的 LLM 客户端。
 
-    - remote: 显式使用 .env 的 SILICONFLOW_*（远程强模型），用于竞赛评测。
+    - remote: 显式使用 .env 的 SILICONFLOW_*（远程强模型），用于评测。
       不能依赖无参 SiliconFlowClient()：其默认优先级为「本地 LM Studio 优先」
       （见 src/preference/llm_client.py 的 fusion 静默降级修复），而评测机通常
       没有本地 LM Studio，会在 127.0.0.1:1234 上整批超时、退化成 rule。
@@ -707,7 +707,7 @@ def main() -> int:
         "--llm-endpoint",
         choices=["remote", "local"],
         default="remote",
-        help="抽取/判卷 LLM 端点：remote=显式用 .env 的 SiliconFlow 远程强模型（竞赛默认）；"
+        help="抽取/判卷 LLM 端点：remote=显式用 .env 的 SiliconFlow 远程强模型（默认）；"
         "local=本地 LM Studio（无参默认优先级）",
     )
     ap.add_argument(

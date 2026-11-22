@@ -9,7 +9,7 @@
 ## 1. 概述
 
 - 作品名称：麒忆智脑（MOKOA）— OS Agent 记忆优化系统
-- 项目定位：华为 ICT 大赛 · 创新赛道 · Agent 赛题
+- 项目定位：
 - 评测目标：验证 4 项硬性指标是否达标
 - 评测口径：功能覆盖实跑 + 标准化数据集自动化跑分；**不包装为大规模评测**，不把失败项写成已验收
 
@@ -42,13 +42,13 @@
 ## 4. 分指标详述
 
 ### 4.1 偏好指标（≥85%，字段级抽取；分类为组件级内部口径）
-- 赛题口径（偏好提取准确率）：`PreferenceMemoryStore.extract()` 对
+- 评测口径（偏好提取准确率）：`PreferenceMemoryStore.extract()` 对
   `datasets/preference_extraction.jsonl` 抽取偏好键值，按 `key=value` 精确匹配计
   字段级 Precision / Recall / F1，passed 按 F1 判定；入口
   `benchmarks/run_benchmarks.py::_run_preference_extraction`（复用 `scripts/pref_eval_dataset.py`）
 - 样本量：<填 sample_size>；完整匹配率 sample_exact_match_rate：<填>（单列，不上阈值）
 - 组件级内部口径（偏好分类准确率）：MemoryClassifier 对标注语料分类，正确/总数，
-  与抽取分列展示，不作为赛题数字
+  与抽取分列展示，不作为题目数字
 - 结论：<填 P/R/F1> ，<达标/未达标说明>
 
 ### 4.2 知识检索召回率（≥85%，Recall@5 / Hit@1）

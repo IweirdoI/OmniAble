@@ -8,7 +8,7 @@
 
 新成员先看 [协作与邀请说明](docs/COLLABORATION.md)、[贡献指南](CONTRIBUTING.md) 和 [团队协作协议](docs/TEAM_AGREEMENT.md)。采用 Issue 认领 → 分支开发 → PR 审查 → 合并到 `master` 的流程，保留 Apache 2.0，新增贡献作 DCO 来源签署。署名、费用与奖金等权益安排由受影响成员另行书面确认。
 
-下文的历史模块分工、比赛信息和进度保留为项目背景，以模块角色代替旧成员账户；本次组队成员和任务以新确认的协议及 Issue 为准。贡献记录见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
+下文的历史模块分工、项目背景和进度保留为项目背景，以模块角色代替旧成员账户；本次组队成员和任务以新确认的协议及 Issue 为准。贡献记录见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
 
 # 仓库说明：
 
@@ -23,7 +23,7 @@
 
 # 麒忆智脑 — OS Agent 记忆优化系统
 
-> **华为 ICT 大赛 · 创新赛道 · Agent 赛题** | 自研 Memory Orchestrator 为核心
+> **** | 自研 Memory Orchestrator 为核心
 
 ---
 
@@ -173,7 +173,7 @@ memory/
 |-------------|------|------|
 | `preference` | 用户偏好 | 喜欢中文回答、要可运行代码 |
 | `tool_call` | 工具调用经验 | pip 安装超时 → 用国内镜像 |
-| `document_chunk` | 文档片段 | 比赛要求摘要 |
+| `document_chunk` | 文档片段 | 验收要求摘要 |
 | `project_context` | 项目上下文 | RAG 模块在 src/rag/memory.ts |
 | `feedback` | 用户反馈 | 「刚才只是测试不要保存」 |
 

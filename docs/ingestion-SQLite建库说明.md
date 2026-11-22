@@ -37,7 +37,7 @@
 | 存 preference 版本链 | preference + Milvus metadata |
 | 替代短期/中期记忆 | core `layer_manager` 内存负责 |
 | 让前端直连本库 | 必须走 `api/server.py` |
-| 引入 MySQL/PostgreSQL 等服务端数据库 | 当前单机智能体和比赛负载使用 SQLite 足够，保持部署简单 |
+| 引入 MySQL/PostgreSQL 等服务端数据库 | 当前单机智能体和本地负载使用 SQLite 足够，保持部署简单 |
 
 ---
 

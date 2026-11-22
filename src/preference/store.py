@@ -83,7 +83,7 @@ class PreferenceMemoryStore(PreferenceStore):
         self.llm_client = llm_client or SiliconFlowClient()
         self.use_llm = use_llm
         self.allow_rules = allow_rules
-        # 开放域抽取头：仅竞赛/开放域评测开启，产品默认关闭以免污染封闭键画像。
+        # 开放域抽取头：仅开放域评测开启，产品默认关闭以免污染封闭键画像。
         self.open_domain = open_domain
         # 封闭键精确匹配口径：只令 OS 抽取头产出已知键、不发明动态键，避免 FP。
         # 默认 False——产品保留长尾兜底（a593907 动态键兜底）。

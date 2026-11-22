@@ -29,7 +29,7 @@ from src.core.classifier import MemoryClassifier
 from src.core.conflict_resolver import ConflictAction, ConflictResolver
 from src.knowledge.memory_service.in_memory_client import InMemoryMilvusClient
 
-# 硬指标阈值（赛题要求）
+# 硬指标阈值（题目要求）
 PREFERENCE_ACCURACY_TARGET = 0.85
 RETRIEVAL_RECALL_TARGET = 0.85
 LATENCY_BUDGET_MS = 500

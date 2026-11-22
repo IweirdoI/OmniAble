@@ -1,7 +1,7 @@
 """通用自然语言遗忘目标解析器。
 
 Module: security
-Ref: 比赛题目 (5) 敏感信息识别与精准遗忘
+Ref: 题目 (5) 敏感信息识别与精准遗忘
 
 背景（P0 根因）：
     原 ``SensitiveService.forget`` 只扫描脱敏索引（SensitiveIndex），

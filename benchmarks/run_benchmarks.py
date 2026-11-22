@@ -11,7 +11,7 @@ Module: testing | Requirement: (7) 量化评测
     组件级内部口径，与"偏好抽取"分列。
   - 偏好抽取（字段级）：复用 scripts/pref_eval_dataset.py 的既有评测入口，
     对 datasets/preference_extraction.jsonl 按 key=value 精确匹配计算
-    Precision / Recall / F1，样本完整匹配率单列；赛题"偏好提取准确率 ≥85%"
+    Precision / Recall / F1，样本完整匹配率单列；题目"偏好提取准确率 ≥85%"
     由该指标承载。金标数据集与阈值不变。
 
 两种运行模式：
@@ -50,7 +50,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-# 硬指标阈值（赛题要求；与 tests/test_metrics.py 保持一致）
+# 硬指标阈值（题目要求；与 tests/test_metrics.py 保持一致）
 PREFERENCE_ACCURACY_TARGET = 0.85
 RETRIEVAL_RECALL_TARGET = 0.85
 LATENCY_BUDGET_MS = 500
@@ -318,7 +318,7 @@ def _run_preference_classification() -> dict:
         "embedding": "n/a（分类不涉及向量）",
         "fallback": False,
         "method": "组件级内部口径：MemoryClassifier 对标注语料判 preference/knowledge，"
-                  "与赛题『偏好提取准确率』（字段级抽取）分列，见 _run_preference_extraction",
+                  "与题目『偏好提取准确率』（字段级抽取）分列，见 _run_preference_extraction",
     }
 
 
@@ -362,7 +362,7 @@ def _run_preference_extraction() -> dict:
         "backend": "PreferenceMemoryStore.extract（rule 模式，无 LLM）",
         "embedding": "n/a（规则抽取，不涉及向量）",
         "fallback": False,
-        "method": "赛题『偏好提取准确率』口径：对 datasets/preference_extraction.jsonl 按"
+        "method": "题目『偏好提取准确率』口径：对 datasets/preference_extraction.jsonl 按"
                   " key=value 精确匹配计字段级 P/R/F1（passed 按 F1 判定）；样本完整匹配"
                   " sample_exact_match_rate 单列不上阈值；金标数据集与阈值未改动",
     }
@@ -618,7 +618,7 @@ def _build_report(real: bool) -> dict:
         real_status = str(real_metric.get("status", "ran"))
     return {
         "project": "麒忆智脑 / MOKOA",
-        "requirement": "XA-202612 (7) 量化评测",
+        "requirement": " (7) 量化评测",
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         # mode 为请求模式；真机指标是否真正运行见 real_backend_status 与各指标的
         # mode/status 字段（TASK-005：基线结果不再冒充 real，缺测显式记录）。

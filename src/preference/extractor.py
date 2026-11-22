@@ -703,7 +703,7 @@ def extract_open_domain_by_llm(
     *,
     debug: bool = False,
 ) -> list[ExtractedPreference]:
-    """开放域自由偏好抽取头（竞赛用）。
+    """开放域自由偏好抽取头（评测用）。
 
     与 extract_by_llm 的封闭键抽取并行：不限定键表，直接把用户表达的持久偏好以
     condition→action 抽成自由文本，description 保留用户原意。落库时经

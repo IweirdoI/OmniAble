@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 """MOKOA 数据集驱动评测 harness —— 可复现抽测 + 详细测试报告.
 
-Module: testing | 对应赛题要求 (3) 知识检索 / (7) 量化评测
+Module: testing | 对应题目要求 (3) 知识检索 / (7) 量化评测
 运行:
     python benchmarks/run_dataset_eval.py --seed 42 --n 40 --rq 50 --rc 800
 
 设计要点:
 1. 可复现: 全程使用单一种子 `random.Random(seed)` 抽选样本, 报告中记录每个数据集选中的索引.
 2. 真实语义: 检索评测走 MOKOA 自有 `create_memory`/`query_memory` + 本地 BGE-M3 编码
-   (进程内向量客户端做真实余弦相似度), 直接命中赛题"知识检索召回率 / 响应时间".
+   (进程内向量客户端做真实余弦相似度), 直接命中题目"知识检索召回率 / 响应时间".
 3. 抽测: 样本量过大时由 `--n/--rq/--rc` 控制; 各数据集默认抽样, 不跑全量.
 4. 详细报告: 输出 JSON(机器可读) + Markdown(人读) 到 benchmarks/results/.
 """
@@ -667,7 +667,7 @@ def main() -> int:
     results: dict = {
         "meta": {
             "project": "麒忆智脑 / MOKOA",
-            "requirement": "XA-202612 (3) 知识检索 / (7) 量化评测",
+            "requirement": " (3) 知识检索 / (7) 量化评测",
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "seed": args.seed,
             "embedding_backend": os.environ.get("OS_AGENT_EMBEDDING_BACKEND", "local"),
@@ -785,7 +785,7 @@ def render_md(r: dict) -> str:
     L.append("- 所有抽测均使用 `random.Random(seed)` 无放回抽样, 选中的全局/行索引记录在 "
              "`sampled_indices` (JSON) 中, 他人用相同 seed 可复现完全相同样本。")
     L.append("- 检索评测走 MOKOA 自有 `create_memory`/`query_memory` 通道, query 用本地 BGE-M3 编码, "
-             "进程内客户端做真实余弦相似度排序, 直接对应赛题 (3)/(7)。")
+             "进程内客户端做真实余弦相似度排序, 直接对应题目 (3)/(7)。")
     L.append("- 入库测试对每条样本经 MemoryPolicy 质量门控 + 真实编码, 记录分类器判定分布。")
     L.append("- 局限性: 检索语料为抽样子集(非 8.8M 全集), 指标用于验证链路与口径; "
              "全量数字需以真机/完整语料复核。")
@@ -799,7 +799,7 @@ def render_md(r: dict) -> str:
     L.append("## 五、关键发现与改进建议")
     ret = r.get("retrieval") or {}
     if ret.get("latency_passed") is False:
-        L.append(f"- **检索延迟超标**: P95={ret.get('latency_p95_ms')}ms 超过 500ms 预算 (赛题要求)。"
+        L.append(f"- **检索延迟超标**: P95={ret.get('latency_p95_ms')}ms 超过 500ms 预算 (题目要求)。"
                  "当前为 CPU 上 BGE-M3 查询编码耗时主导; 建议真机/GPU 部署、查询侧批处理或轻量蒸馏模型以满足时延。")
     ing = r.get("ingestion", {})
     valid_ing = [v for v in ing.values() if "error" not in v and v.get("n_samples")]

@@ -38,7 +38,7 @@ python scripts/eval_kylin_joint.py \
 
 默认 `benchmarks/datasets/kylin_joint_retrieval.json` 为人工编写诊断集：12条知识、15个查询，含多个相关答案的查询。3次重复得到45次测量，仍只有15个独立查询，不能写成45个独立样本或官方标准数据集成绩。
 
-千条规模使用自建标注集 `benchmarks/datasets/kylin_scale_recall_1000.json`（1000 文档、35 查询：诊断集 12/15 + 20 条唯一实体知识）。干扰项为跨主题桌面运维知识，不是近重复灌水。项目书写「自建千条标注集 Recall@5」，不要写成官方赛题集。在 V11 宿主执行：
+千条规模使用自建标注集 `benchmarks/datasets/kylin_scale_recall_1000.json`（1000 文档、35 查询：诊断集 12/15 + 20 条唯一实体知识）。干扰项为跨主题桌面运维知识，不是近重复灌水。项目书写「自建千条标注集 Recall@5」，不要写成官方评测集。在 V11 宿主执行：
 
 ```bash
 bash scripts/eval_kylin_scale_recall.sh

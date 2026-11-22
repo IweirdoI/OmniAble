@@ -1,6 +1,6 @@
 # 测试与 Benchmark 指南
 
-> **模块负责人：testing** | 对应比赛要求 **(7) 量化评测机制** | 协助：`tests/`、`docs/` 效果验证章节
+> **模块负责人：testing** | 对应验收要求 **(7) 量化评测机制** | 协助：`tests/`、`docs/` 效果验证章节
 
 本文档说明：**评测内容、测试方法、模块对接关系、交付材料**。
 
@@ -8,7 +8,7 @@
 > `benchmarks/run_benchmarks.py`（组件级基线 + `--real` 真机模式）与
 > `run_dataset_eval.py`（数据集抽测）可运行，结果写入 `benchmarks/results/`
 > （gitignore，本地生成）。偏好指标已拆分为**分类准确率**（组件级）与
-> **字段级抽取 P/R/F1**（赛题口径，TASK-005）；每项指标记录后端、模型/维度、
+> **字段级抽取 P/R/F1**（评测口径，TASK-005）；每项指标记录后端、模型/维度、
 > fallback、样本数、版本与口径；原生后端缺失时显式 `unavailable` 缺测，
 > 延迟超标影响退出码（详见「模式与环境元数据语义」）。
 
@@ -16,7 +16,7 @@
 
 ## 一、测试模块核心任务
 
-比赛初评 **性能指标占 25 分**，本模块需使用 **标准化数据集 + 自动化脚本** 验证以下硬性指标，并写入提交用的 **效果验证报告**：
+评测 **性能指标占 25 分**，本模块需使用 **标准化数据集 + 自动化脚本** 验证以下硬性指标，并写入提交用的 **效果验证报告**：
 
 | 指标 | 目标 | 测试/入口 |
 |------|------|----------|
@@ -81,9 +81,9 @@ pytest tests/test_metrics.py -v
 | 口径 | 名称 | 内容 | 入口 |
 |------|------|------|------|
 | 组件级（内部） | 偏好分类准确率 | `MemoryClassifier` 对标注语料判 preference / knowledge | `tests/test_metrics.py::test_preference_classification_accuracy`、`run_benchmarks.py::_run_preference_classification` |
-| 赛题口径 | 偏好提取准确率（字段级） | `PreferenceMemoryStore.extract()` 对 `datasets/preference_extraction.jsonl` 抽取偏好键值，按 `key=value` 精确匹配计 **Precision / Recall / F1**；样本完整匹配率 `sample_exact_match_rate` 单列 | `run_benchmarks.py::_run_preference_extraction`（复用 `scripts/pref_eval_dataset.py` 的 `evaluate("rule", ...)`） |
+| 评测口径 | 偏好提取准确率（字段级） | `PreferenceMemoryStore.extract()` 对 `datasets/preference_extraction.jsonl` 抽取偏好键值，按 `key=value` 精确匹配计 **Precision / Recall / F1**；样本完整匹配率 `sample_exact_match_rate` 单列 | `run_benchmarks.py::_run_preference_extraction`（复用 `scripts/pref_eval_dataset.py` 的 `evaluate("rule", ...)`） |
 
-赛题「偏好提取准确率 ≥ 85%」由**字段级抽取的 F1** 承载；rule 模式离线可复现、
+题目「偏好提取准确率 ≥ 85%」由**字段级抽取的 F1** 承载；rule 模式离线可复现、
 不需要 LLM。LLM / fusion 模式的开放域评测仍走 `scripts/eval_preference_hf_dataset.py`
 与 `scripts/pref_eval_dataset.py --mode fusion`（需模型服务），不并入 baseline 跑分。
 金标数据集与阈值未改动。
@@ -157,7 +157,7 @@ embedding 做相似度排序，也不会返回可供验收的真实向量召回�
 
 ```json
 {"id": "ret_001", "user_id": "u1", "query": "pip 安装超时怎么办", "relevant_memory_ids": ["mem_tool_001"], "filters": {"memory_type": "tool_call"}, "top_k": 5}
-{"id": "ret_002", "user_id": "u1", "query": "比赛记忆优化要求有哪些", "relevant_memory_ids": ["mem_doc_001"], "filters": {"memory_type": "document_chunk"}, "top_k": 5}
+{"id": "ret_002", "user_id": "u1", "query": "验收记忆优化要求有哪些", "relevant_memory_ids": ["mem_doc_001"], "filters": {"memory_type": "document_chunk"}, "top_k": 5}
 ```
 
 **召回率计算（常用）：**
@@ -182,7 +182,7 @@ Recall@K = |检索结果 ∩ 相关记忆| / |相关记忆|
 
 **注意：**
 
-- 比赛指标是 **检索响应时间**，建议测 **P50 / P95**，报告里写清楚。
+- 验收指标是 **检索响应时间**，建议测 **P50 / P95**，报告里写清楚。
 - 当前 mock 的耗时只适合接口回归，不能作为真实 Milvus / 麒麟 embedding 的答辩性能数据。
 - 需在 **两种环境** 各测一版（报告分栏）：
 
@@ -361,7 +361,7 @@ datasets/conflict_resolution.jsonl
 | 对比实验章节 | 技术文档一节 | 9 月上旬 |
 | 麒麟适配测试记录 | 与 `docs/KYLIN_SDK.md`  checklist 对齐 | 答辩前 |
 
-比赛方案还要求：**至少 1 个真实场景应用案例** — 与frontend Demo 对齐，在报告中写同一场景的测试数据。
+验收方案还要求：**至少 1 个真实场景应用案例** — 与frontend Demo 对齐，在报告中写同一场景的测试数据。
 
 截至 2026-08-08，已有 `preference_memory_entries.json` 和三类 ingestion Demo 样例；
 标准指标数据集、跑分脚本和报告当时尚未完成。**更新（2026-09-14）：** 现
@@ -408,7 +408,7 @@ datasets/conflict_resolution.jsonl
 可以。用 mock（knowledge的 `milvus_client.py` 已支持）测流程；模块就绪后替换为真实调用，数据集不用改。
 
 **Q：达不到 85% 怎么办？**  
-比赛方案写「未达基础指标需 **明确优化方向**」— 报告里如实写当前值 + 改进计划，不要编造数据。
+验收方案写「未达基础指标需 **明确优化方向**」— 报告里如实写当前值 + 改进计划，不要编造数据。
 
 **Q：数据集从哪来？**  
 优先：团队手工标注 OS Agent 场景 → 问发榜单位是否提供 → 参考 LoCoMo 改写（报告注明来源）。

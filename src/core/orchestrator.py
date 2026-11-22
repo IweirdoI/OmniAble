@@ -925,7 +925,7 @@ class MemoryOrchestrator:
         )
 
     def _store_knowledge_with_conflict(self, entry: MemoryEntry) -> StoreEntryResult:
-        """知识类入库：按 ``record_key`` 实体维度做冲突消解（赛题要求 3 的更新语义）。
+        """知识类入库：按 ``record_key`` 实体维度做冲突消解（题目要求 3 的更新语义）。
 
         无 ``record_key`` 视为不可消歧的独立知识，直接写入（保持原行为）。
         有 ``record_key`` 时：
@@ -1037,7 +1037,7 @@ class MemoryOrchestrator:
             if query.memory_type == MemoryType.PREFERENCE:
                 request_filters["memory_type"] = MemoryTypeTag.PREFERENCE.value
             else:
-                # 长期库用细分类标签；赛题/API 的 knowledge 对应非 preference。
+                # 长期库用细分类标签；题目/API 的 knowledge 对应非 preference。
                 request_filters["memory_type"] = [
                     MemoryTypeTag.TOOL_CALL.value,
                     MemoryTypeTag.DOCUMENT_CHUNK.value,

@@ -70,4 +70,4 @@ powershell -ExecutionPolicy Bypass -File scripts/setup_windows.ps1
 
 引入第三方材料时写明原链接、版本、许可、改动与所需声明。AI 辅助内容也要人工验证，PR 中说明实质使用范围。不得提交无权公开的学校、雇主、原团队或企业资料。
 
-代码贡献记录见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。比赛署名、论文作者顺序、报酬和分配按团队另行确认的协议执行；合并 PR 不自动取得名额、报酬或分成。行为规范见 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)，安全问题见 [SECURITY.md](SECURITY.md)。
+代码贡献记录见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。成果署名、论文作者顺序、报酬和分配按团队另行确认的协议执行；合并 PR 不自动取得名额、报酬或分成。行为规范见 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)，安全问题见 [SECURITY.md](SECURITY.md)。

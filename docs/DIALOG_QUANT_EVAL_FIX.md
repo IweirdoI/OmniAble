@@ -10,7 +10,7 @@
    last_user_control。半截话语和窗口外轮次均排除，记录 n_user_turns_outside_window。
    DailyDialog 仍按偶数轮作为第一位说话者，不能把这一约定当成真实角色标注。
 4. 报告与终端摘要明确标记 memory_id 自检索口径。这不是 DailyDialog BLEU、
-   DIALOGBENCH 选择题准确率或赛题第 (7) 项的官方成绩。
+   DIALOGBENCH 选择题准确率或题目第 (7) 项的官方成绩。
 
 麒麟复跑：
 

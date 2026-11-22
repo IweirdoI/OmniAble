@@ -1,6 +1,6 @@
 """Evaluate conflict resolution correctness on conflict_resolution.jsonl.
 
-Measures the 赛题要求 (4) 指标：知识冲突处理正确率 >= 88%.
+Measures the 题目要求 (4) 指标：知识冲突处理正确率 >= 88%.
 
 Each dataset row defines an (old, new) memory pair plus the expected outcome:
   - "replace"      : detect == True  and resolver decides REPLACE

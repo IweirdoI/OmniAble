@@ -20,7 +20,7 @@
 | 系统安全 SDK | 可选：与security安全模块联动 |
 | 应用支撑 SDK | frontend前端 Qt 控件可参考 |
 
-比赛要求的 **「调用银河麒麟 embedding SDK」** 对应 **9.4.3 向量化 → 9.4.3.1 文本向量化**。
+验收要求的 **「调用银河麒麟 embedding SDK」** 对应 **9.4.3 向量化 → 9.4.3.1 文本向量化**。
 
 ---
 
@@ -166,7 +166,7 @@ src/embedding/
 
 ---
 
-## 8. 适配测试报告 checklist（比赛交付）
+## 8. 适配测试报告 checklist（验收交付）
 
 - [ ] 麒麟 2503 + AI 子系统已安装  
 - [ ] `libkylin-coreai-embedding-dev` 安装成功  
