@@ -6,7 +6,7 @@
 
 | 编号 | 任务 | 状态 | 认领者 | Issue | 更新 |
 |---|---|---|---|---|---|
-| TASK-001 | 确认团队成员与比赛规则 | 已完成 | Linnea |  | 20261122-154444 |
+| TASK-001 | 确认团队成员与协作规则 | 已完成 | Linnea |  | 20261122-155219 |
 | TASK-002 | 复核 Windows 新人上手流程 | 已完成 | HXFhappiness |  | 20261122-152811 |
 | TASK-003 | 确认署名与成果分配附件 | 已完成 | Linnea |  | 20261122-154445 |
 | TASK-004 | [P1] 固定 benchmark 哈希映射，消除跨进程跑分漂移 | 已完成 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/3 | 20261122-130750 |
