@@ -22,6 +22,12 @@ Windows x64 协作者克隆本仓库后，在 PowerShell 执行：
 
 共享的是 Git 中的配置、任务表、状态页及封存记录。不会自动同步其他人的未推送工作，也不是在线多人服务。`.git/clerk/` 内的身份、锁、会话和回执属于各自克隆，不共享。Git 身份由每个人自行设置，不复制维护者身份；GitHub noreply 邮箱也会随贡献公开。
 
+## 自动同步
+
+- 在主仓克隆的干净 `master` 上，用 `./scripts/clerk.ps1 tasks list --display` 或 `./scripts/clerk.ps1 tasks show TASK-011` 查询时，入口脚本先调用 Clerk 的 `sync update`，再读取本地任务。网络失败、分叉或工作区有改动时，查询会提示并显示本地记录。个人分支和 Fork 查询当前检出的台账。
+- Clerk 写入前自动抓取并检查配置的 `origin/master`。如果已知远端有尚未包含在当前分支的提交，Clerk 会拦截写入，等分支按 Git 协作流程更新后再继续。
+- 需要手动刷新干净的主仓 `master` 时，也可以明确运行 `./scripts/clerk.ps1 sync update`。
+
 ## 任务推进
 
 先在 GitHub Issue 确定范围、负责人和验收。维护者在一条统一登记分支创建任务，并通过 PR 合入主线，其他成员从更新后的主线开工。不要在多个离线分支同时分配新编号。
@@ -73,7 +79,7 @@ Windows x64 协作者克隆本仓库后，在 PowerShell 执行：
 
 - GitHub Issue 保存讨论与验收范围；Clerk 保存同一任务的状态、认领与证据，`issue` 字段关联两者；PR 负责审查和合并。
 - Clerk 声明不提供访问权限控制，最终权限由 GitHub 分支保护和 PR 审查执行。
-- 本仓关闭 auto_commit、auto_push 和内置远端同步，适配 Fork、个人分支和受保护的 master。共享前手动 fetch、处理分支更新，再提交 PR。
+- 本仓通过 Git 和 PR 提交共享变更。Fork 开发时按[贡献指南](../CONTRIBUTING.md)同步主仓的最新提交。
 - `.clerk/data/`、`.clerk/archive/` 和状态页的生成区块只由工具维护；配置可审查修改。不要直接手改数据表或生成区块。
 - 多人修改同一任务时先协调。出现 CSV、永久编号表或封存冲突，不任选一边覆盖；保留各自记录，让维护者逐项复核，执行 render、check；确需人工修复后才能以有说明的 seal 重新封存。
 - 任务状态页见 [TEAM_STATUS.md](TEAM_STATUS.md)。`done` 需要经过 review 并附证据及提交，不能把“提了 PR”写成“已合并”。
