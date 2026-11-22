@@ -2,6 +2,8 @@
 
 关联：[TASK-011 设计](https://github.com/IweirdoI/mokoa-windows/issues/10)；实现：[TASK-012](https://github.com/IweirdoI/mokoa-windows/issues/11)。状态：已通过设计验收。
 
+> 2026-11-23 实现补充：界面品牌统一为 OmniAble，辅助面板增加“插件”页签和本地插件宿主（快捷指令、对话导出、会话概览）。远程安装、权限审批、签名校验和后端插件接口仍未接入，不计入 TASK-011 原验收范围。
+
 ## 目标与原则
 
 以聊天为主工作区，文件、网页、记忆作为可打开的辅助面板。参考 DeepSeek Harness 的工作区组织方式，以清晰的导航和宽敞的内容区承载后续扩展；本方案不声称实现插件系统。沿用 Vue 和现有 API、数据权限与演示模式，保留全部现有 data-testid。

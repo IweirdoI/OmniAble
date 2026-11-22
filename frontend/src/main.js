@@ -8,7 +8,9 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { streamChat, applyChatEvent } from './chat-stream.js'
 import './workbench.css'
+import './plugins.css'
 import { createMemorySync, memoryPanels } from './memory-sync.js'
+import { pluginCatalog, pluginCapabilityLabels, filterPlugins, loadInstalledPluginIds, saveInstalledPluginIds } from './plugin-catalog.js'
 
 // 把模型 markdown 文本安全渲染为 HTML（DOMPurify 消毒防 XSS）。流式场景下由 scheduleRender
 // 节流调用，避免每个 token 都对整篇重解析（O(n^2) 卡顿）。
@@ -51,7 +53,7 @@ const demoStats = () => ({
 const greetingMessage = {
   id: 1,
   role: 'assistant',
-  content: '你好，我是 MOKOA 助理。你可以直接问我问题，也可以告诉我需要长期记住或遗忘的内容。',
+  content: '你好，我是 OmniAble 助理。你可以直接问我问题，也可以告诉我需要长期记住或遗忘的内容。',
   time: '刚刚',
 }
 const greeting = () => ({ ...greetingMessage })
@@ -79,6 +81,17 @@ createApp({
     const composer = ref(null)
     const memoryContent = ref(null)
     let panelOpener = null
+
+    const installedPluginIds = ref(loadInstalledPluginIds())
+    const installedPlugins = computed(() => pluginCatalog.filter(plugin => installedPluginIds.value.includes(plugin.id)))
+    const installedPluginCount = computed(() => installedPlugins.value.length)
+    const pluginQuery = ref('')
+    const pluginFilter = ref('all')
+    const activePluginId = ref('')
+    const activePlugin = computed(() => installedPlugins.value.find(plugin => plugin.id === activePluginId.value) || null)
+    const filteredPlugins = computed(() => filterPlugins(pluginCatalog, installedPluginIds.value, pluginQuery.value, pluginFilter.value))
+    const pluginFilters = [['all', '全部'], ['installed', '已安装'], ['available', '可用']]
+    const isPluginInstalled = (id) => installedPluginIds.value.includes(id)
 
     const focusIfVisible = (element) => {
       if (!element || !element.isConnected || !element.getClientRects().length) return false
@@ -141,15 +154,47 @@ createApp({
       menuOpen.value = false
       dock.value = nextDock
       sidebarOpen.value = true
+      if (nextDock === 'plugins') {
+        activePluginId.value = ''
+        pluginQuery.value = ''
+        pluginFilter.value = 'all'
+      }
       if (nextDock === 'workspace') {
         await nextTick()
         document.getElementById('workspace-panel-title')?.focus({ preventScroll: true })
+      } else if (nextDock === 'plugins') {
+        await nextTick()
+        document.querySelector('[data-panel-title="plugins"]')?.focus({ preventScroll: true })
       } else {
         await focusDataPanel(activeTab.value)
       }
     }
+    const openPlugin = async (plugin, opener) => {
+      if (!plugin || !isPluginInstalled(plugin.id)) return
+      panelOpener = opener || document.activeElement
+      menuOpen.value = false
+      dock.value = 'plugins'
+      sidebarOpen.value = true
+      activePluginId.value = plugin.id
+      await nextTick()
+      document.getElementById('plugin-detail-title')?.focus({ preventScroll: true })
+    }
+    const backToPlugins = async () => {
+      activePluginId.value = ''
+      await nextTick()
+      document.querySelector('[data-panel-title="plugins"]')?.focus({ preventScroll: true })
+    }
+    const togglePlugin = (plugin) => {
+      const installed = isPluginInstalled(plugin.id)
+      installedPluginIds.value = installed
+        ? installedPluginIds.value.filter(id => id !== plugin.id)
+        : [...installedPluginIds.value, plugin.id]
+      if (installed && activePluginId.value === plugin.id) activePluginId.value = ''
+      saveInstalledPluginIds(installedPluginIds.value)
+      tell(installed ? `已移除插件：${plugin.name}` : `已安装插件：${plugin.name}`)
+    }
     const selectDock = (nextDock) => { dock.value = nextDock }
-    const dockTabs = ['workspace', 'memory']
+    const dockTabs = ['workspace', 'memory', 'plugins']
     const onDockKeydown = (event, index) => {
       let next = index
       if (event.key === 'ArrowRight') next = (index + 1) % dockTabs.length
@@ -519,6 +564,15 @@ createApp({
       draft.value = prompt
       nextTick(() => composer.value?.focus())
     }
+    const onPluginUse = async (prompt) => {
+      usePrompt(prompt)
+      tell('快捷指令已插入输入框')
+      if (compactViewport.matches) {
+        sidebarOpen.value = false
+        await nextTick()
+        composer.value?.focus()
+      }
+    }
 
     const openIngestion = () => showPanel('ingestion', document.querySelector('[data-testid=open-ingestion]'))
     const prepareForget = async (item, kind = 'memory') => {
@@ -676,14 +730,22 @@ createApp({
       onUserKeydown, sendMessage, handleComposerKeydown, onComposerFocus, composer,
       openIngestion, usePrompt, prepareForget, forget, renderMarkdown,
       showPanel, conversationTitle, conversationMeta, focusChat,
+      pluginCatalog, pluginCapabilityLabels, installedPlugins, installedPluginCount,
+      pluginQuery, pluginFilter, pluginFilters, filteredPlugins, isPluginInstalled,
+      activePlugin, openPlugin, backToPlugins, togglePlugin, onPluginUse,
     }
   },
   template: `
     <div class="app-shell">
       <header class="topbar">
-        <button class="brand-mark" type="button" @click="returnToChat" aria-label="MOKOA 记忆工作台，返回对话">
-          <span class="brand-glyph" aria-hidden="true">M</span>
-          <span class="brand-copy"><b>MOKOA</b><small>记忆工作台</small></span>
+        <button class="brand-mark" type="button" @click="returnToChat" aria-label="OmniAble 记忆工作台，返回对话">
+          <span class="brand-glyph" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="8.15" stroke="currentColor" stroke-width="1.9" />
+              <path d="M8.35 16.15 12 7.55l3.65 8.6M9.7 13.2h4.6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </span>
+          <span class="brand-copy"><b class="brand-name"><span>Omni</span><span class="brand-able">Able</span></b><small>记忆工作台</small></span>
         </button>
         <span class="mobile-status" role="status"><i :class="{ live }"></i>{{ statusText }}</span>
         <span class="sr-only" data-testid="active-user">{{ user }}</span>
@@ -701,6 +763,7 @@ createApp({
           </div>
           <div class="mobile-menu-actions">
             <button type="button" @click="openDock('workspace', $event.currentTarget)"><span class="menu-icon" aria-hidden="true">▤</span><span><b>工作区</b><small>文件、变更与网页</small></span></button>
+            <button type="button" @click="openDock('plugins', $event.currentTarget)"><span class="menu-icon" aria-hidden="true">▦</span><span><b>插件</b><small>{{ installedPluginCount }} 个已启用</small></span></button>
             <button type="button" @click="showPanel('overview', $event.currentTarget)"><span class="menu-icon" aria-hidden="true">◇</span><span><b>记忆总览</b><small>同步、统计与偏好</small></span></button>
             <button type="button" @click="showPanel('ingestion', $event.currentTarget)"><span class="menu-icon" aria-hidden="true">↥</span><span><b>接入</b><small>上传文件或录入记忆</small></span></button>
             <button type="button" @click="showPanel('forget', $event.currentTarget)"><span class="menu-icon" aria-hidden="true">⌫</span><span><b>遗忘</b><small>确认范围后删除记忆</small></span></button>
@@ -724,6 +787,11 @@ createApp({
             <button type="button" :class="{ active: sidebarOpen && dock === 'workspace' }" :aria-pressed="sidebarOpen && dock === 'workspace'" @click="openDock('workspace', $event.currentTarget)"><span class="rail-icon" aria-hidden="true">▤</span><span><b>工作区</b><small>文件、变更与网页</small></span></button>
             <button type="button" :class="{ active: sidebarOpen && dock === 'memory' }" :aria-pressed="sidebarOpen && dock === 'memory'" @click="openDock('memory', $event.currentTarget)"><span class="rail-icon" aria-hidden="true">◇</span><span><b>记忆</b><small>总览、偏好与遗忘</small></span></button>
           </div>
+          <div class="rail-section rail-extension">
+            <span class="rail-label">扩展</span>
+            <button type="button" :class="{ active: sidebarOpen && dock === 'plugins' }" :aria-pressed="sidebarOpen && dock === 'plugins'" @click="openDock('plugins', $event.currentTarget)"><span class="rail-icon" aria-hidden="true">▦</span><span><b>插件</b><small>{{ installedPluginCount }} 个已启用</small></span><span v-if="installedPluginCount" class="rail-count">{{ installedPluginCount }}</span></button>
+            <button v-for="plugin in installedPlugins" :key="plugin.id" type="button" class="rail-plugin" :class="{ active: sidebarOpen && dock === 'plugins' && activePlugin?.id === plugin.id }" :aria-pressed="sidebarOpen && dock === 'plugins' && activePlugin?.id === plugin.id" @click="openPlugin(plugin, $event.currentTarget)"><span class="rail-icon plugin-rail-glyph" :class="'tone-' + plugin.tone" aria-hidden="true">{{ plugin.glyph }}</span><span><b>{{ plugin.name }}</b><small>已启用插件</small></span></button>
+          </div>
           <div class="rail-footer">
             <span class="rail-mode" :class="{ live }"><i aria-hidden="true"></i>{{ live ? '实时数据' : '演示数据' }}</span>
             <small>{{ user }}</small>
@@ -745,7 +813,12 @@ createApp({
 
           <div class="chat-stream" ref="chatScroll" aria-label="对话消息">
             <div class="chat-empty" v-if="!messages.length">
-              <span class="empty-mark" aria-hidden="true">M</span>
+              <span class="empty-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="8.15" stroke="currentColor" stroke-width="1.9" />
+                  <path d="M8.35 16.15 12 7.55l3.65 8.6M9.7 13.2h4.6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </span>
               <h2>今天想记住什么？</h2>
               <p>开始一段对话，或先整理一条明确的偏好。当前为{{ live ? '实时 API' : '演示数据' }}模式。</p>
               <div class="empty-actions">
@@ -756,7 +829,7 @@ createApp({
             </div>
             <article class="message-row" v-for="message in messages" :key="message.id" :class="message.role">
               <div class="message-wrap">
-                <div class="message-meta"><b>{{ message.role === 'assistant' ? 'MOKOA 助理' : '你' }}</b><span>{{ message.time }}</span></div>
+                <div class="message-meta"><b>{{ message.role === 'assistant' ? 'OmniAble 助理' : '你' }}</b><span>{{ message.time }}</span></div>
                 <div class="bubble" @click="openChatLink" v-html="message.html || renderMarkdown(message.content)"></div>
                 <p class="run-status" data-testid="run-status" v-if="message.status" role="status">{{ runLabels[message.status] || message.status }}<span v-if="message.status === 'running' && message.stage"> · {{ stageLabels[message.stage] || message.stage }}</span></p>
                 <p class="run-failure" data-testid="run-failure" v-if="message.failure" role="alert">{{ message.failure }}</p>
@@ -786,7 +859,7 @@ createApp({
               <button type="button" @click="openIngestion">接入资料</button>
             </div>
             <div class="message-row assistant" v-if="sending && !(messages.length && messages[messages.length - 1].role === 'assistant')">
-              <div class="message-wrap"><div class="message-meta"><b>MOKOA 助理</b><span>处理中</span></div><div class="bubble thinking"><i></i><i></i><i></i><span>{{ modelSlow ? '正在等待模型回答和记忆处理…' : '正在检索记忆并生成回答…' }}</span></div></div>
+              <div class="message-wrap"><div class="message-meta"><b>OmniAble 助理</b><span>处理中</span></div><div class="bubble thinking"><i></i><i></i><i></i><span>{{ modelSlow ? '正在等待模型回答和记忆处理…' : '正在检索记忆并生成回答…' }}</span></div></div>
             </div>
           </div>
 
@@ -813,13 +886,14 @@ createApp({
         <aside class="memory-panel" v-show="sidebarOpen" aria-labelledby="context-panel-title">
           <header class="context-head">
             <button class="context-back" type="button" @click="closePanel">← 返回聊天</button>
-            <div class="context-heading"><span class="section-kicker">辅助面板</span><h2 id="context-panel-title" tabindex="-1">{{ dock === 'workspace' ? '文件与网页' : '记忆' }}</h2></div>
+            <div class="context-heading"><span class="section-kicker">辅助面板</span><h2 id="context-panel-title" tabindex="-1">{{ dock === 'workspace' ? '文件与网页' : dock === 'plugins' ? '扩展' : '记忆' }}</h2></div>
             <button v-if="dock === 'memory'" class="dock-expand" type="button" :aria-label="sidebarWide ? '还原面板宽度' : '扩宽面板'" :title="sidebarWide ? '还原面板宽度' : '扩宽面板'" @click="sidebarWide = !sidebarWide">{{ sidebarWide ? '⤡' : '⤢' }}</button>
             <button class="icon-button context-close" type="button" data-testid="context-close" aria-label="关闭辅助面板" @click="closePanel">×</button>
           </header>
           <nav class="dock-tabs" role="tablist" aria-label="辅助面板">
             <button type="button" role="tab" id="dock-tab-workspace" aria-controls="dock-panel-workspace" :aria-selected="dock === 'workspace'" :tabindex="dock === 'workspace' ? 0 : -1" :class="{ active: dock === 'workspace' }" @keydown="onDockKeydown($event, 0)" @click="selectDock('workspace')">工作区</button>
             <button type="button" role="tab" id="dock-tab-memory" aria-controls="dock-panel-memory" :aria-selected="dock === 'memory'" :tabindex="dock === 'memory' ? 0 : -1" :class="{ active: dock === 'memory' }" @keydown="onDockKeydown($event, 1)" @click="selectDock('memory')">记忆</button>
+            <button type="button" role="tab" id="dock-tab-plugins" aria-controls="dock-panel-plugins" :aria-selected="dock === 'plugins'" :tabindex="dock === 'plugins' ? 0 : -1" :class="{ active: dock === 'plugins' }" @keydown="onDockKeydown($event, 2)" @click="selectDock('plugins')">插件 <span class="dock-count">{{ installedPluginCount }}</span></button>
           </nav>
           <div class="context-body">
             <div id="dock-panel-workspace" class="dock-panel" role="tabpanel" aria-labelledby="dock-tab-workspace" v-show="dock === 'workspace'">
@@ -879,6 +953,48 @@ createApp({
                   <div class="safety-note"><b>隐私提示</b><span>敏感信息由后端安全模块解析和清理；前端不会伪造成功结果，也不会保留遗忘前的旧偏好快照。</span></div>
                 </section>
               </div>
+            </div>
+            <div id="dock-panel-plugins" class="dock-panel plugin-shell" role="tabpanel" aria-labelledby="dock-tab-plugins" v-show="dock === 'plugins'">
+              <section v-if="!activePlugin" class="plugin-manager" aria-labelledby="plugin-manager-title">
+                <header class="panel-section-head">
+                  <div><span class="section-kicker">插件中心</span><h2 id="plugin-manager-title" class="panel-title" data-panel-title="plugins" tabindex="-1">插件</h2></div>
+                  <span class="section-meta">{{ installedPluginCount }} / {{ pluginCatalog.length }} 已启用</span>
+                </header>
+                <p class="panel-caption">把可复用的小工具装进工作台。插件可以贡献输入模板、导出动作或独立面板。</p>
+                <div class="plugin-toolbar">
+                  <label class="plugin-search" for="plugin-search"><span class="sr-only">搜索插件或能力</span><input id="plugin-search" v-model="pluginQuery" type="search" placeholder="搜索插件或能力…" autocomplete="off" /></label>
+                  <div class="plugin-filters" role="group" aria-label="筛选插件">
+                    <button v-for="[value, label] in pluginFilters" :key="value" type="button" :class="{ active: pluginFilter === value }" :aria-pressed="pluginFilter === value" @click="pluginFilter = value">{{ label }}</button>
+                  </div>
+                </div>
+                <div class="plugin-list" v-if="filteredPlugins.length">
+                  <article v-for="plugin in filteredPlugins" :key="plugin.id" class="plugin-card" :class="{ installed: isPluginInstalled(plugin.id) }" :data-testid="'plugin-card-' + plugin.id">
+                    <span class="plugin-icon" :class="'tone-' + plugin.tone" aria-hidden="true">{{ plugin.glyph }}</span>
+                    <div class="plugin-card-body">
+                      <header><h3>{{ plugin.name }}</h3><span class="plugin-version">v{{ plugin.version }}</span></header>
+                      <p>{{ plugin.description }}</p>
+                      <div class="plugin-tags"><span v-for="capability in plugin.capabilities" :key="capability">{{ pluginCapabilityLabels[capability] }}</span></div>
+                      <footer>
+                        <small>{{ plugin.author }} · {{ isPluginInstalled(plugin.id) ? '已启用' : '未安装' }}</small>
+                        <div class="plugin-actions">
+                          <button v-if="isPluginInstalled(plugin.id)" class="text-button" type="button" @click="openPlugin(plugin, $event.currentTarget)">打开</button>
+                          <button class="plugin-toggle" type="button" :class="{ installed: isPluginInstalled(plugin.id) }" @click="togglePlugin(plugin)">{{ isPluginInstalled(plugin.id) ? '移除' : '安装' }}</button>
+                        </div>
+                      </footer>
+                    </div>
+                  </article>
+                </div>
+                <div class="empty-state" v-else><b>没有匹配的插件</b><span>换一个关键词，或切换到“全部”查看本地扩展。</span></div>
+                <div class="plugin-storage-note"><b>本地扩展位</b><span>当前只加载随应用构建的插件，启用状态保存在本机；远程安装、权限审批和后端插件接口尚未接入。</span></div>
+              </section>
+              <section v-else class="plugin-detail" aria-labelledby="plugin-detail-title">
+                <button class="plugin-back" type="button" @click="backToPlugins">← 插件列表</button>
+                <header class="plugin-detail-head">
+                  <span class="plugin-icon" :class="'tone-' + activePlugin.tone" aria-hidden="true">{{ activePlugin.glyph }}</span>
+                  <div><span class="section-kicker">{{ activePlugin.author }} · v{{ activePlugin.version }}</span><h2 id="plugin-detail-title" tabindex="-1">{{ activePlugin.name }}</h2><p>{{ activePlugin.description }}</p></div>
+                </header>
+                <component :is="activePlugin.component" :messages="messages" :memories="memories" :user="user" @use="onPluginUse" />
+              </section>
             </div>
           </div>
         </aside>
