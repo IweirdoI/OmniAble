@@ -22,8 +22,11 @@ def check(root: Path) -> None:
     workspace = tomllib.loads((root / ".clerk/workspace.toml").read_text("utf-8"))
     if workspace["policy"]["auto_commit"] or workspace["policy"]["auto_push"]:
         raise ValueError("Clerk must keep manual PR-based Git finalization")
-    if workspace["sync"]["enabled"]:
-        raise ValueError("Fork-compatible configuration must not enable remote sync")
+    sync = workspace["sync"]
+    if not (sync["enabled"] and sync["write_fetch"]):
+        raise ValueError("Clerk task writes must check the latest available remote state")
+    if sync.get("write_update", "refuse") != "refuse":
+        raise ValueError("Clerk writes must support personal branches and pending edits")
     for path in (root / ".clerk/config/kinds").glob("*.toml"):
         tomllib.loads(path.read_text("utf-8"))
     states = {row["key"] for row in rows(".clerk/config/registry/state.csv")}

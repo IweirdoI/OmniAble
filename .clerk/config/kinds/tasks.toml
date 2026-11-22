@@ -115,7 +115,8 @@ archive = true
 name = "claim"
 handler = "identity"
 fields = ["claimant", "claimant_email", "claimed_at"]
-states = ["todo", "active"]
+# done：允许对已验收但漏认领的任务补写认领人，仍要求 claimant 为空。
+states = ["todo", "active", "done"]
 require_empty = ["claimant"]
 
 [[action]]
