@@ -9,7 +9,7 @@
 | TASK-001 | 确认团队成员与比赛规则 | 待开始 |  |  | 20261121-190025 |
 | TASK-002 | 复核 Windows 新人上手流程 | 待开始 |  |  | 20261121-190025 |
 | TASK-003 | 确认署名与成果分配附件 | 待开始 |  |  | 20261121-190026 |
-| TASK-004 | [P1] 固定 benchmark 哈希映射，消除跨进程跑分漂移 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/3 | 20261121-215636 |
+| TASK-004 | [P1] 固定 benchmark 哈希映射，消除跨进程跑分漂移 | 待审查 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/3 | 20261122-123119 |
 | TASK-005 | [P1] 修正 real 评测环境标记、缺测处理和偏好指标命名 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/4 | 20261121-215637 |
 | TASK-006 | [P1] 优化统计与偏好画像全量读取，建立规模和并发基线 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/5 | 20261121-215638 |
 | TASK-007 | [P1] 补齐目标后端检索与并发性能验收，按瓶颈优化 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/6 | 20261121-215640 |

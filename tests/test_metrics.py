@@ -16,8 +16,13 @@ MemoryClassifier / ConflictResolver / MilvusClient(mock) 提供可重复的
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 import time
 import zlib
+from pathlib import Path
 
 from src.common.models import MemoryItem, MemoryLayer, MemoryType, NormalizedRecord, RetrievalQuery
 from src.core.classifier import MemoryClassifier
@@ -229,7 +234,7 @@ def _memory_item(
     if updated_at is not None:
         kwargs["updated_at"] = updated_at
     return MemoryItem(
-        id=f"m-{abs(hash(content)) % 100000}",
+        id=f"m-{zlib.crc32(content.encode('utf-8')) % 100000}",
         memory_type=MemoryType.PREFERENCE,
         layer=MemoryLayer.LONG,
         content=content,
@@ -332,3 +337,83 @@ def test_conflict_resolution_reports_accuracy() -> None:
         if resolver.resolve(old, new).action == expected:
             correct += 1
     print(f"[评测] 冲突处理正确率: {correct}/{len(cases)} = {correct / len(cases):.2%}")
+
+
+# ---------------------------------------------------------------------------
+# 5. 跨进程确定性回归（TASK-004 / Issue #3）
+#    benchmark 与本文件基线必须同源：向量、记忆 ID、召回在不同
+#    PYTHONHASHSEED 与独立进程下完全一致，不允许跑分漂移。
+# ---------------------------------------------------------------------------
+
+_CROSS_PROCESS_SAMPLES = ["pip 镜像", "ROS2 安装教程", "SSH 免密配置", "theme_dark=true"]
+
+# 在独立进程中打印 benchmark 向量、crc32 参考向量、记忆 ID 与检索召回。
+# JSON 结果逐字节比较，任何 PYTHONHASHSEED 漂移都会让本测试失败。
+_CROSS_PROCESS_SNIPPET = """\
+import json, sys
+sys.path.insert(0, {root})
+import benchmarks.run_benchmarks as b
+import zlib
+
+
+def baseline_vec(text, dim=48):
+    vec = [0.0] * dim
+    normalized = text.lower()
+    for i in range(len(normalized) - 1):
+        pair = normalized[i : i + 2]
+        vec[zlib.crc32(pair.encode("utf-8")) % dim] += 1.0
+    return vec
+
+
+samples = {samples!r}
+recall = b._run_retrieval_recall()
+print(json.dumps({{
+    "vectors": [b._hash_embedding(s) for s in samples],
+    "baseline": [baseline_vec(s) for s in samples],
+    "ids": [b._memory_item(s).id for s in samples],
+    "recall_at_5": recall["recall_at_5"],
+    "hit_at_1": recall["hit_at_1"],
+}}))
+"""
+
+
+def test_benchmark_hash_embedding_matches_baseline() -> None:
+    """benchmark 的向量算法必须与 test_metrics 的 crc32 基线同源。"""
+    from benchmarks.run_benchmarks import _hash_embedding as bench_vec
+
+    for text in _CROSS_PROCESS_SAMPLES:
+        assert bench_vec(text, 48) == _hash_embedding(text), (
+            f"benchmark 向量与基线不一致：{text!r}"
+        )
+
+
+def test_benchmark_metrics_cross_process_deterministic() -> None:
+    """固定样本在不同 PYTHONHASHSEED 与独立进程下，向量/ID/召回完全一致。"""
+    root = Path(__file__).resolve().parents[1]
+    snippet = _CROSS_PROCESS_SNIPPET.format(root=repr(str(root)), samples=_CROSS_PROCESS_SAMPLES)
+
+    env = dict(os.environ)
+    results: list[dict] = []
+    seeds = ["1", "2", "42"]
+    for seed in seeds:
+        env["PYTHONHASHSEED"] = seed
+        proc = subprocess.run(
+            [sys.executable, "-c", snippet],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            cwd=str(root),
+            timeout=120,
+        )
+        assert proc.returncode == 0, f"PYTHONHASHSEED={seed} 子进程失败：{proc.stderr[-500:]}"
+        results.append(json.loads(proc.stdout.strip().splitlines()[-1]))
+
+    first = results[0]
+    for seed, other in zip(seeds[1:], results[1:]):
+        assert other == first, f"PYTHONHASHSEED={seed} 与 seed=1 的结果不一致（跑分漂移）"
+    assert first["vectors"] == first["baseline"], "benchmark 向量偏离 crc32 基线"
+    assert first["recall_at_5"] >= RETRIEVAL_RECALL_TARGET, (
+        f"固定基线召回 {first['recall_at_5']} < {RETRIEVAL_RECALL_TARGET}"
+    )
+    print(f"[评测] 跨进程一致性: seeds={seeds} 全部一致，Recall@5={first['recall_at_5']}")
