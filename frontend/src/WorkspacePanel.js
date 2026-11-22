@@ -117,11 +117,11 @@ export default {
   },
   template: `
     <section class="workspace" aria-label="文件与网页工作区">
-      <header class="ws-header"><div><span class="eyebrow">AGENT WORKSPACE</span><h2>{{ root }}</h2></div><button @click="refresh" :disabled="busy" aria-label="刷新工作区">↻</button></header>
+      <header class="ws-header"><div><span class="section-kicker">工作目录</span><h2 id="workspace-panel-title" tabindex="-1">{{ root }}</h2></div><button class="icon-button" @click="refresh" :disabled="busy" aria-label="刷新工作区">↻</button></header>
       <nav class="ws-tabs" aria-label="工作区导航">
-        <button :class="{active: mode === 'files'}" @click="mode = 'files'">▤ 文件</button>
-        <button :class="{active: mode === 'changes'}" @click="mode = 'changes'; refresh()">± 变更 <span v-if="changes.length">{{ changes.length }}</span></button>
-        <button :class="{active: mode === 'web'}" @click="mode = 'web'">◎ 网页</button>
+        <button type="button" :class="{active: mode === 'files'}" :aria-current="mode === 'files' ? 'page' : null" @click="mode = 'files'">文件</button>
+        <button type="button" :class="{active: mode === 'changes'}" :aria-current="mode === 'changes' ? 'page' : null" @click="mode = 'changes'; refresh()">变更 <span v-if="changes.length">{{ changes.length }}</span></button>
+        <button type="button" :class="{active: mode === 'web'}" :aria-current="mode === 'web' ? 'page' : null" @click="mode = 'web'">网页</button>
       </nav>
       <p v-if="error" class="ws-error" role="alert">{{ error }}</p><p v-if="notice" class="ws-notice" role="status">{{ notice }}</p>
       <div v-if="!enabled && mode !== 'web'" class="ws-empty"><b>连接你的工作目录</b><p>在服务端设置 AGENT_ENABLE_WORKSPACE=1，并用 AGENT_EXEC_CWD 指定工作目录，重启后刷新。</p><small>文件操作仅在指定目录内执行，记忆资料仍在“记忆”面板。</small></div>
