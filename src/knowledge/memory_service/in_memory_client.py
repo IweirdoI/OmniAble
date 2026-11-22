@@ -67,7 +67,13 @@ class InMemoryMilvusClient:
         embedding: list[float] | None,
         filters: dict[str, Any],
         top_k: int = 5,
+        *,
+        output_fields: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        """字段投影：output_fields=None 时保持全字段（向后兼容）。
+
+        TASK-006：画像路径只需元数据字段，投影可避免把大 content 复制给调用方。
+        """
         candidates: list[tuple[float, dict[str, Any]]] = []
         for record in self._records.values():
             if record.get("is_deleted"):
@@ -82,10 +88,27 @@ class InMemoryMilvusClient:
             )
             item = dict(record)
             item.pop("embedding", None)
+            if output_fields is not None:
+                # 只保留实际存储的字段（与 Milvus 服务端投影语义一致），
+                # 不为缺失字段注入 None，避免改变调用方 metadata.get(k, default) 语义。
+                item = {key: item[key] for key in output_fields if key in item}
             item["score"] = score
             candidates.append((score, item))
         candidates.sort(key=lambda item: item[0], reverse=True)
         return [item for _, item in candidates[:top_k]]
+
+    def count(self, filters: dict[str, Any]) -> int:
+        """聚合计数（不含已删除记录），与 search 的过滤语义一致。
+
+        TASK-006：供 memory_stats 等统计路径替代全量拉取后 Python 计数。
+        """
+        merged_filters = {"is_deleted": False, **filters}
+        return sum(
+            1
+            for record in self._records.values()
+            if not record.get("is_deleted")
+            and self._matches_filters(record, merged_filters)
+        )
 
     def get_by_id(
         self,

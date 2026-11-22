@@ -458,18 +458,18 @@ class MemoryOrchestrator:
             mid_snapshot = self._snapshot_from_items(mid_items, capacity=_MID_SNAPSHOT_CAPACITY)
             long_snapshot = self._snapshot_from_items(long_items, capacity=None)
 
-        # 只依赖存储公开检索接口，避免 stats 与 mock 私有实现绑定。
-        milvus_records = self._milvus.search(None, {"user_id": user_id}, top_k=100_000)
+        # 只依赖存储公开接口（count 聚合，TASK-006）：替代
+        # search(None, ..., top_k=100_000) 的全量拉取 + Python 计数，
+        # 延迟与记录数解耦，且不再受 top_k 静默截断影响。
+        milvus_total = self._milvus.count({"user_id": user_id})
+        milvus_preference = self._milvus.count(
+            {"user_id": user_id, "memory_type": MemoryTypeTag.PREFERENCE.value}
+        )
         milvus_snapshot = MemoryLayerSnapshot(
-            count=len(milvus_records),
+            count=milvus_total,
             capacity=None,
-            preference_count=sum(
-                1 for record in milvus_records if record.get("memory_type") == MemoryTypeTag.PREFERENCE.value
-            ),
-            knowledge_count=len(milvus_records)
-            - sum(
-                1 for record in milvus_records if record.get("memory_type") == MemoryTypeTag.PREFERENCE.value
-            ),
+            preference_count=milvus_preference,
+            knowledge_count=milvus_total - milvus_preference,
         )
 
         total_count = (
@@ -660,11 +660,51 @@ class MemoryOrchestrator:
         user_id: str,
         scene_id: str | None = None,
     ) -> dict:
-        """从权威长期存储构建画像，避免候选索引领先于实际入库状态。"""
+        """从权威长期存储构建画像，避免候选索引领先于实际入库状态。
 
+        TASK-006：直接走存储投影查询（画像只需元数据，不需要 content 与
+        打分排序），并以 count 聚合显式暴露 top_k 截断，不再静默漏数。
+        """
         from src.preference.keys import PREFERENCE_KEYS
 
-        items = self.list_preferences(user_id, latest_only=True, top_k=10_000).items
+        profile_top_k = 10_000
+        latest_filters = {
+            "user_id": user_id,
+            "memory_type": MemoryTypeTag.PREFERENCE.value,
+            "is_latest": True,
+        }
+        projection = [
+            "memory_id",
+            "user_id",
+            "preference_key",
+            "preference_value",
+            "scope",
+            "scene_id",
+            "confidence",
+            "n_observations",
+            "version",
+            "is_latest",
+            "category",
+            "confidence_source",
+            "source_type",
+            "source",
+        ]
+        hits = self._milvus.search(
+            None,
+            latest_filters,
+            top_k=profile_top_k,
+            output_fields=projection,
+        )
+        items = [self._query_hit_to_memory_item(hit) for hit in hits]
+        # 未达上限时无需 count（取回数即最新总数）；仅在边界情形校验是否截断，
+        # 避免常见路径的第二次全量扫描（TASK-006）。
+        if len(items) < profile_top_k:
+            truncated = False
+            n_latest_available = len(items)
+        else:
+            n_latest_available = self._milvus.count(latest_filters)
+            truncated = n_latest_available > len(items)
+
         by_key: dict[str, MemoryItem] = {}
         priorities: dict[str, int] = {}
         for item in items:
@@ -726,6 +766,11 @@ class MemoryOrchestrator:
                 key: {"value": kv[key], "confidence": confidence[key]}
                 for key in sorted(kv)
             },
+            # TASK-006：超上限不得静默漏数——截断时显式暴露，由调用方决定
+            # 是否分页/提示用户（字段为增量，向后兼容）。
+            "truncated": truncated,
+            "n_latest_available": n_latest_available,
+            "profile_top_k": profile_top_k,
         }
 
     def get_preference_history(

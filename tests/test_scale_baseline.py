@@ -1,4 +1,4 @@
-"""规模与并发基线 harness 的正确性回归（TASK-006 / Issue #5 Phase 1）.
+"""规模与并发基线 harness 的正确性回归（TASK-006 / Issue #5）.
 
 Module: testing | Requirement: (7) 量化评测
 
@@ -83,8 +83,18 @@ def test_run_scale_small_scale_correctness() -> None:
     assert set(section["backend_calls_per_op"]) >= {
         "memory_stats", "get_preference_profile", "recall_lexical",
     }
-    assert section["backend_calls_per_op"]["memory_stats"] == pytest.approx(1.0), (
-        "memory_stats 每次调用应恰好 1 次后端 search（全量拉取口径的证据）"
+    # TASK-006 Phase 2：stats 走 count 聚合（不再全量拉取），profile 为投影 + count
+    stats_calls = section["backend_calls_per_op"]["memory_stats"]
+    assert stats_calls["search"] == 0, (
+        f"优化后 memory_stats 不应全量拉取记录（实际 search={stats_calls['search']}）"
+    )
+    assert stats_calls["count"] == pytest.approx(2.0), (
+        "memory_stats 每次调用应为 2 次 count 聚合（总数 + 偏好数）"
+    )
+    profile_calls = section["backend_calls_per_op"]["get_preference_profile"]
+    assert profile_calls["search"] == pytest.approx(1.0)
+    assert profile_calls["count"] == pytest.approx(0.0), (
+        "小规模未达 top_k 上限，profile 走快速路径不做 count（边界情形才校验截断）"
     )
 
     config = section["concurrency"]["configs"][0]
@@ -93,26 +103,30 @@ def test_run_scale_small_scale_correctness() -> None:
     assert section["errors"] == []
 
 
-def test_truncation_probe_detects_silent_miss() -> None:
-    """profile top_k=10_000 边界：超出部分被静默丢弃且必须被探针量化。
+def test_truncation_probe_detects_truncation_and_exposes_flag() -> None:
+    """profile top_k=10_000 边界：超出部分不进画像，但必须显式暴露。
 
-    在恰好 10_050 条互不相同键的 is_latest 偏好下，当前实现只能取回
-    10_000 条（先过滤后截断），画像特征数与真值差 50 且无任何告警——
-    这是 Phase 2 引入显式 truncated 标志与 count 接口的直接证据。
+    在恰好 10_050 条互不相同键的 is_latest 偏好下，实现只能取回
+    10_000 条（先过滤后截断）；Phase 2 后画像携带 truncated=True 与
+    n_latest_available，不再静默漏数。
     """
     probe = run_truncation_probe(total_latest=10_050)
 
     assert probe["expected_features"] == 10_050
     assert probe["observed_features"] == 10_000, (
-        "当前实现为『先过滤后 top_k 截断』；若该断言失败，说明截断行为已变化，"
+        "实现为『先过滤后 top_k 截断』；若该断言失败，说明截断行为已变化，"
         "需同步更新探针口径"
     )
-    assert probe["silent_missed_keys"] == 50
-    assert probe["stats_exact"] is True, "10_050 < stats 上限 100_000，计数应精确"
+    assert probe["missed_keys_beyond_top_k"] == 50
+    assert probe["truncated_flag"] is True, "超上限必须显式暴露 truncated 标志"
+    assert probe["n_latest_available"] == 10_050
+    assert probe["stats_exact"] is True, "10_050 条应被 count 聚合精确计数"
 
 
 def test_probe_small_scale_no_truncation() -> None:
-    """低于 top_k 上限时不得出现静默丢失（探针口径的阴性对照）。"""
+    """低于 top_k 上限时不触发截断（探针口径的阴性对照）。"""
     probe = run_truncation_probe(total_latest=500)
     assert probe["observed_features"] == 500
-    assert probe["silent_missed_keys"] == 0
+    assert probe["missed_keys_beyond_top_k"] == 0
+    assert probe["truncated_flag"] is False
+    assert probe["n_latest_available"] == 500
