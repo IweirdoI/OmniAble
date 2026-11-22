@@ -131,7 +131,7 @@ def main() -> int:
     )
     from src.knowledge.memory_service.create_memory import create_memory
     from src.common.models import RetrievalQuery
-    from benchmarks.run_benchmarks import _retrieval_corpus
+    from benchmarks.run_benchmarks import _retrieval_corpus, _percentile
 
     orchestrator = create_orchestrator()
     client = orchestrator._milvus
@@ -143,8 +143,6 @@ def main() -> int:
     embedding_backend = resolve_embedding_backend_name()
     storage_cfg = {"memory_backend": os.getenv("OS_AGENT_MEMORY_BACKEND", "auto")}
     memory_backend = resolve_memory_backend(storage_cfg, project_root=_ROOT)
-
-    fallback = embedding_backend == "hash" or bool(getattr(provider, "_fallback_mode", False))
     model_name = getattr(provider, "_model_name", None) or embedding_backend
 
     documents, relevant = _retrieval_corpus()
@@ -156,6 +154,13 @@ def main() -> int:
     first_vec = provider.embed([documents[0]])[0]
     model_load_s = _perf() - model_load_start  # 含模型加载/下载检查（冷）
     dim = len(first_vec)
+
+    # fallback 判定必须在首次实际编码之后：local 模型加载失败回退 stub 的
+    # _fallback_mode 只在 _ensure_model 尝试后才翻转；接线干跑不给正式判定
+    fallback = embedding_backend == "hash" or bool(
+        getattr(provider, "_fallback_mode", False)
+    )
+    formal = not fallback
 
     gold_created = 0
     for doc in documents:
@@ -216,11 +221,10 @@ def main() -> int:
             start = _perf()
             fn()
             latencies.append((_perf() - start) * 1000)
-        ordered = sorted(latencies)
         return {
             "reps": reps,
             "p50_ms": round(statistics.median(latencies), 3),
-            "p95_ms": round(ordered[max(len(ordered) - 1 - int(len(ordered) * 0.05), 0)], 3),
+            "p95_ms": round(_percentile(latencies, 95), 3),
             "mean_ms": round(statistics.fmean(latencies), 3),
             "raw_ms": [round(v, 3) for v in latencies],
         }
@@ -236,6 +240,13 @@ def main() -> int:
         ),
         args.reps,
     )
+    # 词面补召拉取实测：recall 在 knowledge 词面路径会用
+    # search(None, filters, top_k=10_000) 全量拉取匹配记录（此前为残差估算，
+    # 队长复核要求改为实测）。这里以同一过滤条件直测该阶段。
+    lexical_fetch_latency = _measure(
+        lambda: client.search(None, {"user_id": gold_user}, top_k=10_000),
+        args.reps,
+    )
     rerank_profile_latency = {
         key: round(
             max(recall_latency[key] - encode_latency[key] - storage_latency[key], 0.0), 3
@@ -249,6 +260,10 @@ def main() -> int:
         lambda: orchestrator.recall(
             RetrievalQuery(query=scale_query, user_id=scale_user, top_k=5)
         ),
+        args.reps,
+    )
+    lexical_fetch_at_scale_latency = _measure(
+        lambda: client.search(None, {"user_id": scale_user}, top_k=10_000),
         args.reps,
     )
 
@@ -302,7 +317,9 @@ def main() -> int:
         "wall_s": round(wall_s, 2),
         "ops_per_sec": round(ops / wall_s, 2) if wall_s else 0.0,
         "p50_ms": round(statistics.median(latencies), 3) if latencies else 0.0,
-        "p95_ms": round(sorted(latencies)[max(len(latencies) - 1, 0)], 3) if latencies else 0.0,
+        # P95 与分阶段测量统一走 _percentile（插值法）；此前把最大值写成 P95
+        "p95_ms": round(_percentile(latencies, 95), 3) if latencies else 0.0,
+        "max_ms": round(max(latencies), 3) if latencies else 0.0,
         "failure_rate": round(len(failures) / ops, 4) if ops else 0.0,
         "failure_samples": failures[:3],
     }
@@ -353,11 +370,18 @@ def main() -> int:
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "embedding_backend": embedding_backend,
             "memory_backend": memory_backend,
+            # 正式验收判定仅在 fallback=False（真实语义编码确认后）给出；
+            # 接线干跑（hash / stub 降级）的数字仅验证链路，不带 PASS/FAIL
+            "formal": formal,
+            "run_kind": "正式验收" if formal else "接线干跑",
         },
         "environment": environment,
         "dataset": {
+            # 实际加载计数：_retrieval_corpus 会追加 benchmarks/datasets/
+            # knowledge_retrieval.jsonl 的条目（10 内置 docs + jsonl 扩展）
             "gold_corpus_docs": len(documents),
             "gold_queries": len(relevant),
+            "gold_corpus_source": "run_benchmarks._retrieval_corpus（内置 + knowledge_retrieval.jsonl 扩展）",
             "scale_docs": args.scale,
             "scale_created": scale_created,
             "gold_created": gold_created,
@@ -366,13 +390,15 @@ def main() -> int:
         "staged_latency": {
             "encode": encode_latency,
             "storage": storage_latency,
+            "lexical_fetch": lexical_fetch_latency,
+            "lexical_fetch_at_scale": lexical_fetch_at_scale_latency,
             "rerank_profile_approx": rerank_profile_latency,
             "recall_total": recall_latency,
             "recall_total_at_scale": recall_at_scale_latency,
             "chat": chat_probe,
-            "note": "rerank_profile 为近似口径（recall_total − encode − storage，含词面补召）；"
-                    "storage 直测为单次向量检索，未含 lexical 补召的标量查询；"
-                    "recall_total_at_scale 在规模语料（scale_user）范围测量",
+            "note": "encode/storage/lexical_fetch 为直测；rerank_profile 为近似口径"
+                    "（recall_total − encode − storage，含重排、合并与扩展查询等其余环节，"
+                    "报告中标注为估算）；recall_total_at_scale 在规模语料范围测量",
         },
         "cold_start": {
             "model_load_s": round(model_load_s, 2),
@@ -385,20 +411,27 @@ def main() -> int:
             "target": 0.85,
             "sample_size": len(relevant),
             "scoring": "与 run_benchmarks --real 相同金标与计分约定",
+            # 接线干跑不给出达标判定（数字仅验证链路与口径）
+            "passed": (hits_at5 / len(relevant)) >= 0.85 if formal else None,
         },
         "recall_latency_full": {
             # 预算对照口径：规模语料范围的完整 recall P95（Issue #6：以完整
-            # recall 的 P95 对照 500ms 目标，按目标数据规模测量）
-            "p50_ms": statistics.median(recall_at_scale_latency["raw_ms"]),
-            "p95_ms": sorted(recall_at_scale_latency["raw_ms"])[max(len(recall_at_scale_latency["raw_ms"]) - 1, 0)],
+            # recall 的 P95 对照 500ms 目标，按目标数据规模测量）。
+            # P95 算法与全仓统一（_percentile 插值法），另单列 max 供参考
+            "p50_ms": round(statistics.median(recall_at_scale_latency["raw_ms"]), 3),
+            "p95_ms": round(_percentile(recall_at_scale_latency["raw_ms"], 95), 3),
+            "max_ms": round(max(recall_at_scale_latency["raw_ms"]), 3),
             "budget_ms": LATENCY_BUDGET_MS,
-            "passed_p95": sorted(recall_at_scale_latency["raw_ms"])[max(len(recall_at_scale_latency["raw_ms"]) - 1, 0)] <= LATENCY_BUDGET_MS,
+            "passed_p95": (
+                _percentile(recall_at_scale_latency["raw_ms"], 95) <= LATENCY_BUDGET_MS
+                if formal else None
+            ),
             "sample_size": len(recall_at_scale_latency["raw_ms"]),
             "scope": f"scale_user（{args.scale} 条语料）",
         },
         "concurrency": concurrency,
         "limitations": [
-            "rerank_profile 为近似口径（总耗时减直测两项）",
+            "词面补召拉取（lexical_fetch）为直测；重排合并与其他环节为估算残差（recall_total − encode − lexical_fetch − storage）",
             "chat 需要可用模型服务，缺测时单列",
             "memory 后端为进程内接线对照；milvus 模式单独验证持久化",
         ],
@@ -443,27 +476,42 @@ class _FixedVectorEmbedding:
 
 def _render_md(report: dict) -> str:
     env = report["environment"]
+    formal = bool(report["meta"].get("formal"))
+    # 正式判定只在 fallback=False（首次实际编码后确认）时给出；
+    # 接线干跑只呈现数字，不标 PASS/FAIL（Task-007 队长复核口径）
+    def _verdict(passed) -> str:
+        if not formal or passed is None:
+            return "接线干跑（无正式判定）"
+        return "PASS" if passed else "FAIL"
+
+    dataset = report["dataset"]
     lines = [
         "# TASK-007 Windows 桌面应用目标后端性能验收",
         "",
         f"- 生成时间：{report['meta']['generated_at']} ｜ 提交：{env.get('git_commit') or '未知'}",
+        f"- 运行类型：**{report['meta'].get('run_kind')}**"
+        + ("" if formal else "（fallback=hash/stub：数字仅验证链路，不给正式判定）"),
         f"- 环境：Windows {env['windows_version']} / {env['machine']} / {env['processor']} / RAM {env.get('total_ram_gb')}GB",
         f"- 配置：embedding={env['embedding_backend']}（{env['embedding_model']}，{env['embedding_dim']} 维，"
         f"fallback={env['embedding_fallback']}）｜ memory={env['memory_backend']}",
         f"- 模型加载：{env['model_load_s']}s ｜ 规模编码：{env['scale_encode_s']}s ｜ 插入：{env['scale_insert_s']}s",
+        f"- 数据集：金标 {dataset['gold_corpus_docs']} docs / {dataset['gold_queries']} queries"
+        f"（{dataset['gold_corpus_source']}）；规模语料 {dataset['scale_created']}/{dataset['scale_docs']} 条",
         "",
-        "## 分阶段耗时（warm，完整 recall P95 对照 500ms）",
+        "## 分阶段耗时（warm，P95 与全仓 _percentile 统一）",
         "",
         "| 阶段 | P50(ms) | P95(ms) | 均值(ms) |",
         "|---|---|---|---|",
     ]
     staged = report["staged_latency"]
     for name, label in (
-        ("encode", "编码（embedding）"),
+        ("encode", "编码（embedding，直测）"),
         ("storage", "存储检索（向量检索直测）"),
-        ("rerank_profile_approx", "重排与画像（近似=recall−encode−storage）"),
+        ("lexical_fetch", "词面补召拉取（标量 query 直测，金标范围）"),
+        ("lexical_fetch_at_scale", f"词面补召拉取（规模 {dataset['scale_docs']} 条）"),
+        ("rerank_profile_approx", "重排合并与其他（估算=recall−encode−storage）"),
         ("recall_total", "完整 recall 全链路（金标范围）"),
-        ("recall_total_at_scale", f"完整 recall 全链路（规模 {report['dataset']['scale_docs']} 条）"),
+        ("recall_total_at_scale", f"完整 recall 全链路（规模 {dataset['scale_docs']} 条）"),
     ):
         metric = staged[name]
         lines.append(f"| {label} | {metric['p50_ms']} | {metric['p95_ms']} | {metric['mean_ms']} |")
@@ -473,15 +521,16 @@ def _render_md(report: dict) -> str:
     full = report["recall_latency_full"]
     lines.append("")
     lines.append(f"- **完整 recall P95（{full.get('scope', '规模范围')}） = {full['p95_ms']}ms"
-                 f"（预算 ≤{full['budget_ms']}ms，{'PASS' if full['passed_p95'] else 'FAIL'}）**，"
-                 f"样本 {full['sample_size']}")
+                 f"（预算 ≤{full['budget_ms']}ms，{_verdict(full.get('passed_p95'))}；"
+                 f"max={full.get('max_ms')}ms）**，样本 {full['sample_size']}")
     quality = report["recall_quality"]
     lines.append(f"- Recall@5 = {quality['recall_at_5']} / Hit@1 = {quality['hit_at_1']} "
-                 f"（目标 ≥{quality['target']}，金标 {quality['sample_size']} 条，与 --real 同计分）")
+                 f"（目标 ≥{quality['target']}，金标 {quality['sample_size']} 条，"
+                 f"达标判定：{_verdict(quality.get('passed'))}，与 --real 同计分）")
     conc = report["concurrency"]
     lines.append(f"- 并发 {conc['workers']} 线程 × {conc['rounds']} 轮：{conc['ops']} ops，"
-                 f"{conc['ops_per_sec']} ops/s，P50={conc['p50_ms']}ms / P95={conc['p95_ms']}ms，"
-                 f"失败率 {conc['failure_rate']}")
+                 f"{conc['ops_per_sec']} ops/s，P50={conc['p50_ms']}ms / P95={conc['p95_ms']}ms"
+                 f"（max={conc.get('max_ms')}ms），失败率 {conc['failure_rate']}")
     for sample in conc["failure_samples"]:
         lines.append(f"  - 失败样例：{sample}")
     cold = report["cold_start"]
@@ -490,6 +539,9 @@ def _render_md(report: dict) -> str:
     lines.append("")
     for note in report["limitations"]:
         lines.append(f"> {note}")
+    if not formal:
+        lines.append("> 本报告为接线干跑：fallback 状态在首次实际编码后确认，"
+                     "不给出正式验收判定；正式判定请以 local 真实编码运行的报告为准。")
     return "\n".join(lines) + "\n"
 
 

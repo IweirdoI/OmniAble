@@ -1,0 +1,32 @@
+{
+  "step": "Milvus Lite 重启持久化验证（TASK-007 / Issue #6）",
+  "commands": [
+    "# 1) 建库+播种（验收 B）",
+    "set HF_HUB_OFFLINE=1 & set OS_AGENT_EMBEDDING_BACKEND=local & set OS_AGENT_MEMORY_BACKEND=milvus & set OS_AGENT_MILVUS_URI=data/perf_milvus_bench.db & set OS_AGENT_MILVUS_COLLECTION=mokoa_windows_perf",
+    ".venv\\Scripts\\python.exe scripts\\windows_perf_acceptance.py --scale 1000 --reps 10 --workers 4 --rounds 5",
+    "# 2) 退出进程（脚本自然结束，无残留连接）",
+    "# 3) 新进程重连并断言检索命中",
+    ".venv\\Scripts\\python.exe scripts\\verify_milvus_persistence.py --uri data/perf_milvus_bench.db --collection mokoa_windows_perf"
+  ],
+  "reconnect_result": {
+    "uri": "data/perf_milvus_bench.db",
+    "collection": "mokoa_windows_perf",
+    "persisted_records_total": 3056,
+    "reconnect_search_hits": 5,
+    "hit_contents_prefix": [
+      "pip 安装超时时应使用国内镜像源",
+      "pip 安装超时时应使用国内镜像源",
+      "pip 安装超时时应使用国内镜像源",
+      "pip 安装超时时应使用国内镜像源",
+      "Docker 容器端口映射使用 -p 参数"
+    ],
+    "embedding_leak": false,
+    "verdict": "PASS"
+  },
+  "note": "记录数 3056 为多次验收运行累积（每次使用新的 user_id 前缀，互不覆盖）；重连后检索与命中正常，说明重启后数据存活。检索结果中同一正文重复出现是多次运行播种同源金标导致，不影响持久化结论。",
+  "bug_found_and_fixed": {
+    "issue": "milvus-lite / 重启后集合处于 released 状态，旧实现 _ensure_collection 对已存在集合直接 return、不 load，search 报 code=101",
+    "fix": "已存在的集合也调用 load_collection（幂等）",
+    "evidence": "本验证在修复前必现 code=101；修复后新进程重连 PASS"
+  }
+}
