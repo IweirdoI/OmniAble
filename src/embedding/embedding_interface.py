@@ -10,7 +10,6 @@ from pathlib import Path
 import yaml
 
 from src.common.interfaces import EmbeddingProvider
-from src.common.kylin_runtime import host_can_load_kylin_sdk
 
 _SHARED_PROVIDERS: dict[str, EmbeddingProvider] = {}
 _SHARED_LOCK = threading.Lock()
@@ -31,10 +30,6 @@ def resolve_embedding_backend_name(backend: str | None = None) -> str:
     """Resolve auto/env/config to a concrete backend name."""
 
     cfg = load_embedding_config()
-    from src.common.kylin_runtime import acceptance_enabled, enforce_acceptance
-    enforce_acceptance()
-    if acceptance_enabled() and backend is not None and backend.strip().lower() != "kylin":
-        raise RuntimeError("V11 acceptance requires the system embedding SDK")
     resolved = (
         backend
         or os.getenv("OS_AGENT_EMBEDDING_BACKEND")
@@ -42,24 +37,12 @@ def resolve_embedding_backend_name(backend: str | None = None) -> str:
         or str(cfg.get("backend", "auto"))
     ).strip().lower()
     if resolved == "auto":
-        # Only the V11 host userspace can load CoreAI; KARE/Linux-dev must not
-        # pretend the system embedding SDK is selected and then silently fall back.
-        resolved = "kylin" if host_can_load_kylin_sdk() else "local"
+        resolved = "local"
     return resolved
 
 
 def _build_embedding_backend(resolved: str) -> EmbeddingProvider:
     cfg = load_embedding_config()
-    if resolved == "kylin":
-        from src.embedding.kylin_adapter import KylinEmbeddingAdapter
-
-        strict = os.getenv("OS_AGENT_KYLIN_STRICT", "").strip().lower() in {
-            "1", "true", "yes", "on",
-        }
-        if not strict and host_can_load_kylin_sdk():
-            strict = True
-        return KylinEmbeddingAdapter(allow_fallback=not strict)
-
     if resolved == "hash":
         from src.embedding.local_embedding import HashEmbeddingAdapter
 
@@ -85,19 +68,18 @@ def create_embedding_backend(backend: str | None = None) -> EmbeddingProvider:
     """
     Factory for pluggable embedding backends. Returns a new instance.
 
-    auto   -> kylin on Linux, local on Windows/dev
-    kylin  -> 银河麒麟 CoreAI embedding SDK
+    auto   -> local on Windows/dev
     local  -> BGE-M3 / sentence-transformers for dev
     hash   -> deterministic offline vectors for tests/wiring only
 
-    Request paths should use ``get_shared_embedding_backend`` so CoreAI
+    Request paths should use ``get_shared_embedding_backend`` so local model
     sessions are not created and destroyed per /store-entry.
     """
     return _build_embedding_backend(resolve_embedding_backend_name(backend))
 
 
 def get_shared_embedding_backend(backend: str | None = None) -> EmbeddingProvider:
-    """Process-wide provider. CoreAI init_session/init_model runs once per backend."""
+    """Reuse a single embedding provider per backend in the process."""
 
     resolved = resolve_embedding_backend_name(backend)
     with _SHARED_LOCK:

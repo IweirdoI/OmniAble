@@ -22,7 +22,7 @@ MAX_BROWSE_TOTAL = 10_000
 
 
 class MemoryBackendUnavailable(Exception):
-    """向量后端（Milvus / Kylin）当前不可达；API 层据此返回 503 而非 500。"""
+    """向量后端（Milvus）当前不可达；API 层据此返回 503 而非 500。"""
 
 
 class MilvusClient:
@@ -93,7 +93,7 @@ metadata 的特殊性：注意列表中包含 metadata（JSON类型）。
         self.vector_dim = vector_dim
         self.client = client
         # 连接延迟到首次实际操作时进行，避免 Milvus 不可达时整个服务起不来（#4）。
-        # 子类（KylinVectorClient）已注入 transport 时按原行为立即建集合。
+        # 注入 transport 时立即校验集合。
         if client is not None:
             self._ensure_collection()
 
@@ -192,8 +192,7 @@ metadata 的特殊性：注意列表中包含 metadata（JSON类型）。
         """服务端 count(*) 聚合计数（不含已删除记录），过滤语义与 search 一致。
 
         TASK-006：供 memory_stats 等统计路径替代全量拉取后 Python 计数。
-        count(*) 输出在 pymilvus 2.x query 上可用；Milvus Lite / 麒麟向量引擎
-        的兼容性以真实后端实测为准（Windows 开发环境未安装 milvus_lite）。
+        count(*) 输出在 pymilvus 2.x query 上可用；实际 Milvus 服务端兼容性以目标环境实测为准。
         """
         self._ensure_connected()
         merged_filters = {"is_deleted": False, **filters}
@@ -220,14 +219,13 @@ metadata 的特殊性：注意列表中包含 metadata（JSON类型）。
     ) -> dict[str, Any]:
         """稳定排序分页（TASK-014 / Issue #13）：创建时间倒序，memory_id 决胜。
 
-        两阶段实现，不依赖服务端 ORDER BY / offset（Kylin SDK transport 的
-        query 无服务端 limit/offset，pymilvus 标量 query 无稳定排序保证）：
+        两阶段实现，避免依赖标量查询的服务端排序：
           1) count() 取总数；轻投影读全量排序键（memory_id + created_at，
-             与 count 的 ID 投影同量级），客户端排序后取页内 ID；
+             仅复制排序所需字段），客户端排序后取页内 ID；
           2) 按页内 ID 用 in 过滤取整页数据（复用 search 的投影语义）。
 
         匹配总数超过 MAX_BROWSE_TOTAL 时显式报错要求细化筛选，不静默截断。
-        三后端（memory / pymilvus / kylin）语义一致；pymilvus / 麒麟端的
+        memory 与 pymilvus 语义一致；Milvus 的
         排序稳定性以真实后端实测为准。
         """
         if limit < 1 or offset < 0:

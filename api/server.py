@@ -24,7 +24,7 @@ from src.security.semantic_detector import SemanticDetectionUnavailable
 
 orchestrator: MemoryOrchestrator = create_orchestrator()
 
-app = FastAPI(title="Kylin OS Agent Memory API", version="0.3.0")
+app = FastAPI(title="MOKOA Desktop Memory API", version="0.3.0")
 
 from api.workspace import router as workspace_router
 from src.agent.workspace import WorkspaceError
@@ -54,7 +54,7 @@ async def backend_unavailable(request, exc):
     return JSONResponse(
         status_code=503,
         content={
-            "detail": "记忆后端（向量库）暂不可用：Milvus/Kylin 连接或集合初始化失败。"
+            "detail": "记忆后端（向量库）暂不可用：Milvus 连接或集合初始化失败。"
             "请检查向量库服务是否就绪后重试。"
         },
     )
@@ -298,28 +298,6 @@ def _serialize_process_result(result: ProcessInputResult) -> dict[str, Any]:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    from src.common.kylin_runtime import acceptance_enabled, enforce_acceptance
-    if acceptance_enabled():
-        from src.embedding.embedding_interface import get_shared_embedding_backend
-        from src.knowledge.memory_service.kylin_vector_client import KylinVectorClient
-        enforce_acceptance()
-        client = orchestrator._milvus
-        if not isinstance(client, KylinVectorClient):
-            raise RuntimeError("Acceptance API is not using KylinVectorClient")
-        provider = get_shared_embedding_backend()
-        vectors = provider.embed(["麒麟实机健康检查"])
-        if provider.using_fallback or provider.backend_name != "kylin-coreai":
-            raise RuntimeError("Real CoreAI embedding required")
-        if len(vectors[0]) != client.vector_dim:
-            raise RuntimeError("Embedding/vector database dimension mismatch")
-        if client.bridge.info.get("backend") != "kylin-vector-sdk":
-            raise RuntimeError("Real vector SDK required")
-        client.search(vectors[0], {"user_id": "health_" + os.getenv("OS_AGENT_ACCEPTANCE_RUN_ID", "")}, top_k=1)
-        return {"status": "ok", "memory_backend": "kylin", "embedding_backend": "kylin",
-                "kylin_strict": "1", "using_fallback": False,
-                "vector_dim": client.vector_dim, "vector_sdk": client.bridge.info,
-                "collection": client.collection, "pid": os.getpid(),
-                "run_id": os.getenv("OS_AGENT_ACCEPTANCE_RUN_ID", "")}
     return {
         "status": "ok",
         "memory_backend": os.getenv("OS_AGENT_RESOLVED_MEMORY_BACKEND", ""),

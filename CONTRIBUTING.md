@@ -41,8 +41,8 @@ Fork 的 `origin` 是自己的仓库。在 GitHub 创建 PR，base 选择 `Iweir
 
 - 契约先看 `src/common/interfaces.py`、`src/knowledge/memory_service/memory_schema.py` 和现有调用链。
 - Embedding 统一入口为 `src/embedding/embedding_interface.py`，不要绕过统一接口另建存储链路。
-- 麒麟目标后端为麒麟向量引擎，Milvus 是兼容选项；旧指南“最终库只有 Milvus”的说法不再适用。
-- Windows memory/hash、Windows BGE、麒麟 SDK 证据分别记录。hash 没有语义，不能证明召回质量或麒麟验收性能。
+- Windows 开发使用进程内 memory，持久化可显式选择 Milvus。
+- 分开记录 Windows memory/hash 接线、BGE 语义检索及持久化后端证据，说明机器、后端和模型。
 
 ## 验证与提交
 

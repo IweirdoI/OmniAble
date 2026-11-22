@@ -51,13 +51,6 @@ ENV_OVERRIDES: dict[str, tuple[str, type]] = {
     # Embedding
     "OS_AGENT_EMBEDDING_BACKEND": ("embedding.backend", str),
     "EMBEDDING_BACKEND": ("embedding.backend", str),
-    # 麒麟运行时
-    "OS_AGENT_KYLIN_ACCEPTANCE": ("kylin.acceptance", _as_bool),
-    "OS_AGENT_KYLIN_STRICT": ("kylin.strict", _as_bool),
-    "OS_AGENT_KYLIN_VECTOR_LIBRARY": ("kylin.vector_library", str),
-    "OS_AGENT_KYLIN_VECTOR_ENDPOINT": ("kylin.vector_endpoint", str),
-    "OS_AGENT_KYLIN_VECTOR_TIMEOUT_MS": ("kylin.vector_timeout_ms", int),
-    "MEMORY_VECTOR_DIM": ("kylin.vector_dim", int),
     # 顶层 LLM（安全语义层 / 视觉描述等）
     "LM_STUDIO_API_KEY": ("llm.api_key", str),
     "OPENAI_API_KEY": ("llm.api_key", str),
@@ -159,7 +152,7 @@ def get_bool(path: str, default: bool = False) -> bool:
 
 
 def get_section(name: str, default: Any = None) -> Any:
-    """读取某个顶层配置段（如 ``"memory"`` / ``"kylin"``）。"""
+    """读取某个顶层配置段（如 ``"memory"`` / ``"embedding"``）。"""
     if default is None:
         default = {}
     return get(name, default)

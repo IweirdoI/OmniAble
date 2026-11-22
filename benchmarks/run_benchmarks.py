@@ -17,11 +17,9 @@ Module: testing | Requirement: (7) 量化评测
 两种运行模式：
   1) 默认（组件级基线）：确定性 hash embedding + 进程内向量客户端，无需真机，
      用于日常回归与 CI；结果标记为 baseline。
-  2) --real：按 configs/default.yaml 的 storage/embedding 后端（真机应为 kylin）
-     通过 create_memory / query_memory 原生接口播种并检索，得到真实召回/延迟。
-     在麒麟 V11 宿主上先按 docs/测试结果.md 第 9 节导出 OS_AGENT_* 环境变量再运行。
-     原生后端缺失或不可达时，该指标显式记为 status=unavailable（缺测），
-     不标为通过，也不让基线结果冒充真机成绩。
+  2) --real：使用 Windows 应用配置的存储与向量模型，通过 create_memory /
+     query_memory 测量组件检索。目标环境的配置见 docs/WINDOWS.md。
+     后端缺失时记为 unavailable。hash 或模型降级结果不计入语义验收。
 
 方法学声明：组件级基线用确定性向量，只验证「链路与指标口径正确」，
 不代表真实语义检索质量；真机数字以 --real 跑分为准。
@@ -127,6 +125,7 @@ def _resolve_environment() -> dict:
         configured_backend = None
     return {
         "python_version": platform.python_version(),
+        "platform": platform.platform(),
         "git_commit": _git_commit(),
         "configured_embedding_backend": configured_backend,
         "embedding_backend": "deterministic-crc32-bigram（组件级基线专用）",
@@ -494,40 +493,21 @@ def _run_conflict_correctness() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _real_backend_info(dim: int | None) -> dict:
-    """探测 --real 实际使用的后端与 embedding 信息，用于如实上报。"""
-    from src.embedding.embedding_interface import get_shared_embedding_backend
-    from src.knowledge.memory_service.config import (
-        get_embedding_backend,
-        get_vector_dim,
-    )
-
-    backend_name = get_embedding_backend()
-    try:
-        provider = get_shared_embedding_backend()
-    except Exception:  # noqa: BLE001 - 探测失败不阻断，交给缺测条目
-        provider = None
-    model_name = getattr(provider, "_model_name", None) if provider is not None else None
-    fallback = bool(getattr(provider, "_fallback_mode", False)) if provider is not None else None
-    if dim is None:
-        dim = int(getattr(provider, "dimension", get_vector_dim()))
-    return {
-        "backend": f"memory_service 原生接口（storage={backend_name}，真机应为 kylin）",
-        "embedding": model_name or backend_name,
-        "embedding_dim": int(dim) if dim is not None else None,
-        "fallback": fallback,
-    }
-
-
 def _run_real_retrieval() -> dict:
-    """在配置的后端（真机应为 kylin）上播种并检索，产出真实召回/延迟。
+    """在 Windows 应用配置的后端上测量组件检索。
 
     任何导入失败、依赖缺失或后端不可达都返回 status=unavailable 的缺测
     条目（不崩溃、不静默丢弃、不计为通过；TASK-005 / Issue #4）。
     """
-    name = "知识检索召回率(真机)"
+    name = "知识检索召回率（已配置后端）"
     try:
+        from uuid import uuid4
+
+        from src.core.factory import _load_default_config, resolve_memory_backend
+        from src.embedding.embedding_interface import resolve_embedding_backend_name
         from src.knowledge.memory_service.embedding_client import EmbeddingClient
+        from src.knowledge.memory_service.in_memory_client import InMemoryMilvusClient
+        from src.knowledge.memory_service.milvus_client import MilvusClient
         from src.knowledge.memory_service.memory_schema import (
             CreateMemoryRequest,
             MemoryEntry,
@@ -542,12 +522,22 @@ def _run_real_retrieval() -> dict:
         return _unavailable_metric(name, exc)
 
     documents, relevant = _retrieval_corpus()
-    user_id = "bench_real"
+    user_id = f"bench_real_{uuid4().hex}"
     try:
-        # 显式创建统一 embedding 入口并播种/检索复用；编码一次以记录真实维度
-        embedding = EmbeddingClient()
+        embedding_backend = resolve_embedding_backend_name()
+        embedding = EmbeddingClient(embedding_backend)
         dim = len(embedding.embed(documents[0]))
-        for idx, doc in enumerate(documents):
+        storage = _load_default_config().get("storage", {})
+        backend = resolve_memory_backend(storage, project_root=ROOT)
+        if backend == "milvus":
+            client = MilvusClient(
+                uri=os.getenv("OS_AGENT_MILVUS_URI", storage.get("milvus_uri", "http://localhost:19530")),
+                collection=os.getenv("OS_AGENT_BENCHMARK_COLLECTION", "mokoa_windows_benchmark"),
+                vector_dim=dim,
+            )
+        else:
+            client = InMemoryMilvusClient()
+        for doc in documents:
             entry = MemoryEntry(
                 content=doc,
                 memory_type=MemoryTypeTag.TOOL_CALL,
@@ -556,7 +546,9 @@ def _run_real_retrieval() -> dict:
                 user_id=user_id,
                 confidence=0.9,
             )
-            create_memory(CreateMemoryRequest(entry=entry), embedding=embedding)
+            result = create_memory(CreateMemoryRequest(entry=entry), milvus=client, embedding=embedding)
+            if not result.created:
+                raise RuntimeError("Failed to seed the benchmark corpus")
 
         hits_at5 = 0
         hits_at1 = 0
@@ -564,6 +556,7 @@ def _run_real_retrieval() -> dict:
         for query, relevant_content in relevant:
             resp = query_memory(
                 QueryMemoryRequest(user_id=user_id, query=query, top_k=5),
+                milvus=client,
                 embedding=embedding,
             )
             latencies.append(resp.latency_ms)
@@ -577,7 +570,8 @@ def _run_real_retrieval() -> dict:
 
     n = len(relevant)
     recall = hits_at5 / n
-    info = _real_backend_info(dim)
+    provider = embedding._provider
+    fallback = embedding_backend == "hash" or bool(getattr(provider, "_fallback_mode", False))
     return {
         "name": name,
         "mode": "real",
@@ -585,10 +579,13 @@ def _run_real_retrieval() -> dict:
         "recall_at_5": round(recall, 4),
         "hit_at_1": round(hits_at1 / n, 4),
         "target": RETRIEVAL_RECALL_TARGET,
-        "passed": recall >= RETRIEVAL_RECALL_TARGET,
+        "passed": not fallback and recall >= RETRIEVAL_RECALL_TARGET,
         "sample_size": n,
-        **info,
-        "method": "真机口径：create_memory/query_memory 原生接口 + 配置后端真实编码；"
+        "backend": backend,
+        "embedding": "hash" if embedding_backend == "hash" else getattr(provider, "_model_name", embedding_backend),
+        "embedding_dim": dim,
+        "fallback": fallback,
+        "method": "Windows 组件检索：create_memory/query_memory + 配置后端编码；"
                   "fallback=True 时数字仅代表降级链路，不代表语义检索质量",
         "latency_p50_ms": round(_percentile(latencies, 50), 3),
         "latency_p95_ms": round(_percentile(latencies, 95), 3),
@@ -640,8 +637,8 @@ def _render_summary(report: dict) -> str:
         "# 量化评测结果摘要",
         "",
         f"- 生成时间：{report['generated_at']}",
-        f"- 模式：{report['mode']}（真机指标状态：{report.get('real_backend_status', 'n/a')}）",
-        f"- 环境：embedding={report['environment']['embedding_backend']}"
+        f"- 模式：{report['mode']}（配置后端指标状态：{report.get('real_backend_status', 'n/a')}）",
+        f"- 组件基线环境：embedding={report['environment']['embedding_backend']}"
         f" / dim={report['environment']['embedding_dim']}"
         f" / memory={report['environment']['memory_backend']}",
         f"- 提交：{report['environment'].get('git_commit') or '未知（无 git）'}",
@@ -653,8 +650,11 @@ def _render_summary(report: dict) -> str:
         if m.get("status") == "unavailable":
             lines.append(f"- **{name}**：缺测（unavailable）→ {mark}（{m.get('reason','')}）")
         elif "recall_at_5" in m:
+            measured_backend = (f"，存储={m['backend']}，向量={m['embedding']}"
+                                f" / {m['embedding_dim']} 维，fallback={m['fallback']}"
+                                if m.get("mode") == "real" else "")
             lines.append(f"- **{name}**：Recall@5={m['recall_at_5']} / Hit@1={m['hit_at_1']} / "
-                         f"P95={m.get('latency_p95_ms')}ms / 目标≥{m['target']} → {mark}")
+                         f"P95={m.get('latency_p95_ms')}ms / 目标≥{m['target']} → {mark}{measured_backend}")
         elif "precision" in m:
             lines.append(f"- **{name}**：P={m['precision']} / R={m['recall']} / F1={m['f1']} / "
                          f"完整匹配={m.get('sample_exact_match_rate')} / 目标≥{m['target']} → {mark}")
@@ -667,7 +667,7 @@ def _render_summary(report: dict) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="MOKOA 量化评测一键跑分")
-    parser.add_argument("--real", action="store_true", help="在配置的后端（真机应为 kylin）上跑真实召回/延迟")
+    parser.add_argument("--real", action="store_true", help="用 Windows 应用配置的存储与向量模型测量组件检索")
     args = parser.parse_args()
 
     report = _build_report(real=args.real)

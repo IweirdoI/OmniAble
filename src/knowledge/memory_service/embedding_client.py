@@ -11,7 +11,7 @@ from src.embedding.embedding_interface import get_shared_embedding_backend
 # 入库时只对 `MemoryEntry.content` 做 embedding。
 # WSL/Linux 环境优先用这里的统一接口，不要在业务层直接依赖具体 SDK。
 #
-# 默认复用进程内 provider：麒麟 CoreAI 会话不可按请求创建/销毁。
+# 默认复用进程内 provider：避免每次请求加载本地模型。
 
 
 class EmbeddingClient:

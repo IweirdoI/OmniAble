@@ -9,7 +9,7 @@ Module: testing | Requirement: (7) 量化评测
   - 并发阶段在 InMemory 后端上的线程安全（错误如实记录，本口径下应为 0）
 
 说明：全部使用 InMemoryMilvusClient + hash 向量，仅验证 harness 与链路口径，
-不代表 Milvus / 麒麟 SDK 性能。
+Windows 目标配置性能另测。
 """
 
 from __future__ import annotations

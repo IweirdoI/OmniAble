@@ -9,8 +9,9 @@
   1) 解析器：同一 knowledge_key 的新旧事实应 REPLACE；同文应 no_conflict
   2) 端到端：按 key 写入后，用问题做 semantic 召回，top-5 应含更新后答案、且默认不回旧条
 
-    export OS_AGENT_EMBEDDING_BACKEND=kylin OS_AGENT_MEMORY_BACKEND=memory OS_AGENT_KYLIN_STRICT=1
-    bash scripts/run_host_py.sh scripts/eval_conflict_longmemeval.py --seed 42 --n 100
+    . ./scripts/windows_env.ps1
+    $env:OS_AGENT_EMBEDDING_BACKEND = "local"
+    ./.venv/Scripts/python.exe scripts/eval_conflict_longmemeval.py --seed 42 --n 100
 """
 from __future__ import annotations
 

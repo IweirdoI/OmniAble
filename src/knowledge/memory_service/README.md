@@ -31,8 +31,7 @@ security security      →  解析目标 memory_id → delete_memory      ─┘
 
 ## Embedding
 
-`embedding_client.py` 调用core `src/embedding/embedding_interface.py`。麒麟 ctypes
-适配尚待真机验证；本地 fallback 当前是 768 维零向量 stub。
+`embedding_client.py` 调用core `src/embedding/embedding_interface.py`。Windows 本地使用 BGE-M3，开发接线使用确定性 hash。模型及存储配置见 [Windows 开发](../../../docs/WINDOWS.md)。
 
 ## 开发
 

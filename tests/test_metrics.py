@@ -464,7 +464,6 @@ def test_real_backend_unavailable_recorded_and_fails_overall(monkeypatch) -> Non
 def test_real_backend_degradation_recorded(monkeypatch) -> None:
     """embedding 降级（stub fallback）必须在真机指标中如实记录。"""
     import benchmarks.run_benchmarks as rb
-    from src.embedding import embedding_interface as ei
     from src.knowledge.memory_service import create_memory as create_memory_module
     from src.knowledge.memory_service import embedding_client as embedding_client_module
     from src.knowledge.memory_service import query_memory as query_memory_module
@@ -482,20 +481,17 @@ def test_real_backend_degradation_recorded(monkeypatch) -> None:
             return [[0.0] * self.dimension for _ in texts]
 
     stub = _StubProvider()
-    # EmbeddingClient 在模块命名空间绑定了 get_shared_embedding_backend，
-    # _real_backend_info 则从 embedding_interface 动态导入，两处都要替换。
+    monkeypatch.setenv("OS_AGENT_EMBEDDING_BACKEND", "local")
+    monkeypatch.setenv("OS_AGENT_MEMORY_BACKEND", "memory")
     monkeypatch.setattr(embedding_client_module, "get_shared_embedding_backend", lambda backend=None: stub)
-    monkeypatch.setattr(ei, "get_shared_embedding_backend", lambda backend=None: stub)
     monkeypatch.setattr(
         create_memory_module,
         "create_memory",
         lambda request, **kwargs: CreateMemoryResponse(memory_id="m", created=True),
     )
-    monkeypatch.setattr(
-        query_memory_module,
-        "query_memory",
-        lambda request, **kwargs: QueryMemoryResponse(items=[], latency_ms=1.0),
-    )
+    expected = dict(rb._retrieval_corpus()[1])
+    monkeypatch.setattr(query_memory_module, "query_memory", lambda request, **kwargs:
+        QueryMemoryResponse(items=[{"content": expected[request.query]}], latency_ms=1.0))
 
     metric = rb._run_real_retrieval()
     assert metric["status"] == "ran", f"降级不是缺测：{metric.get('reason')}"
@@ -503,7 +499,9 @@ def test_real_backend_degradation_recorded(monkeypatch) -> None:
     assert metric["fallback"] is True, "降级为确定性向量时必须记录 fallback"
     assert metric["embedding"] == "stub-hash"
     assert metric["embedding_dim"] == 48
-    assert metric["passed"] is False  # 空结果召回为 0，如实判失败
+    assert metric["backend"] == "memory"
+    assert metric["recall_at_5"] == 1.0
+    assert metric["passed"] is False  # 降级结果即使检索命中也不能通过语义验收。
 
 
 def test_recall_pass_latency_fail_fails_overall() -> None:

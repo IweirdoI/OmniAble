@@ -204,11 +204,11 @@ class SecurityService(ABC):
 
 
 class EmbeddingProvider(ABC):
-    """Owner: TBD (core协调) | Target: Kylin embedding SDK."""
+    """Owner: TBD (core协调) | Target: local embedding backend (BGE-M3 / hash)."""
 
     @abstractmethod
     def embed(self, texts: list[str]) -> list[list[float]]:
-        """Batch embedding via Kylin SDK or dev fallback."""
+        """Batch embedding via local backend or dev fallback."""
 
 
 class StorageBackend(ABC):

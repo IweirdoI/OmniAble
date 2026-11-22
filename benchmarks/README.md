@@ -5,7 +5,7 @@
 本文档说明：**评测内容、测试方法、模块对接关系、交付材料**。
 
 > **当前代码状态（2026-11-22）：** `tests/test_metrics.py` 指标测试均已启用；
-> `benchmarks/run_benchmarks.py`（组件级基线 + `--real` 真机模式）与
+> `benchmarks/run_benchmarks.py`（组件级基线 + `--real` 配置后端模式）与
 > `run_dataset_eval.py`（数据集抽测）可运行，结果写入 `benchmarks/results/`
 > （gitignore，本地生成）。偏好指标已拆分为**分类准确率**（组件级）与
 > **字段级抽取 P/R/F1**（评测口径，TASK-005）；每项指标记录后端、模型/维度、
@@ -30,9 +30,9 @@
 
 ### 模式与环境元数据语义（TASK-005 / Issue #4）
 
-- 报告顶层 `mode` 为请求模式（`baseline` / `--real`），`real_backend_status` 记录真机指标是否 `ran` / `unavailable` / `not_requested`；**每项指标各自携带 `mode`、`status`**。
+- 报告顶层 `mode` 为请求模式（`baseline` / `--real`），`real_backend_status` 记录配置后端指标是否 `ran` / `unavailable` / `not_requested`；**每项指标各自携带 `mode`、`status`**。
 - 组件级基线恒为 `baseline`：确定性 crc32 向量 + 进程内客户端，只验证链路与口径，不代表语义检索质量。
-- `--real` 走 `create_memory` / `query_memory` 原生接口；后端依赖缺失或不可达时产出 `status=unavailable` 的缺测条目（附脱敏原因），**不标为通过、不让基线结果冒充真机成绩**。
+- `--real` 走 `create_memory` / `query_memory` 组件接口；后端依赖缺失或不可达时产出 `status=unavailable` 的缺测条目（附脱敏原因），**不标为通过、hash 或模型降级不能通过语义验收**。
 - 每项指标记录 `backend`（真实后端）、`embedding`（模型）、`embedding_dim`（维度）、`fallback`（是否降级为确定性向量）、`sample_size`、`method`（口径说明）；报告顶层 `environment` 记录 Python 版本与 git 提交。
 - 总体退出码由 `_overall_passed` 决定：任一指标 `passed=False`、`latency_passed=False` 或 `status=unavailable` 即整体失败。
 
@@ -53,7 +53,7 @@ benchmarks/
 │   ├── preference_extraction.jsonl    ← 【已有】35 条字段级抽取金标
 │   ├── knowledge_retrieval.jsonl      ← 【已有】检索评测扩展语料
 │   ├── conflict_resolution.jsonl      ← 【已有】冲突消解评测样例
-│   ├── kylin_joint_retrieval.json     ← 【已有】麒麟联调检索样例
+│   ├── kylin_joint_retrieval.json     ← 保留的历史检索语料
 │   ├── security_forget.jsonl          ← 【规划】
 │   └── ingestion_pipeline.jsonl       ← 【规划】
 └── results/                  ← 【已有】每次跑分输出（gitignore，本地生成）
@@ -183,20 +183,20 @@ Recall@K = |检索结果 ∩ 相关记忆| / |相关记忆|
 **注意：**
 
 - 验收指标是 **检索响应时间**，建议测 **P50 / P95**，报告里写清楚。
-- 当前 mock 的耗时只适合接口回归，不能作为真实 Milvus / 麒麟 embedding 的答辩性能数据。
+- 当前 mock 的耗时只适合接口回归，不能作为Windows 目标后端的性能数据。
 - 需在 **两种环境** 各测一版（报告分栏）：
 
 | 环境 | 用途 | 对接 |
 |------|------|------|
 | 开发机（Windows + local embedding + mock Milvus） | 日常回归 | knowledge mock |
-| 麒麟真机（Kylin SDK + Milvus Lite/集群） | **正式答辩数据** | core Embedding + knowledge Milvus |
+| 目标 Windows 机器（本地 BGE-M3 + 产品配置的存储） | **正式答辩数据** | core Embedding + knowledge Milvus |
 
 **对接：知识检索模块（knowledge）+ 编排核心模块（core）**
 
 | 模块 | 提供 |
 |------|------|
 | knowledge | `query_memory` 返回 `latency_ms` 字段；Milvus 部署方式 |
-| core | 麒麟 Embedding 真机联调时间窗口；`docs/KYLIN_SDK.md` 环境 |
+| core | Windows 模型与存储配置，见 `docs/WINDOWS.md` |
 
 **测试方法：**
 
@@ -344,7 +344,7 @@ datasets/conflict_resolution.jsonl
 |------|----------|------|
 | A/B-1 | 有 vs 无 **冲突消解** | 证明 conflict_resolver 价值 |
 | A/B-2 | 有 vs 无 **quality 门控** | 证明智能筛选 |
-| A/B-3 | **Kylin embedding** vs local embedding | 国产化适配与延迟 |
+| A/B-3 | BGE-M3 不同设备配置 | 本地模型延迟 |
 | A/B-4 | 仅向量检索 vs 向量 + filter | 证明 memory_type 分类有效 |
 
 ---
@@ -359,7 +359,7 @@ datasets/conflict_resolution.jsonl
 | 效果验证报告 | 填入 `report_template.md` → 并入 Word/PDF | 9 月上旬 |
 | 功能测试报告 | checklist 结果表 | 9 月上旬 |
 | 对比实验章节 | 技术文档一节 | 9 月上旬 |
-| 麒麟适配测试记录 | 与 `docs/KYLIN_SDK.md`  checklist 对齐 | 答辩前 |
+| Windows 目标配置测试记录 | 按 `docs/WINDOWS.md` 验收 | 答辩前 |
 
 验收方案还要求：**至少 1 个真实场景应用案例** — 与frontend Demo 对齐，在报告中写同一场景的测试数据。
 
@@ -377,7 +377,7 @@ datasets/conflict_resolution.jsonl
 |------------|----------|----------|
 | 偏好准确率 | **偏好记忆（preference）** | extract 接口 + 样例 |
 | 检索召回率 / 延迟 | **知识检索（knowledge）** | query/create 可用 + Milvus |
-| 延迟（Embedding） | **Embedding（core）** | 麒麟真机联调 |
+| 延迟（Embedding） | **Embedding（core）** | Windows 目标配置实测 |
 | 冲突正确率 | **编排核心（core）** | conflict_resolver 稳定 |
 | 入库/更新正确性 | **知识检索（knowledge）** | update/delete 行为 |
 | 多源清洗 | **多源接入（ingestion）** | 四类数据源样例 |
@@ -398,7 +398,7 @@ datasets/conflict_resolution.jsonl
 | **第 2 周** | 向各模块要样例；手工标注首批 30 条/类 |
 | **第 3 周** | 实现 `run_benchmarks.py`；去掉 `test_metrics.py` 的 skip |
 | **第 4 周** | 功能测试 checklist 全跑；出第一版报告 |
-| **答辩前** | 麒麟真机 + Milvus 正式环境复测；更新最终数字 |
+| **答辩前** | Windows 目标配置复测；更新最终数字 |
 
 ---
 
@@ -425,7 +425,7 @@ datasets/conflict_resolution.jsonl
 | `tests/test_metrics.py` | 4 项硬性指标 pytest |
 | `src/knowledge/memory_service/memory_schema.py` | 入库 JSON 格式 |
 | `src/knowledge/memory_service/README.md` | knowledge CRUD 说明 |
-| `docs/KYLIN_SDK.md` | 麒麟 Embedding 适配 checklist |
+| `docs/WINDOWS.md` | Windows 模型、存储与验收配置 |
 | `docs/ARCHITECTURE.md` | 全队架构 |
 | 项目根 `README.md` | 分工与数据流 |
 

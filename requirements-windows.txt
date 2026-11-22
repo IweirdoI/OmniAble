@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Windows 日常开发依赖。版本与 requirements.txt 相同，但不安装 sentence-transformers / torch。
-# 麒麟真机和 Windows 语义检索（BGE-M3）仍使用 requirements.txt，不要用本文件代替真机环境。
+# Windows 语义检索（BGE-M3）使用完整依赖 requirements.txt。
 # hash 向量没有语义，不能拿来写召回率。
 
 pydantic==2.13.5

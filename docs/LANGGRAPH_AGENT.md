@@ -72,11 +72,9 @@ $env:AGENT_TIMEOUT_SECONDS = '60'
 聊天遗忘指令和面板遗忘都会清空前端历史；其他 API 客户端必须遵守 reset_history，并在调用 /forget 后丢弃旧 history。
 输入和模型上下文走现有无状态正则脱敏；这不是覆盖所有隐式隐私的保证。
 
-## 麒麟迁移
+## Windows 模型与存储
 
-重新创建 Linux 虚拟环境并安装依赖，不复制 Windows `.venv`。推荐 Python 3.12。
-LangGraph 不包含麒麟原生 SDK；Embedding、向量存储继续使用项目原有真机配置及验收脚本。
-Windows 的开发存储/回退结果不能代替麒麟 SDK 性能与持久化验收。
+本地语义检索和可选 Milvus 持久化的配置见 [Windows 开发指南](WINDOWS.md)。
 
 ## 验证命令
 

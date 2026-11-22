@@ -9,7 +9,7 @@ Module: core | 协助: testing
 - **一个核心**：自研 Memory Orchestrator  
 - **三类记忆**：Preference / Knowledge / Lifecycle  
 - **三个参考**：MemoryOS、Mem0、Cognee（设计借鉴，非并行部署）  
-- **自研不可替代**：分类、冲突消解、多源清洗、麒麟 Embedding 适配、混合存储  
+- **自研不可替代**：分类、冲突消解、多源清洗、本地 Embedding、混合存储
 
 不再接入 Supermemory、Zep、LangMem 等并行 adapter，避免功能重叠和答辩解释成本。
 
@@ -84,7 +84,7 @@ Module: core | 协助: testing
 |------|------|--------|
 | 最终记忆库 | **Milvus（生产目标）**；当前为进程内 mock | knowledge `memory_service/` |
 | 摄取中转库 | SQLite staging（审计、TTL 去重、按需 JSONL 导出） | ingestion |
-| Embedding | 麒麟 SDK / 本地 fallback | core `embedding/` |
+| Embedding | BGE-M3 / hash 开发接线 | core `embedding/` |
 
 > 已移除早期 `src/storage/` SQLite 双库 stub，统一由 Milvus 承担向量存储。
 > staging 在 Orchestrator 敏感过滤之前写入，但审计 content、扩展 metadata 和 raw
@@ -97,15 +97,10 @@ Module: core | 协助: testing
 
 ```
 embedding_interface.py   ← 后端工厂
-├── kylin_adapter.py     ← 银河麒麟 SDK ctypes 适配骨架（待真机验证）
 └── local_embedding.py   ← BGE-M3 本地模型；不可用时显式告警并降级为 1024 维哈希向量
 ```
 
-当前可表述为：**「系统预留多种 Embedding 后端，已实现统一接口、麒麟 ctypes
-适配骨架，并在开发机接入 BGE-M3 本地模型。」** 在完成麒麟真机测试前，
-不应宣称麒麟 SDK 端侧向量性能已验收。
-
-详见 `docs/KYLIN_SDK.md`。
+Windows 应用通过统一接口接入本地 BGE-M3。开发接线使用确定性 hash。配置与性能验收见 [Windows 开发](WINDOWS.md)。
 
 ## 8. 记忆流转（题目要求 6）
 
@@ -122,7 +117,7 @@ embedding_interface.py   ← 后端工厂
 
 ## 10. 待办
 
-- [x] 麒麟 SDK 文档整理（KYLIN_SDK.md）
+- [x] Windows 模型与存储配置（WINDOWS.md）
 - [ ] Cognee adapter 最小 POC（knowledge）
 - [ ] 冲突消解评测集（testing）
-- [ ] 麒麟真机 embedding 延迟测试（core）
+- [ ] Windows 目标机器 embedding 延迟测试（core）

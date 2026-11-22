@@ -71,12 +71,12 @@ git remote -v
 - **隐私与遗忘**：`src/security/service.py`、`forget_parser.py`、`knowledge_forget.py`、
   `index_crypto.py` 及实际调用链；对应 `tests/test_security.py`、`test_knowledge_forget.py`、
   `test_outbound_privacy.py` 和隐私专项测试。安全报告方式见 [SECURITY.md](../SECURITY.md)。
-- **Embedding 与麒麟**：`src/embedding/embedding_interface.py`、各后端实现、
-  [SDK 说明](KYLIN_SDK.md) 与本任务指定的真机脚本；对应 `tests/test_embedding.py`、`tests/test_kylin*.py`。
+- **Windows Embedding 与存储**：`src/embedding/embedding_interface.py`、各后端实现和
+  [Windows 验收说明](WINDOWS.md#task-007-目标配置验收)；对应 `tests/test_embedding.py` 和后端契约测试。
 - **前端**：`frontend/src/`、`frontend/vite.config.js`、`frontend/package.json`，
   对照真实 API 契约；测试见 `frontend/tests/`，验证用现有构建命令。
 - **评测**：先看 [benchmarks 说明](../benchmarks/README.md)、对应脚本和测试。
-  使用既有数据、固定样本和计分口径；不能改金标、删失败样本或混用 hash／本地模型／SDK 数字。
+  使用既有数据、固定样本和计分口径；不能改金标、删失败样本或混用 hash、本地模型和持久化后端的数字。
 
 公共契约优先核对 `src/common/interfaces.py`、`src/common/models.py`、
 `src/knowledge/memory_service/memory_schema.py`；配置入口是 `configs/default.yaml`。
@@ -96,8 +96,8 @@ Vite 默认代理到 `http://127.0.0.1:18080`；只跑 API 时，启动脚本默
 不要把“端口没对上”判断为业务接口坏了。
 
 日常规则、单元测试与接口接线不要求下载真实模型。完整聊天需要另配可用的模型服务，
-密钥由各自环境提供。BGE 语义检索按 Windows 指南安装完整环境；麒麟原生 SDK 和向量引擎需要对应设备与授权。
-`hash` 没有语义，`memory` 是开发内存后端；它们不能证明语义召回率、重启持久化或麒麟性能。
+密钥由各自环境提供。BGE 语义检索按 Windows 指南安装完整环境。
+`hash` 没有语义，`memory` 是开发内存后端；它们不能证明语义召回率、重启持久化或正式性能验收。
 不要把本人的 `.venv`、`.env`、数据库或模型复制给队友。
 
 ## 5. Clerk 与多人协作
@@ -157,7 +157,7 @@ PR 说明参考 [模板](../.github/PULL_REQUEST_TEMPLATE.md)：问题、行为�
 ## 7. 对用户的交付与下一次接手
 
 完成时说明改了什么、为什么、在哪里、如何验证、是否提交或合入以及剩余限制。
-如果未验证真实模型、未在麒麟运行、缺少密钥或测试按条件跳过，写明边界。
+如果未验证真实模型、未测 Windows 目标配置、缺少密钥或测试按条件跳过，写明边界。
 保留原团队和第三方来源，当前公开文档不重新写入旧成员账户、个人环境或真实用户资料。
 
 下一次对话需要交接时，在 Issue／PR 或任务约定的位置保存任务编号、分支、提交、范围、

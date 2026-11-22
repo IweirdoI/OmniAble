@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 """对话（MultiWOZ）与工具调用（ToolBench）专项评测.
 
-在麒麟宿主上：
-    export OS_AGENT_EMBEDDING_BACKEND=kylin OS_AGENT_MEMORY_BACKEND=memory OS_AGENT_KYLIN_STRICT=1
-    bash scripts/run_host_py.sh scripts/eval_dialog_tool_datasets.py --seed 42 --n 50
+在 Windows PowerShell 中：
+    . ./scripts/windows_env.ps1
+    $env:OS_AGENT_EMBEDDING_BACKEND = "local"
+    ./.venv/Scripts/python.exe scripts/eval_dialog_tool_datasets.py --seed 42 --n 50
 """
 from __future__ import annotations
 

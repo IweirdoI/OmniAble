@@ -1,10 +1,9 @@
-"""Storage transport contract regressions; substitutes do not validate native SDK performance."""
+"""Storage transport contract regressions; transport substitutes verify queries and projection."""
 
 import pytest
 
 from src.core.orchestrator import MemoryOrchestrator
 from src.knowledge.memory_service.milvus_client import MilvusClient, MemoryBackendUnavailable
-from src.knowledge.memory_service.kylin_vector_client import KylinVectorClient, _SdkTransport
 
 
 class StrictQueryTransport:
@@ -38,23 +37,6 @@ def test_profile_projection_uses_schema_fields_and_keeps_nested_metadata():
     assert feature["scope"] == "scene"
     assert feature["n_observations"] == 7
     assert feature["source"] == "explicit"
-
-
-@pytest.mark.parametrize("total", [0, 100_005])
-def test_kylin_count_uses_uncapped_id_projection_without_unsupported_aggregate(total):
-    class Bridge:
-        def call(self, op, **payload):
-            assert op == "query"
-            assert payload["output_fields"] == ["memory_id"]
-            assert 'user_id == "alice"' in payload["filter"]
-            assert "is_deleted == false" in payload["filter"]
-            return [{"memory_id": str(i)} for i in range(total)]
-
-    client = object.__new__(KylinVectorClient)
-    client.client = _SdkTransport(Bridge())
-    client.bridge = client.client.bridge
-    client.collection = "test"
-    assert client.count({"user_id": "alice"}) == total
 
 
 def test_milvus_count_does_not_turn_invalid_aggregate_into_zero():

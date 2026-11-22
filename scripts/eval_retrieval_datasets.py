@@ -6,9 +6,10 @@ TREC 官方 8.8M 全库排名仍跳过（进程内无法索引 884 万段）。�
 取出 judged query 的正例正文，再加干扰段做抽样 Recall/nDCG；正例用 passage id，
 不用 QA query_id 或相似正文去猜。
 
-    export OS_AGENT_EMBEDDING_BACKEND=kylin OS_AGENT_MEMORY_BACKEND=memory OS_AGENT_KYLIN_STRICT=1
-    bash scripts/run_host_py.sh scripts/eval_retrieval_datasets.py --seed 42 --nq 50 --rc 5000
-    bash scripts/run_host_py.sh scripts/eval_retrieval_datasets.py --seed 42 --trec-only --rc 5000
+    . ./scripts/windows_env.ps1
+    $env:OS_AGENT_EMBEDDING_BACKEND = "local"
+    ./.venv/Scripts/python.exe scripts/eval_retrieval_datasets.py --seed 42 --nq 50 --rc 5000
+    ./.venv/Scripts/python.exe scripts/eval_retrieval_datasets.py --seed 42 --trec-only --rc 5000
 """
 from __future__ import annotations
 

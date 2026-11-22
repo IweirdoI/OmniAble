@@ -9,11 +9,6 @@ from pathlib import Path
 from typing import Callable
 
 from src.common.config import load_default_config
-from src.common.kylin_runtime import (
-    discover_bridge_library,
-    host_can_load_kylin_sdk,
-    under_pytest,
-)
 from src.core.consolidator import MemoryConsolidator
 from src.core.layer_manager import LayerManager
 from src.core.orchestrator import MemoryOrchestrator
@@ -27,6 +22,11 @@ from src.security.service import SecurityAndForgetService, redact_sensitive_text
 
 
 logger = logging.getLogger(__name__)
+
+
+def under_pytest() -> bool:
+    """检测是否运行在 pytest 会话中（决定 auto 后端回落到进程内 memory）。"""
+    return "PYTEST_CURRENT_TEST" in os.environ
 
 
 def _load_default_config() -> dict:
@@ -95,73 +95,32 @@ def _create_staging_store(
             dedup_ttl_seconds,
         )
     except (OSError, sqlite3.Error):
-        from src.common.kylin_runtime import acceptance_enabled
-        if acceptance_enabled():
-            raise
         logger.exception("SQLite staging 初始化失败，回退到进程内去重")
         return None, dedup_ttl_seconds
 
 
-def _probe_kylin_vector_dim() -> int:
-    configured = os.getenv("MEMORY_VECTOR_DIM")
-    if configured:
-        return int(configured)
-    from src.embedding.embedding_interface import get_shared_embedding_backend
-
-    provider = get_shared_embedding_backend("kylin")
-    dimension = provider.dimension
-    if dimension <= 0:
-        raise RuntimeError("麒麟 Embedding 探测到非法维度")
-    os.environ.setdefault("MEMORY_VECTOR_DIM", str(dimension))
-    return dimension
-
-
-def _lock_kylin_runtime(project_root: Path, library: Path) -> None:
-    os.environ.setdefault("OS_AGENT_KYLIN_VECTOR_LIBRARY", str(library))
-    os.environ.setdefault("OS_AGENT_EMBEDDING_BACKEND", "kylin")
-    os.environ.setdefault("OS_AGENT_KYLIN_STRICT", "1")
-    os.environ.setdefault("OS_AGENT_MILVUS_COLLECTION", "mokoa_kylin_sdk")
-
-
 def resolve_memory_backend(storage_config: dict, *, project_root: Path) -> str:
-    from src.common.kylin_runtime import enforce_acceptance
-    enforce_acceptance()
     requested = os.getenv(
         "OS_AGENT_MEMORY_BACKEND",
         str(storage_config.get("memory_backend", "auto")),
     ).strip().lower()
-    if requested in {"memory", "milvus", "kylin"}:
-        if requested == "kylin":
-            library = discover_bridge_library(project_root)
-            if library is None:
-                raise RuntimeError(
-                    "OS_AGENT_MEMORY_BACKEND=kylin 但未找到桥接库；"
-                    "请设置 OS_AGENT_KYLIN_VECTOR_LIBRARY 或先编译 "
-                    "build/kylin-vector/libmokoa_kylin_vector_bridge.so"
-                )
-            _lock_kylin_runtime(project_root, library)
+    if requested in {"memory", "milvus"}:
         return requested
     if requested != "auto":
         raise ValueError(
-            "storage.memory_backend 仅支持 auto、memory、milvus 或 kylin，"
+            "storage.memory_backend 仅支持 auto、memory 或 milvus，"
             f"当前值为 {requested!r}"
         )
     if under_pytest():
         return "memory"
-    library = discover_bridge_library(project_root)
-    if host_can_load_kylin_sdk() and library is not None:
-        _lock_kylin_runtime(project_root, library)
-        logger.info("麒麟 V11 运行时已锁定系统向量 SDK：%s", library)
-        return "kylin"
     logger.warning(
-        "记忆后端 auto 回落到进程内 memory：当前不是可加载系统 SDK 的麒麟 V11 用户态"
+        "记忆后端 auto 回落到进程内 memory：本地开发默认后端，"
+        "如需持久化请显式配置 milvus"
     )
     return "memory"
 
 
 def create_orchestrator() -> MemoryOrchestrator:
-    from src.common.kylin_runtime import enforce_acceptance
-    enforce_acceptance()
     config = _load_default_config()
     memory_cfg = config.get("memory", {})
     storage_cfg = config.get("storage", {})
@@ -237,15 +196,6 @@ def create_orchestrator() -> MemoryOrchestrator:
         logger.warning(
             "使用进程内记忆后端：仅供开发/测试，不代表 Milvus 持久化或性能验收"
         )
-    elif memory_backend == "kylin":
-        from src.knowledge.memory_service.kylin_vector_client import KylinVectorClient
-
-        milvus = KylinVectorClient(
-            collection=os.getenv("OS_AGENT_MILVUS_COLLECTION", str(storage_cfg.get("collection_name", "os_agent_memory"))),
-            vector_dim=_probe_kylin_vector_dim(),
-            endpoint=os.getenv("OS_AGENT_KYLIN_VECTOR_ENDPOINT", ""),
-            timeout_ms=int(os.getenv("OS_AGENT_KYLIN_VECTOR_TIMEOUT_MS", "5000")),
-        )
     elif memory_backend == "milvus":
         configured_uri = os.getenv(
             "OS_AGENT_MILVUS_URI",
@@ -261,7 +211,7 @@ def create_orchestrator() -> MemoryOrchestrator:
         )
     else:
         raise ValueError(
-            "storage.memory_backend 仅支持 auto、memory、milvus 或 kylin，"
+            "storage.memory_backend 仅支持 auto、memory 或 milvus，"
             f"当前值为 {memory_backend!r}"
         )
 

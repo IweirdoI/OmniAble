@@ -30,7 +30,7 @@ const demoPreferences = [
 
 const demoMemories = [
   { id: 'tool-024', type: 'knowledge', layer: 'long', content: 'pip 安装依赖超时：可使用清华镜像。', source: 'tool_result', scene: 'coding' },
-  { id: 'doc-007', type: 'knowledge', layer: 'long', content: '麒麟系统缺少 pip 时，可先安装 python3-pip。', source: 'document', scene: 'os_operation' },
+  { id: 'doc-007', type: 'knowledge', layer: 'long', content: 'Windows 上可用 py -m pip 检查或安装 Python 依赖。', source: 'document', scene: 'os_operation' },
   { id: 'ctx-015', type: 'knowledge', layer: 'long', content: '项目后端使用 FastAPI 提供记忆摄取、检索、偏好及遗忘接口。', source: 'conversation', scene: 'coding' },
 ]
 

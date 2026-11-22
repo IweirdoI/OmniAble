@@ -102,7 +102,7 @@ npm run build
 
 完整浏览器验收使用项目真实 FastAPI、隔离 SQLite/偏好目录、内存存储与 hash 测试
 
-Embedding，不代表真实视觉模型、BGE-M3 或麒麟 SDK 的效果/性能验收。
+Embedding，不代表真实视觉模型、BGE-M3 的效果/性能验收。
 
 
 
@@ -422,7 +422,7 @@ GET /preferences/demo_user?latest_only=false&top_k=10
 
 - 相似度分数暂未由 `/recall` 透传；如需展示，后端需先保留 Milvus 命中的 `score`
 
-- **显示接口返回的检索耗时**（ms）；真实 Milvus/麒麟环境验收前不要标注“已达到 ≤500ms”
+- **显示接口返回的检索耗时**（ms）；Windows 目标配置验收前不要标注“已达到 ≤500ms”
 
 - 可选：高亮命中关键词
 
@@ -620,7 +620,7 @@ POST /forget
 
 
 
-**场景：麒麟 OS 上的编程助手 Agent**
+**场景：Windows 桌面编程助手**
 
 
 
@@ -672,7 +672,7 @@ POST /forget
 
 | Demo 与报告一致 | **testing** | 测试 query 列表 |
 
-| 麒麟环境部署 | **core** | 答辩机器上前后端启动方式 |
+| Windows 环境部署 | **core** | 答辩机器上前后端启动方式 |
 
 
 
@@ -762,7 +762,7 @@ POST /forget
 
 | **第 4 周** | Dashboard、冲突演示、latency 展示、UI 打磨 |
 
-| **答辩前** | 录演示视频；与testing对齐 query；麒麟机部署试跑 |
+| **答辩前** | 录演示视频；与testing对齐 query；Windows 目标机器部署试跑 |
 
 
 

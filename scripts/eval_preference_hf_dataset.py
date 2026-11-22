@@ -8,8 +8,8 @@
 1. 开放域 100 条：检测（空/非空）+ action 词面覆盖的样本正确率 / P / R / F1
 2. 封闭键 35 条：`preference_extraction.jsonl` 的精确 key=value 匹配
 
-    export OS_AGENT_EMBEDDING_BACKEND=kylin OS_AGENT_MEMORY_BACKEND=memory OS_AGENT_KYLIN_STRICT=1
-    bash scripts/run_host_py.sh scripts/eval_preference_hf_dataset.py --seed 42 --n 100 --mode rule
+    . ./scripts/windows_env.ps1
+    ./.venv/Scripts/python.exe scripts/eval_preference_hf_dataset.py --seed 42 --n 100 --mode rule
 """
 from __future__ import annotations
 

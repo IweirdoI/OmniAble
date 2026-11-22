@@ -6,7 +6,7 @@ from src.preference.keys import PREFERENCE_KEYS
 
 ALLOWED_KEYS_TEXT = "\n".join(f"- {k}" for k in sorted(PREFERENCE_KEYS))
 
-EXTRACTION_SYSTEM_PROMPT = """You are an OS Agent preference extraction engine for Kylin desktop OS.
+EXTRACTION_SYSTEM_PROMPT = """You are an OS Agent preference extraction engine for a Windows desktop app.
 Extract DURABLE structured preferences from user utterances.
 
 ALWAYS extract when the utterance implies a reusable policy, even if phrased as a current task.

@@ -9,7 +9,7 @@ Phase 2 优化口径：
   - 写入 / 版本更新 / 遗忘后画像与计数即时一致；跨用户不得串数据
 
 说明：全部使用 InMemoryMilvusClient；MilvusClient.count 的 count(*) 输出
-与麒麟向量引擎兼容性以真实后端实测为准（Windows 开发环境无 milvus_lite）。
+以 Windows 配置的 Milvus 服务实测为准。
 """
 
 from __future__ import annotations

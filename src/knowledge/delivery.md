@@ -44,7 +44,7 @@
 如果继续做正式 Milvus 接入，只需要确认这几件事：
 
 1. `MilvusClient` 的真实库配置是否仍然是本地 `.db`
-2. embedding 后端是否已经在 Linux/麒麟环境可用
+2. embedding 后端是否已经在 Windows 目标配置可用
 3. `memory_schema.py` 的字段是否继续维持当前约定
 4. `query_memory` / `delete_memory` 的 filters 是否还要扩展
 

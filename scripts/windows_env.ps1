@@ -1,4 +1,4 @@
-﻿# 当前 PowerShell 会话的 Windows 开发环境。不写注册表，不影响麒麟。
+﻿# 当前 PowerShell 会话的 Windows 开发环境。变量只对当前会话及子进程生效。
 # 用法: . .\scripts\windows_env.ps1
 
 $Root = Split-Path -Parent $PSScriptRoot

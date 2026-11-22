@@ -69,7 +69,7 @@ def main() -> int:
         "history_count": len(history_items),
         "latest_count": len(latest_items),
         "latest_content": latest_items[0].content if latest_items else None,
-        "note": "仅验证接线，不代表真实Milvus、麒麟SDK或性能验收",
+        "note": "仅验证接线，目标存储与语义性能另行验收",
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
     temp_storage.cleanup()

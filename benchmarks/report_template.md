@@ -2,7 +2,7 @@
 
 > 模块负责人：testing | 对应能力 **(7) 量化评测**
 > 运行方式：`python benchmarks/run_benchmarks.py [--real]`
-> 本报告填写说明：用 `benchmarks/results/report_*.json` 与 `summary_*.md` 的真实数字替换下方占位；真机数字来自麒麟 V11 宿主（kylin 后端）的 `--real` 跑分。
+> 本报告填写说明：用 `benchmarks/results/report_*.json` 与 `summary_*.md` 的真实数字替换下方占位；目标配置的组件检索来自 Windows 环境的 `--real` 跑分，完整性能验收见 `docs/WINDOWS.md`。
 
 ---
 
@@ -15,18 +15,18 @@
 
 ## 2. 测试环境
 
-| 项 | 开发/CI（baseline） | 真机验收（real） |
+| 项 | 开发/CI（baseline） | Windows 目标配置（real） |
 |---|---|---|
-| 系统 | Windows / 开发机 | 银河麒麟 V11 2603 |
-| 记忆后端 | 进程内 mock / memory | 麒麟 AI 子系统向量引擎 `mokoa_kylin_sdk` |
-| Embedding | 本地 BGE-M3（sentence-transformers） | 麒麟端侧 Embedding SDK（768 维，严格模式） |
-| 向量维度 | 1024（BGE-M3） | 768（麒麟 SDK） |
-| 严格模式 | 关 | `OS_AGENT_KYLIN_STRICT=1` |
+| 系统 | Windows / 开发机 | <Windows 版本、CPU/GPU 与内存> |
+| 记忆后端 | 进程内 mock / memory | <产品配置的存储与版本> |
+| Embedding | 组件级确定性 hash | <本地模型与版本> |
+| 向量维度 | 48（组件基线） | <实测向量维度> |
+| 模型降级 | 不适用 | <记录 fallback> |
 | 跑分时间 | <填写> | <填写> |
 
 ## 3. 四项硬性指标结果
 
-| 指标 | 目标 | baseline 数值 | 真机数值 | 是否达标 |
+| 指标 | 目标 | baseline 数值 | 目标配置数值 | 是否达标 |
 |---|---|---|---|---|
 | 偏好提取准确率（字段级 F1） | ≥ 85% | <填 recall_json> | <填 real_json> | <✅/❌> |
 | └ 偏好分类准确率（组件级，内部口径） | 内部指标 | <填 recall_json> | 同 baseline（分类与后端无关） | <✅/❌> |
@@ -35,7 +35,7 @@
 | 冲突处理正确率 | ≥ 88% | <填 conflict_json> | 同 baseline（规则无关后端） | <✅/❌> |
 
 > 说明：冲突处理正确率依赖 `ConflictResolver` 规则，与存储后端无关，真机与 baseline 一致。
-> 真机列仅填 `status=ran` 的结果；后端缺失时如实写「unavailable（缺测）」，不用 baseline 数字代替（TASK-005）。
+> 目标配置列仅填 `status=ran` 的结果；后端缺失时如实写「unavailable（缺测）」，不用 baseline 数字代替（TASK-005）。
 
 > 说明：冲突处理正确率依赖 `ConflictResolver` 规则，与存储后端无关，真机与 baseline 一致。
 
@@ -59,7 +59,7 @@
 
 ### 4.3 检索响应时间（≤500ms，建议报 P50/P95）
 - baseline 平均 <填>ms；P95 <填>ms
-- 真机 P50 <填>ms；P95 <填>ms
+- 目标配置 P50 <填>ms；P95 <填>ms
 - 结论：<达标/未达标说明>
 
 ### 4.4 冲突处理正确率（≥88%）
@@ -73,7 +73,7 @@
 |---|---|---|---|
 | A/B-1 | 有 vs 无 冲突消解 | 证明 conflict_resolver 价值 | <填> |
 | A/B-2 | 有 vs 无 quality 门控 | 证明智能筛选 | <填> |
-| A/B-3 | Kylin embedding vs local | 国产化适配与延迟 | <填> |
+| A/B-3 | BGE-M3 不同设备配置 | 本地模型延迟 | <填> |
 | A/B-4 | 仅向量 vs 向量+filter | 证明 memory_type 分类有效 | <填> |
 
 ## 6. 结论与改进方向
@@ -91,6 +91,6 @@
 - 跑分命令：
   ```bash
   python benchmarks/run_benchmarks.py            # 组件级基线
-  # 真机：先导出 OS_AGENT_* 环境变量，再
+  # 目标配置：先按 docs/WINDOWS.md 设置存储与本地模型
   python benchmarks/run_benchmarks.py --real
   ```

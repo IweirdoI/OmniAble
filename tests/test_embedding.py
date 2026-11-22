@@ -1,4 +1,4 @@
-"""Local / Kylin embedding tests. Module: core."""
+"""Local and hash embedding tests. Module: core."""
 
 from __future__ import annotations
 

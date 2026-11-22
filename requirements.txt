@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-# Kylin OS Agent Memory - Core dependencies
+# MOKOA Windows Desktop - Core dependencies
 # 依赖统一锁定为当前验证通过的精确版本，避免 >= 下限拉取非预期/被投毒版本（#11）。
 # 升级前请在隔离环境验证并通过全部测试后再更新此处；CI 建议额外生成 requirements.lock。
-# 本文件是麒麟真机和完整安装（含 BGE-M3）的锁定清单。
+# 本文件是Windows 完整安装（含 BGE-M3）的锁定清单。
 # Windows 日常接线使用 requirements-windows.txt，不包含 sentence-transformers。
 
 pydantic==2.13.5

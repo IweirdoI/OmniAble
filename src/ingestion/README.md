@@ -592,4 +592,4 @@ python -m pytest tests/ -v
 - [x] 对拒绝码和各阶段耗时建立监控（`GET /staging/stats` + `stage_ms`）
 - [x] 与 security 模块确认 `privacy_risk` 标记协议（`detect_privacy_risk`）
 - [x] 建立真实工具日志和用户行为 JSONL 数据集（`ingestion_acceptance.jsonl`）
-- [ ] 在麒麟真机执行批量吞吐与内存稳定性测试（脚本：`scripts/ingestion_acceptance.py`）
+- [ ] 在目标 Windows 机器执行批量吞吐与内存稳定性测试（脚本：`scripts/ingestion_acceptance.py`）

@@ -2,7 +2,7 @@
 """ingestion · ingestion 准上线验收脚本。
 
 重放 ``benchmarks/datasets/ingestion_acceptance.jsonl``，再生成一批合成事件
-测量吞吐与 p95。可在开发机或麒麟真机上运行：
+测量吞吐与 p95。可在 Windows 开发机或目标配置上运行：
 
     python scripts/ingestion_acceptance.py
     python scripts/ingestion_acceptance.py --repeat 200

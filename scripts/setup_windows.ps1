@@ -1,6 +1,5 @@
 ﻿# Windows 开发环境。默认装核心依赖并用 hash 向量做接线冒烟。
 # 语义检索: .\scripts\setup_windows.ps1 -Profile full
-# 麒麟真机不要运行本脚本，继续使用 requirements.txt 与 scripts/*.sh。
 
 param(
     [ValidateSet("core", "full")]

@@ -4,7 +4,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
   // MOKOA FastAPI
-  // Allow VITE_API_TARGET to override the Kylin V11 default port.
+  // Allow VITE_API_TARGET to override the Windows API default port.
   const apiTarget = env.VITE_API_TARGET || 'http://127.0.0.1:18080'
 
   return {

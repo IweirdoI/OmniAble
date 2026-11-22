@@ -11,8 +11,8 @@
   - 截断行为（profile top_k=10_000 边界：过滤后超出即静默丢键）
 
 方法学声明：本基线使用 InMemoryMilvusClient + 确定性 hash embedding，
-只验证链路与口径、采集优化前的证据基线；不代表 Milvus / 麒麟 SDK 的
-真实延迟与吞吐（真机数字见 run_benchmarks.py --real 与 TASK-007）。
+只验证链路与口径、采集优化前的证据基线；不代表 Windows 目标存储与模型的
+真实延迟与吞吐（目标配置见 run_benchmarks.py --real 与 TASK-007）。
 
 运行:
     python benchmarks/run_scale_baseline.py                      # 默认三档规模
@@ -496,7 +496,7 @@ def _render_md(report: dict) -> str:
         "# 规模与并发基线（TASK-006 / Issue #5）",
         "",
         f"- 生成时间：{report['meta']['generated_at']}",
-        f"- 后端：{report['meta']['backend']}（仅接线证据，不代表 Milvus/麒麟性能）",
+        f"- 后端：{report['meta']['backend']}（仅接线证据，目标配置性能另测）",
         f"- Python：{report['environment']['python_version']} / 提交：{report['environment'].get('git_commit') or '未知'}",
         "",
     ]

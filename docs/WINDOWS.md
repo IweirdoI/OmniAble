@@ -1,18 +1,18 @@
 # Windows 开发
 
-麒麟真机验收不走本文。真机仍用 `requirements.txt`、`scripts/*.sh` 和麒麟 Embedding SDK。本文只覆盖 Windows 上的安装、接线和本地 API。
+本文覆盖 MOKOA 在 Windows 上的安装、前后端联调、语义检索与性能验收。
 
 原版代码在 [mokoa-kylin](https://github.com/IweirdoI/mokoa-kylin)，对应原项目的提交 `220bdd1`。本仓与上游的关系见 [发布说明.md](发布说明.md)。
 
 ## 能证明什么
 
-| 环境 | 能做 | 不能写成真机验收 |
+| 环境 | 能做 | 证据边界 |
 |------|------|------------------|
-| Windows + hash | 安装、API、规则抽取、单测 | 召回质量、500ms、麒麟 SDK |
-| Windows + BGE-M3（`local`） | 语义检索和前后端联调 | 麒麟 SDK；维度是 1024，不是真机 768 |
-| 本机 Milvus Lite 或 Docker 里的 Milvus | 重启后数据还在 | Embedding SDK |
+| Windows + hash | 安装、API、规则抽取、单测 | 无法评估语义质量或产品延迟 |
+| Windows + BGE-M3（`local`） | 语义检索和前后端联调 | 记录模型、维度以及实测机器 |
+| 可选 Milvus 服务 | 重启后数据还在 | 单独验证存储持久化 |
 
-Hash 向量没有语义。报告里如果写了 Windows BGE 的数字，必须注明「非麒麟 SDK」。
+Hash 向量用于接线。语义结果需使用本地模型且报告实际降级状态。
 
 ## 日常
 
@@ -59,14 +59,23 @@ npm run dev
 powershell -ExecutionPolicy Bypass -File scripts\dev_windows.ps1 -Port 18080
 ```
 
-## 不要在 Windows 上跑的入口
+## TASK-007 目标配置验收
 
-这些脚本依赖麒麟宿主 Python、`.so` 或 Unix socket，Windows 上会直接说明并退出，或只应在真机执行：
+在目标 Windows 机器按实际产品配置选择存储。需要跨应用重启保留长期记忆时，预先启动 Milvus，并设置用于评测的服务地址。
 
-- `scripts/run_host_py.sh`
-- `scripts/kylin_preflight.py`
-- `scripts/smoke_kylin_embedding.py`
-- `scripts/run_flow_persistence_check.py`
-- `scripts/kylin_v11_*.sh`
+```powershell
+. ./scripts/windows_env.ps1
+$env:OS_AGENT_EMBEDDING_BACKEND = "local"
+# 若目标配置使用持久化存储，再设以下两项（按实际服务地址配置）
+# $env:OS_AGENT_MEMORY_BACKEND = "milvus"
+# $env:OS_AGENT_MILVUS_URI = "http://127.0.0.1:19530"
+./.venv/Scripts/python.exe benchmarks/run_benchmarks.py --real
+```
 
-不要把 Windows 的 `.venv` 拷到麒麟上。两边各自创建虚拟环境。
+`--real` 测组件级检索。Milvus 模式在独立评测集合 `mokoa_windows_benchmark` 写入固定虚构数据，可用 `OS_AGENT_BENCHMARK_COLLECTION` 指定另一独立集合。切换模型或向量维度时另用一套评测集合。
+启动带 Milvus 的 Windows API 时使用 `./scripts/dev_windows.ps1 -Port 18085 -Embedding local -MemoryBackend milvus`。
+`scripts/windows_scale_acceptance.py` 可对端口 18085 做现有的串行规模探针，`benchmarks/run_scale_baseline.py` 提供固定数据的 memory/hash 并发对照。
+
+完整验收使用同一提交和金标，记录 Windows 版本、CPU/GPU、内存、存储及模型版本、维度、降级状态、冷暖启动、规模和并发。
+分别记录编码、存储、重排／画像、完整 recall 和聊天耗时，以及 Recall@K、P50/P95、吞吐、失败率。
+以完整 recall 的 P95 对照 500ms 目标。按实测定位瓶颈，再用同一数据和配置复测，缺测单列。

@@ -137,7 +137,7 @@ def main():
             predict(case["text"])
             timings.append((perf_counter() - start) * 1000)
     memory = process.memory_info()
-    report = {"scope": "synthetic diagnostic corpus, Windows/Linux CPU candidate test; not Kylin acceptance",
+    report = {"scope": "synthetic diagnostic corpus, Windows/Linux CPU candidate test; report the actual hardware and runtime",
               "platform": platform.platform(), "python": platform.python_version(),
               "onnxruntime": ort.__version__, "threads": args.threads,
               "model_sha256": hashlib.sha256(model_file.read_bytes()).hexdigest(),

@@ -318,7 +318,7 @@ storage:
 | 验收数据集 | `benchmarks/datasets/ingestion_acceptance.jsonl` | 14 条期望与管线一致 |
 | 吞吐脚本 | `python scripts/ingestion_acceptance.py --repeat 80` | 开发机 p95 < 1ms 量级 |
 
-真机（麒麟）仍需跑同一脚本，确认批量吞吐和 SQLite 文件增长。这是当前唯一未在本机完成的准上线项。
+目标 Windows 配置仍需跑同一脚本，确认批量吞吐和 SQLite 文件增长。这是当前唯一未在本机完成的准上线项。
 
 ---
 
@@ -328,8 +328,8 @@ ingestion 已达到**准上线**：主链、审计、脱敏、遗忘、自动清
 
 上线前仍建议：
 
-1. 在银河麒麟真机跑 `scripts/ingestion_acceptance.py --repeat 500`，记录 p95 与数据库体积。
+1. 在目标 Windows 机器运行 `scripts/ingestion_acceptance.py --repeat 500`，记录 p95 与数据库体积。
 2. 用真实 Agent 日志替换/扩充 JSONL 后，再微调 `quality_weights`。
 3. 多 worker 部署时确认只有一份 SQLite 文件，并观察 `database is locked` 是否被 5s busy timeout 消化。
 
-整系统上线还依赖：真实 Milvus、麒麟 Embedding SDK 真机验收。这两项不属于本模块。
+整系统上线还依赖：Windows 目标存储与本地向量模型验收。这两项不属于本模块。

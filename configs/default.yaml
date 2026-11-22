@@ -13,7 +13,7 @@ project:
 api:
   host: 127.0.0.1
   port: 8000                 # 开发默认；真机验收常用 18080（命令行/环境变量覆盖）
-  title: Kylin OS Agent Memory API
+  title: MOKOA Desktop Memory API
   version: "0.3.0"
   cors_allow_origins: ["*"]  # 前后端分离部署时由编排核心添加 CORSMiddleware
 
@@ -96,18 +96,16 @@ retrieval:
   latency_budget_ms: 500
 
 embedding:
-  backend: auto  # auto | kylin | local | hash（hash 仅测试）
+  backend: auto  # auto | local | hash（hash 仅测试）
   local_model: BAAI/bge-m3
   normalize: true
-  allow_stub_fallback: true  # 未安装 sentence-transformers 时回退零向量，便于 CI
-  # auto：仅在可加载 V11 系统 SDK 的用户态选择 kylin，并默认严格模式。
+  allow_stub_fallback: true  # 未安装 sentence-transformers 时回退确定性 hash 向量，便于联调
+  # auto：使用本地 BGE-M3；开发脚本显式选择 hash。
   # device: cpu  # 可选；省略则 sentence-transformers 自动选择
-  # kylin: libkylin-coreai-embedding-dev (see docs/KYLIN_SDK.md)
 
 storage:
-  # auto：麒麟 V11 宿主 + 已编译桥接库 → 系统向量 SDK；pytest/开发机 → memory。
-  # 禁止在真机验收时静默落到 memory / pymilvus / BGE。
-  memory_backend: auto       # auto | memory | milvus | kylin
+  # auto 使用进程内 memory；需要重启持久化时显式配置 Milvus。
+  memory_backend: auto       # auto | memory | milvus
   milvus_uri: http://localhost:19530
   collection_name: os_agent_memory
   # Ingestion staging (ingestion) — 详见 ingestion-SQLite建库说明.md
@@ -120,20 +118,6 @@ storage:
   staging_audit_retention_days: 90
   staging_auto_purge_interval_seconds: 3600  # 0 关闭后台自动清理
   dedup_ttl_seconds: 300
-
-# ---------------------------------------------------------------------------
-# 麒麟运行时（src/common/kylin_runtime.py、embedding/kylin_adapter.py、knowledge/memory_service/kylin_vector_client.py）
-# 这些默认值原散落在 factory.py / embedding/* 等处的 os.getenv，现统一收口于此。
-# 环境变量 OS_AGENT_KYLIN_* 可覆盖对应键。
-# ---------------------------------------------------------------------------
-kylin:
-  acceptance: false           # OS_AGENT_KYLIN_ACCEPTANCE=1 进入正式验收（禁止降级）
-  strict: false               # OS_AGENT_KYLIN_STRICT=1 严格模式，禁止 fallback
-  vector_dim: 1024           # MEMORY_VECTOR_DIM 真实维度（真机探测后覆盖）
-  milvus_collection: mokoa_kylin_sdk   # 真机验收集合名（OS_AGENT_MILVUS_COLLECTION）
-  vector_library: ""          # OS_AGENT_KYLIN_VECTOR_LIBRARY 桥接库 .so 路径
-  vector_endpoint: ""         # OS_AGENT_KYLIN_VECTOR_ENDPOINT 系统向量引擎 socket
-  vector_timeout_ms: 5000
 
 # ---------------------------------------------------------------------------
 # 知识记忆库（src/knowledge/memory_service）：策略与长度约束

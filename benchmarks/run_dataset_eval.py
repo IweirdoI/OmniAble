@@ -30,8 +30,8 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-# ---- 在任何 MOKOA 导入前固定默认后端; 真机可覆盖为 kylin ----
-os.environ.setdefault("OS_AGENT_EMBEDDING_BACKEND", "local")   # 开发机 BGE-M3; V11 请 export ...=kylin
+# ---- 在导入 MOKOA 前固定默认后端，允许 Windows 会话显式覆盖 ----
+os.environ.setdefault("OS_AGENT_EMBEDDING_BACKEND", "local")   # Windows BGE-M3
 os.environ.setdefault("OS_AGENT_MEMORY_BACKEND", "memory")      # 进程内客户端
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 try:

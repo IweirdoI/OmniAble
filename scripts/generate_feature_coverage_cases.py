@@ -14,7 +14,7 @@ OVERSIZE = "data/demo_coverage/attachments/10_oversized_dummy.pdf"
 
 USER_A = "demo_user_a"
 USER_B = "demo_user_b"
-BG = "统一背景：用户在麒麟电脑上处理学习 / 办公 / 开发任务；主线虚构项目「星河笔记」(XingHe Notes)，对照项目「课程助手」(CourseAssistant)。"
+BG = "统一背景：用户在 Windows 电脑上处理学习 / 办公 / 开发任务；主线虚构项目「星河笔记」(XingHe Notes)，对照项目「课程助手」(CourseAssistant)。"
 
 
 def case(
@@ -278,7 +278,7 @@ def render_md() -> str:
         "",
         "## 5. 执行说明",
         "",
-        "1. 启动后端与前端（或 `scripts/kylin_v11_demo_start.sh`），用户框使用 `demo_user_a`。",
+        "1. 启动后端与前端（见 `docs/WINDOWS.md`），用户框使用 `demo_user_a`。",
         f"2. 附件从 `{ATTACH_DIR}/` 上传；DOC-10 使用 `{OVERSIZE}`。",
         "3. 建议分批：SRC+DOC → PREF+KNOW → CONF+SEC → ISO+FLOW。",
         f"4. 机器可读副本：`{OUT_DIR.relative_to(ROOT) / 'cases_80.jsonl'}`。",

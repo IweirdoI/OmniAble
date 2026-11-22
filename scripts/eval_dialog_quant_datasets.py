@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 """量化评测类对话数据集：DailyDialog + DIALOGBENCH.
 
-在麒麟宿主上：
-    export OS_AGENT_EMBEDDING_BACKEND=kylin OS_AGENT_MEMORY_BACKEND=memory OS_AGENT_KYLIN_STRICT=1
-    bash scripts/run_host_py.sh scripts/eval_dialog_quant_datasets.py --seed 42 --n 50
+在 Windows PowerShell 中：
+    . ./scripts/windows_env.ps1
+    $env:OS_AGENT_EMBEDDING_BACKEND = "local"
+    ./.venv/Scripts/python.exe scripts/eval_dialog_quant_datasets.py --seed 42 --n 50
 """
 from __future__ import annotations
 
