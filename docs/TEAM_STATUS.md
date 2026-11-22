@@ -19,7 +19,7 @@
 | TASK-011 | [P1] 确定聊天与记忆工作台视觉规范和关键页面方案 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/10 | 20261121-215645 |
 | TASK-012 | [P1] 落地工作台 UI 改版，恢复手机操作并完善键盘可用性 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/11 | 20261121-215812 |
 | TASK-013 | [P2] 贯通聊天、偏好画像和记忆查询的场景选择 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/12 | 20261121-215647 |
-| TASK-014 | [P2] 增加可分页的长期记忆浏览与筛选，独立于本轮聊天召回 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/13 | 20261121-215815 |
+| TASK-014 | [P2] 增加可分页的长期记忆浏览与筛选，独立于本轮聊天召回 | 进行中 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/13 | 20261122-153224 |
 | TASK-015 | [P1] 建立前端自动化回归 CI，覆盖聊天流式与响应式主流程 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/14 | 20261121-215649 |
 | TASK-016 | [P1] 按设计完善 Agent 路由、执行预算与结果核验 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/16 | 20261122-151543 |
 | TASK-017 | [P1] 集成 Agent 文件工作区、变更预览与网页侧栏 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/19 | 20261122-151544 |

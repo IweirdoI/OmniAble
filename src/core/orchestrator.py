@@ -50,11 +50,12 @@ from src.knowledge.memory_service.memory_schema import (
     CreateMemoryRequest,
     DeleteMemoryRequest,
     MemoryEntry,
+    MemorySource,
     MemoryTypeTag,
     QueryMemoryRequest,
     UpdateMemoryRequest,
 )
-from src.knowledge.memory_service.milvus_client import MilvusClient
+from src.knowledge.memory_service.milvus_client import MAX_BROWSE_TOTAL, MilvusClient
 from src.knowledge.memory_service.in_memory_client import InMemoryMilvusClient
 from src.knowledge.memory_service.query_memory import query_memory
 from src.knowledge.memory_service.update_memory import update_memory
@@ -1179,6 +1180,71 @@ class MemoryOrchestrator:
             RetrievalQuery(query="", user_id=user_id, top_k=top_k),
             filters=filters,
         )
+
+    def list_memories_page(
+        self,
+        user_id: str,
+        *,
+        memory_type: str | None = None,
+        source: str | None = None,
+        scene_id: str | None = None,
+        include_superseded: bool = False,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> dict:
+        """只读分页浏览权威长期记忆（TASK-014 / Issue #13，独立于聊天召回）。
+
+        - 用户隔离：user_id 强制注入 filters，调用方不可覆盖
+        - 默认只看最新（is_latest=True）；include_superseded 展示版本链
+        - 类型筛选支持五类标签或 "knowledge" 聚合（tool_call/document_chunk/
+          project_context/feedback）；来源筛选按 MemorySource 枚举校验
+        - 返回 {total, offset, limit, returned, order, items}；items 为存储
+          public record（无 embedding；content 为入库时已脱敏文本）
+        - 匹配总数超过 MAX_BROWSE_TOTAL 时显式报错要求细化筛选，不静默漏数
+        """
+        filters: dict = {"user_id": user_id}
+        if memory_type is not None:
+            normalized = memory_type.strip().lower()
+            if normalized == "knowledge":
+                filters["memory_type"] = [
+                    MemoryTypeTag.TOOL_CALL.value,
+                    MemoryTypeTag.DOCUMENT_CHUNK.value,
+                    MemoryTypeTag.PROJECT_CONTEXT.value,
+                    MemoryTypeTag.FEEDBACK.value,
+                ]
+            else:
+                try:
+                    filters["memory_type"] = MemoryTypeTag(normalized).value
+                except ValueError as exc:
+                    raise ValueError(
+                        "未知 memory_type："
+                        f"{memory_type}；可选 preference/knowledge/tool_call/"
+                        "document_chunk/project_context/feedback"
+                    ) from exc
+        if source is not None:
+            try:
+                filters["source"] = MemorySource(source.strip().lower()).value
+            except ValueError as exc:
+                valid = "/".join(item.value for item in MemorySource)
+                raise ValueError(f"未知 source：{source}；可选 {valid}") from exc
+        if scene_id is not None:
+            filters["scene_id"] = scene_id
+        if not include_superseded:
+            filters["is_latest"] = True
+
+        page = self._milvus.list_page(filters, offset=offset, limit=limit)
+        if page["total"] > MAX_BROWSE_TOTAL:
+            raise ValueError(
+                f"匹配记录数 {page['total']} 超出浏览上限 {MAX_BROWSE_TOTAL}，请细化筛选条件"
+            )
+        return page
+
+    def get_memory_detail(self, user_id: str, memory_id: str) -> dict | None:
+        """单条已保存记忆详情（TASK-014）。跨用户一律返回 None（不泄露存在性）。"""
+        record = self._milvus.get_by_id(memory_id)
+        if record is None or str(record.get("user_id") or "") != user_id:
+            return None
+        return record
 
     def forget(self, user_id: str, instruction: str) -> list[str]:
         """NL 遗忘：解析目标 ID → 删敏感索引 + 短期/中期/Milvus。

@@ -110,6 +110,39 @@ class InMemoryMilvusClient:
             and self._matches_filters(record, merged_filters)
         )
 
+    def list_page(
+        self,
+        filters: dict[str, Any],
+        *,
+        offset: int = 0,
+        limit: int = 20,
+        output_fields: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """稳定排序分页（TASK-014 / Issue #13）：创建时间倒序。
+
+        本地后端 dict 插入序等价创建序，倒序切片精确稳定，单次扫描完成；
+        与 MilvusClient.list_page 的两阶段实现语义一致。
+        """
+        if limit < 1 or offset < 0:
+            raise ValueError("分页参数不合法：limit>=1 且 offset>=0")
+        merged_filters = {"is_deleted": False, **filters}
+        matches = [
+            record
+            for record in self._records.values()
+            if not record.get("is_deleted")
+            and self._matches_filters(record, merged_filters)
+        ]
+        page_records = list(reversed(matches))[offset : offset + limit]
+        items = []
+        for record in page_records:
+            item = dict(record)
+            item.pop("embedding", None)
+            if output_fields is not None:
+                item = {key: item[key] for key in output_fields if key in item}
+            items.append(item)
+        return {"total": len(matches), "offset": offset, "limit": limit,
+                "returned": len(items), "items": items, "order": "created_desc"}
+
     def get_by_id(
         self,
         memory_id: str,

@@ -595,6 +595,54 @@ def preference_history(
     }
 
 
+@app.get("/memories/{user_id}")
+def list_memories(
+    user_id: str,
+    memory_type: str | None = None,
+    source: str | None = None,
+    scene_id: str | None = None,
+    include_superseded: bool = False,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> dict[str, Any]:
+    """只读分页浏览已保存长期记忆（TASK-014，独立于本轮聊天召回）。
+
+    稳定排序（创建时间倒序）、类型/来源/场景筛选；items 无 embedding，
+    content 为入库时已脱敏文本。匹配总数超浏览上限时报 400 要求细化筛选。
+    """
+    try:
+        page = orchestrator.list_memories_page(
+            user_id,
+            memory_type=memory_type,
+            source=source,
+            scene_id=scene_id,
+            include_superseded=include_superseded,
+            offset=offset,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "user_id": user_id,
+        "filters": {
+            "memory_type": memory_type,
+            "source": source,
+            "scene_id": scene_id,
+            "include_superseded": include_superseded,
+        },
+        **page,
+    }
+
+
+@app.get("/memories/{user_id}/{memory_id}")
+def memory_detail(user_id: str, memory_id: str) -> dict[str, Any]:
+    """单条记忆详情；跨用户或不存在一律 404（不泄露存在性）。"""
+    record = orchestrator.get_memory_detail(user_id, memory_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="memory not found")
+    return {"user_id": user_id, "memory": record}
+
+
 @app.post("/recall")
 def recall(req: RecallRequest) -> dict[str, Any]:
     parsed_type = MemoryType(req.memory_type) if req.memory_type is not None else None
