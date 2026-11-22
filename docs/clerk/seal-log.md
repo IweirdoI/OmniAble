@@ -3,3 +3,4 @@
 - 20261122-143601 Linnea <2312809203@qq.com>: Resolve PR20 generated seal conflict after auditing merged TASK-006; preserve TASK-005 and all current master records; original seal stages retained in local git audit
 - 20261122-144737 Linnea <2312809203@qq.com>: Integrate TASK-006 Phase2 d4b8ba0: audit confirms only TASK-006 active to review; preserve all other master task records; regenerate merged seals, original stages retained in local git audit
 - 20261122-152753 Linnea <2312809203@qq.com>: 合并 PR #21：TASK-002 review 行与 master 已完成行行级合并后重建封存
+- 20261122-160129 Linnea <2312809203@qq.com>: merge PR #22 (TASK-014 API part): rebuild seal after merging master task records

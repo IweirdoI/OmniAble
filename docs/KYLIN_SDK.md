@@ -1,6 +1,6 @@
 # 银河麒麟 AI SDK 接入说明
 
-> 来源：`kylinos_dev_manual(1).pdf` — KylinSdk V3.0 开发指南，第 9 章 AI SDK
+> 来源：KylinSdk V3.0 开发指南，第 9 章 AI SDK
 
 > **当前代码状态（2026-08-12）：** 已有 `kylin_ctypes.py`、
 > `KylinEmbeddingAdapter`、预检与严格 smoke test，但尚无麒麟真机验证记录。开发环境的

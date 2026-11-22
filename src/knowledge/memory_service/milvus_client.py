@@ -15,6 +15,12 @@ from src.knowledge.memory_service.config import (
     VECTOR_DIM,
 )
 
+# 浏览总量上限（TASK-014 / Issue #13）：匹配数超过该值时要求细化筛选，
+# 显式报错不静默截断。上限需 ≤ Milvus query 单次窗口（默认 16384），
+# 保证分页阶段一的键投影单次可完成。
+MAX_BROWSE_TOTAL = 10_000
+
+
 class MemoryBackendUnavailable(Exception):
     """向量后端（Milvus / Kylin）当前不可达；API 层据此返回 503 而非 500。"""
 
@@ -203,6 +209,68 @@ metadata 的特殊性：注意列表中包含 metadata（JSON类型）。
         if value is None:
             raise MemoryBackendUnavailable("Invalid count(*) response from memory backend")
         return int(value)
+
+    def list_page(
+        self,
+        filters: dict[str, Any],
+        *,
+        offset: int = 0,
+        limit: int = 20,
+        output_fields: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """稳定排序分页（TASK-014 / Issue #13）：创建时间倒序，memory_id 决胜。
+
+        两阶段实现，不依赖服务端 ORDER BY / offset（Kylin SDK transport 的
+        query 无服务端 limit/offset，pymilvus 标量 query 无稳定排序保证）：
+          1) count() 取总数；轻投影读全量排序键（memory_id + created_at，
+             与 count 的 ID 投影同量级），客户端排序后取页内 ID；
+          2) 按页内 ID 用 in 过滤取整页数据（复用 search 的投影语义）。
+
+        匹配总数超过 MAX_BROWSE_TOTAL 时显式报错要求细化筛选，不静默截断。
+        三后端（memory / pymilvus / kylin）语义一致；pymilvus / 麒麟端的
+        排序稳定性以真实后端实测为准。
+        """
+        if limit < 1 or offset < 0:
+            raise ValueError("分页参数不合法：limit>=1 且 offset>=0")
+        total = self.count(filters)
+        if total == 0:
+            return {"total": 0, "offset": offset, "limit": limit,
+                    "returned": 0, "items": [], "order": "created_desc"}
+        if total > MAX_BROWSE_TOTAL:
+            raise ValueError(
+                f"匹配记录数 {total} 超出浏览上限 {MAX_BROWSE_TOTAL}，请细化筛选条件"
+            )
+        merged_filters = {"is_deleted": False, **filters}
+        expr = self._build_expr(merged_filters)
+        self._ensure_connected()
+        key_rows = self.client.query(
+            collection_name=self.collection,
+            filter=expr,
+            output_fields=["memory_id", "created_at"],
+        )
+
+        def _sort_key(row: Any) -> tuple[str, str]:
+            return (str(row.get("created_at") or ""), str(row.get("memory_id") or ""))
+
+        ordered_ids = [
+            str(row.get("memory_id"))
+            for row in sorted(key_rows, key=_sort_key, reverse=True)
+        ]
+        page_ids = ordered_ids[offset : offset + limit]
+        if not page_ids:
+            return {"total": total, "offset": offset, "limit": limit,
+                    "returned": 0, "items": [], "order": "created_desc"}
+        page_items = self.search(
+            None,
+            {**filters, "memory_id": page_ids},
+            top_k=limit,
+            output_fields=output_fields,
+        )
+        by_id = {str(item.get("memory_id")): item for item in page_items}
+        ordered_items = [by_id[memory_id] for memory_id in page_ids if memory_id in by_id]
+        return {"total": total, "offset": offset, "limit": limit,
+                "returned": len(ordered_items), "items": ordered_items,
+                "order": "created_desc"}
 
     def get_by_id(self, memory_id: str, *, include_embedding: bool = False) -> dict[str, Any] | None:
         self._ensure_connected()
