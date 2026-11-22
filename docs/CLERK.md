@@ -24,7 +24,7 @@ Windows x64 协作者克隆本仓库后，在 PowerShell 执行：
 
 ## 自动同步
 
-- 在主仓克隆的干净 `master` 上，用 `./scripts/clerk.ps1 tasks list --display` 或 `./scripts/clerk.ps1 tasks show TASK-011` 查询时，入口脚本先调用 Clerk 的 `sync update`，再读取本地任务。网络失败、分叉或工作区有改动时，查询会提示并显示本地记录。个人分支和 Fork 查询当前检出的台账。
+- 在主仓克隆的干净 `master` 上，用 `./scripts/clerk.ps1 tasks list --display` 或 `./scripts/clerk.ps1 tasks show TASK-011` 查询时，入口脚本先抓取 `origin`，最多等待 5 秒，成功后尝试快进到 `origin/master`。网络失败、超时、分叉或工作区有改动时，查询会提示并显示本地记录。个人分支和 Fork 查询当前检出的台账。
 - Clerk 写入前自动抓取并检查配置的 `origin/master`。如果已知远端有尚未包含在当前分支的提交，Clerk 会拦截写入，等分支按 Git 协作流程更新后再继续。
 - 需要手动刷新干净的主仓 `master` 时，也可以明确运行 `./scripts/clerk.ps1 sync update`。
 
