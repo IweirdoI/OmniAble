@@ -67,8 +67,11 @@ def memory_records(profile, hits, scene_id, *, only_matched_preferences=False):
         scope = feature.get("scope") or ("scene" if feature.get("scene_id") else "global")
         if scope == "scene" and (scene_id is None or feature.get("scene_id") != scene_id):
             continue
-        preferences.setdefault(key, {"key": key, "value": feature["value"], "scope": scope,
-                                     "version": feature.get("version", 1)})
+        record = {"key": key, "value": feature["value"], "scope": scope,
+                  "version": feature.get("version", 1)}
+        if feature.get("memory_id"):
+            record["source_memory_id"] = feature["memory_id"]
+        preferences.setdefault(key, record)
 
     memories, seen_ids, seen_text = [], set(), set()
     truncated = bool(profile.get("truncated")) or len(preferences) > _MAX_PROFILE_RECORDS
@@ -108,8 +111,14 @@ def memory_records(profile, hits, scene_id, *, only_matched_preferences=False):
 
 
 def memory_json(records):
-    return _json({"preferences": [row for row in records if "key" in row],
+    return _json({"preferences": [{key: value for key, value in row.items() if key != "source_memory_id"}
+                                  for row in records if "key" in row],
                   "memories": [row for row in records if "memory_id" in row]})
+
+
+def memory_source_ids(records) -> set[str]:
+    return {str(source) for row in records
+            if (source := row.get("memory_id") or row.get("source_memory_id"))}
 
 
 def _memory_message(records):

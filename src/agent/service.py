@@ -26,7 +26,8 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from src.agent.context import (
     MEMORY_WARNING, RESPONSE_TOKENS, TOOL_WARNING, ContextLimitExceeded, ToolContextLimitExceeded,
-    estimate_input_tokens, limit_tool_result, memory_json, memory_records, pack_model_input, select_memory,
+    estimate_input_tokens, limit_tool_result, memory_json, memory_records, memory_source_ids,
+    pack_model_input, select_memory,
 )
 from src.agent.runtime import (
     HEARTBEAT_COMMENT,
@@ -76,6 +77,9 @@ class ChatRequest(BaseModel):
     save_memory: bool = True
     # 召回条数：默认 5；下限 1 保证至少返回结果，上限 10 防止单次召回过多拖慢重排/撑爆上下文
     top_k: int = Field(default=5, ge=1, le=10)
+    # 会话恢复（TASK-018 / Issue #23）：提供时由服务端从会话库构建 history
+    # （排除被遗忘与未完成消息）并在成功回合后落库；缺省时行为完全不变
+    session_id: str | None = Field(default=None, max_length=128)
 
 
 class AgentState(TypedDict, total=False):
@@ -90,6 +94,7 @@ class AgentState(TypedDict, total=False):
     warnings: list[str]
     context_warnings: list[str]
     reference_memory: list[dict[str, Any]]
+    tool_memory_ids: set[str]
     preference_profile: dict[str, Any]
 
 
@@ -997,8 +1002,10 @@ class MemoryAgent:
             items = self._search(req, req.message)
             if self._ctx is not None:
                 self._ctx.check("before_profile")
-            profile = self.memory.get_preference_profile(req.user_id, scene_id=req.scene_id,
-                                                         global_only=req.scene_id is None)
+            profile = self.memory.get_preference_profile(
+                req.user_id, scene_id=req.scene_id, global_only=req.scene_id is None,
+                include_memory_ids=bool(req.session_id),
+            )
             candidates, truncated = memory_records(profile, items, req.scene_id)
             records = select_memory(candidates, self.budget.memory_context_tokens)
             if truncated or len(records) < len(candidates):
@@ -1154,6 +1161,7 @@ class MemoryAgent:
         import hashlib
         messages = list(state["messages"])
         items = {item["id"]: item for item in state["memories"]}
+        tool_memory_ids = set(state.get("tool_memory_ids", ()))
         ctx = self._ctx
         context_warnings = list(state["context_warnings"])
         ctx.current_rounds += 1
@@ -1202,6 +1210,7 @@ class MemoryAgent:
                             records, truncated = memory_records(state["preference_profile"], hits,
                                 state["request"].scene_id, only_matched_preferences=True)
                             selected = select_memory(records, self.budget.tool_result_tokens)
+                            tool_memory_ids.update(memory_source_ids(selected))
                             if (truncated or len(selected) < len(records)) and TOOL_WARNING not in context_warnings:
                                 context_warnings.append(TOOL_WARNING)
                             ok, content = True, memory_json(selected)
@@ -1259,7 +1268,8 @@ class MemoryAgent:
             messages.append({"role": "tool", "tool_call_id": call_id,
                              "content": limited_content})
             ctx.check("after_tool")
-        return {"messages": messages, "memories": list(items.values()), "context_warnings": context_warnings}
+        return {"messages": messages, "memories": list(items.values()),
+                "tool_memory_ids": tool_memory_ids, "context_warnings": context_warnings}
 
     def _verify(self, state):
         ctx = self._ctx
@@ -1354,6 +1364,12 @@ class MemoryAgent:
             ctx.check("complete")
             result = {key: state[key] for key in ("answer", "memories", "recall_ms", "warnings", "memory_write")}
             result["context_warnings"] = state["context_warnings"]
+            # 实际送进模型的召回记忆 id（预算筛选后的引用集）——会话存储据此
+            # 关联「回答引用的记忆」，遗忘时可整轮抑制旧回答（TASK-018 复核
+            # 阻塞项 2）。只暴露 id，不把记忆正文带进 API 响应。
+            if request.session_id:
+                recall_memory_ids = memory_source_ids(state.get("reference_memory", []))
+                result["referenced_memory_ids"] = sorted(recall_memory_ids | state.get("tool_memory_ids", set()))
             result["reset_history"] = False
             status = STATUS_PARTIAL if ctx.partial else STATUS_COMPLETED
         result["latency_ms"] = (perf_counter()-self._started)*1000

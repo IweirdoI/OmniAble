@@ -75,20 +75,41 @@ def test_model_receives_authoritative_scene_preference_and_compact_knowledge(mon
                    memory_type=MemoryType.KNOWLEDGE),
     ]
     monkeypatch.setattr(memory, "recall", lambda query: SimpleNamespace(items=records))
-    for scene, expected in ((None, "全局新设置"), ("office", "办公新设置")):
+    for scene, expected, preference_id in (
+        (None, "全局新设置", "global"), ("office", "办公新设置", "office"),
+    ):
         llm = model()
         result = MemoryAgent(memory, llm).chat(ChatRequest(
-            user_id="synthetic", message="解释下载设置和部署资料", scene_id=scene, save_memory=False,
+            user_id="synthetic", message="解释下载设置和部署资料", scene_id=scene,
+            save_memory=False, session_id="session",
         ))
         messages, _ = llm.complete.call_args.args
         reference = next(row["content"] for row in messages if row["content"].startswith(MEMORY_PREFIX))
         payload = json.loads(reference.removeprefix(MEMORY_PREFIX))
         assert [row["value"] for row in payload["preferences"]] == [expected]
+        assert "source_memory_id" not in payload["preferences"][0]
+        assert result["referenced_memory_ids"] == sorted(["doc", preference_id])
         assert [row["memory_id"] for row in payload["memories"]] == ["doc"]
         assert payload["memories"][0]["filename"] == "guide.md"
         assert "private" not in reference and "unused" not in reference and "旧下载设置" not in reference
         assert MEMORY_WARNING in result["context_warnings"]
         assert len(result["memories"]) == 3  # UI recall evidence remains the original response contract.
+
+
+def test_memory_lookup_in_tool_round_is_linked_to_saved_turn():
+    lookup = tool_call("memory-lookup", {"query": "补查"})
+    lookup["function"]["name"] = "search_memory"
+    llm = model({"tool_calls": [lookup]}, {"content": "使用补查资料"}, tools=True)
+    memory = Mock()
+    memory.get_preference_profile.return_value = {"features": []}
+    hit = MemoryItem(id="tool-only", user_id="synthetic", content="补查资料",
+                     layer=MemoryLayer.LONG, memory_type=MemoryType.KNOWLEDGE)
+    memory.recall.side_effect = [SimpleNamespace(items=[]), SimpleNamespace(items=[hit])]
+
+    result = MemoryAgent(memory, llm).chat(ChatRequest(
+        user_id="synthetic", message="帮我查资料", session_id="session", save_memory=False,
+    ))
+    assert result["referenced_memory_ids"] == ["tool-only"]
 
 
 def test_tool_rounds_can_drop_an_entire_old_batch_and_keep_latest_pairing():

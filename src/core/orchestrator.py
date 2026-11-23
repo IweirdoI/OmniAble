@@ -662,6 +662,7 @@ class MemoryOrchestrator:
         scene_id: str | None = None,
         *,
         global_only: bool = False,
+        include_memory_ids: bool = False,
     ) -> dict:
         """从权威长期存储构建画像，避免候选索引领先于实际入库状态。
 
@@ -759,6 +760,7 @@ class MemoryOrchestrator:
                         or "unknown"
                     ),
                     "rank_score": rank_score,
+                    **({"memory_id": item.id} if include_memory_ids else {}),
                 }
             )
 

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from collections import defaultdict, deque
+from contextlib import aclosing
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, Query, Request, UploadFile, HTTPException
@@ -19,11 +22,24 @@ from src.core.orchestrator import MemoryOrchestrator, ProcessInputResult
 from src.knowledge.memory_service.memory_schema import MemoryEntry
 from src.agent.context import ContextLimitExceeded
 from src.agent.runtime import RunTimedOut, get_stream_slots
-from src.agent.service import ChatRequest, MemoryAgent, ModelUnavailable
+from src.agent.service import ChatMessage, ChatRequest, MemoryAgent, ModelUnavailable
+from src.agent.session_store import SessionStore
 from src.knowledge.memory_service.milvus_client import MemoryBackendUnavailable
 from src.security.semantic_detector import SemanticDetectionUnavailable
 
 orchestrator: MemoryOrchestrator = create_orchestrator()
+
+# Agent 本地会话存储（TASK-018 / Issue #23）：data/agent_sessions.db，
+# 与 Memory Orchestrator 长期记忆生命周期独立；设计说明见 docs/AGENT_SESSIONS.md
+session_store = SessionStore(project_root=str(Path(__file__).resolve().parents[1]))
+
+
+class SessionCreateRequest(BaseModel):
+    # 定义在路由注册之前：`from __future__ import annotations` 下 FastAPI 在
+    # 装饰器执行时解析注解，模型必须已定义（TASK-018 实测踩坑）
+    user_id: str = Field(min_length=1, max_length=128)
+    title: str | None = Field(default=None, max_length=200)
+
 
 app = FastAPI(title="MOKOA Desktop Memory API", version="0.3.0")
 
@@ -71,11 +87,23 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 
+def _restore_session(req: ChatRequest) -> set[str]:
+    if not req.session_id:
+        return set()
+    restored = session_store.load_model_history(req.user_id, req.session_id)
+    if restored is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    history, memory_ids = restored
+    req.history = [ChatMessage(**item) for item in history]
+    return memory_ids
+
+
 @app.post("/agent/chat")
 def agent_chat(req: ChatRequest) -> dict[str, Any]:
+    history_memory_ids = _restore_session(req)
     agent = MemoryAgent(orchestrator)
     try:
-        return agent.chat(req)
+        result = agent.chat(req)
     except ContextLimitExceeded as exc:
         return JSONResponse(status_code=422, content={
             "detail": str(exc), "workflow": agent._workflow("failed", "context_budget"),
@@ -93,6 +121,38 @@ def agent_chat(req: ChatRequest) -> dict[str, Any]:
             detail={"message": "执行超过请求时间预算已停止；请缩小任务范围后重试。",
                     "workflow": agent._workflow("timed_out", exc.reason)},
         ) from exc
+    _finalize_session_turn(req, result, history_memory_ids)
+    return result
+
+
+def _finalize_session_turn(req: ChatRequest, terminal: dict,
+                           history_memory_ids: set[str] | None = None) -> None:
+    """Persist a completed turn and suppress forgotten memory across the user's sessions."""
+    if req.session_id and terminal.get("type", "done") == "done":
+        session_store.record_completed_turn(
+            req.user_id, req.session_id, req.message, terminal,
+            history_memory_ids=history_memory_ids,
+        )
+    deleted_ids = terminal.get("deleted_ids") or []
+    if deleted_ids:
+        session_store.forget_memories(req.user_id, deleted_ids)
+
+
+async def _record_session_stream(gen, req: ChatRequest,
+                                 history_memory_ids: set[str] | None = None):
+    """Complete session writes before sending the SSE terminal event."""
+    async with aclosing(gen):
+        async for chunk in gen:
+            event = None
+            if isinstance(chunk, str) and chunk.startswith("data: "):
+                try:
+                    event = json.loads(chunk[6:].strip())
+                except (ValueError, TypeError):
+                    event = None
+            if (isinstance(event, dict) and event.get("type") in ("done", "error")
+                    and (req.session_id or event.get("deleted_ids"))):
+                await asyncio.to_thread(_finalize_session_turn, req, event, history_memory_ids)
+            yield chunk
 
 
 @app.post("/agent/chat/stream")
@@ -103,6 +163,7 @@ async def agent_chat_stream(req: ChatRequest):
     达到上限直接 429 + Retry-After，不创建无界等候线程。槽位由执行
     worker 在真实退出时释放——未退出的调用继续占用额度。
     """
+    history_memory_ids = await asyncio.to_thread(_restore_session, req) if req.session_id else None
     slots = get_stream_slots()
     if not slots.try_acquire():
         raise HTTPException(
@@ -121,13 +182,60 @@ async def agent_chat_stream(req: ChatRequest):
                         agent._ctx.cancel("client_disconnected")
                     if not agent._worker_started:
                         slots.release()
-        return RunResponse(agent.chat_stream(req, on_finished=slots.release),
+        gen = agent.chat_stream(req, on_finished=slots.release)
+        # 包装器总是启用：遗忘抑制不依赖 session_id（前端仍会发无会话的
+        # 遗忘请求），落库仍只在有 session_id 时发生（见 _finalize_session_turn）
+        gen = _record_session_stream(gen, req, history_memory_ids)
+        return RunResponse(gen,
                            media_type="text/event-stream",
                            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
     except Exception:
         # 响应未能建立时立即归还；正常路径由 worker 退出时释放
         slots.release()
         raise
+
+
+# ---------------------------------------------------------------------------
+# Agent 本地会话（TASK-018 / Issue #23）：会话列表/详情/删除（展示与恢复口径）。
+# 会话记录与 Memory Orchestrator 长期记忆生命周期独立；设计见 docs/AGENT_SESSIONS.md。
+# ---------------------------------------------------------------------------
+
+@app.post("/agent/sessions")
+def create_agent_session(req: SessionCreateRequest) -> dict[str, Any]:
+    session = session_store.create_session(req.user_id, title=req.title)
+    return {"user_id": req.user_id, "session": session}
+
+
+@app.get("/agent/sessions/{user_id}")
+def list_agent_sessions(
+    user_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    """按更新时间倒序分页列出用户会话（严格用户隔离）。"""
+    return {
+        "user_id": user_id,
+        **session_store.list_sessions(user_id, offset=offset, limit=limit),
+    }
+
+
+@app.get("/agent/sessions/{user_id}/{session_id}")
+def get_agent_session(user_id: str, session_id: str) -> dict[str, Any]:
+    """会话详情（消息为展示口径：被遗忘消息显示占位）。跨用户/不存在 → 404。"""
+    session = session_store.get_session(user_id, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"user_id": user_id, "session": session}
+
+
+@app.delete("/agent/sessions/{user_id}/{session_id}")
+def delete_agent_session(user_id: str, session_id: str) -> dict[str, Any]:
+    """删除会话（级联物理删除消息）。跨用户/不存在 → 404。"""
+    deleted = session_store.delete_session(user_id, session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"user_id": user_id, "session_id": session_id, "deleted": True}
+
 
 # CORS：绝不将 allow_origins 设为 "*" 同时 allow_credentials=True（无效且不安全的组合）。
 # 来源由 API_CORS_ORIGINS 显式配置（逗号分隔）；未配置时仅放行本地前端，且不开凭证。
@@ -652,6 +760,10 @@ def recall(req: RecallRequest) -> dict[str, Any]:
 @app.post("/forget")
 def forget(req: ForgetRequest) -> dict[str, Any]:
     deleted_ids = orchestrator.forget(req.user_id, req.instruction)
+    # 遗忘联动（TASK-018 / Issue #23）：写墓碑 + 抑制引用这些记忆的会话消息
+    # （正文替换为占位），保证相关文本不经恢复、下次请求或**晚到的回合**
+    # 重新送给模型（幂等）
+    session_store.forget_memories(req.user_id, deleted_ids)
     return {
         "user_id": req.user_id,
         "instruction": req.instruction,
