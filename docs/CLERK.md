@@ -59,6 +59,30 @@ Windows x64 协作者克隆本仓库后，在 PowerShell 执行：
 
 证据与提交示例必须替换为真实值；完成操作也通过后续 PR 保存。暂停用 `tasks pause <编号> --note "原因"`，恢复用 `tasks resume <编号>`；释放认领用 `tasks release <编号>`。精确字段与状态以 `help tasks`、`explain tasks` 为准。
 
+## 设计文档管理
+
+设计文稿使用 `documents` 类型，正文保存在 `docs/designs/`，索引见 [设计文档](designs/README.md)。
+这是本仓声明的工具种类，不需要安装或修改 Clerk 源码。文稿的编号、标题与元信息通过工具维护，
+正文可审阅修改；索引不手改。设计文稿要求包含范围、实施步骤、验收、待确认项及来源。
+
+```powershell
+./scripts/clerk.ps1 documents list
+./scripts/clerk.ps1 documents show DOC-001
+./scripts/clerk.ps1 context documents DOC-001 --full
+./scripts/clerk.ps1 context tasks TASK-040 --full
+./scripts/clerk.ps1 documents set DOC-001 --revision "0.2" --implementation "planned-not-deployed"
+./scripts/clerk.ps1 check
+```
+
+上例 DOC-001 / TASK-040 对应 [AgentArts 适配方案](designs/DOC-001-agentarts-adaptation.md)及其文档任务。
+新建其他设计时使用 `documents new --title ... --slug ... --revision ... --implementation ... --task 实际编号 --file 正文文件`，
+以工具返回的编号为准。`revision` 是设计修订号，`implementation` 记录真实实施状态，
+`task` 为必须存在的任务引用。创建后使用
+`tasks link <真实任务编号> design documents <真实文稿编号>` 建立正式关系，使任务上下文可读取文稿正文。
+正文修改后通过 `documents set` 更新实际修订号，再执行 `render` 和 `check`。
+`implementation=planned-not-deployed` 表示待实施；文档任务完成不代表云接入或赛题验收完成。
+方案的 P0—P5 是待拆分的工作包，不因文档任务完成自动成为已实施任务。
+
 ## 合并后的验收闭环
 
 维护者处理任务合并时，自动核对对应 Clerk 任务的验收与状态，无需等队友提醒或再次请求已有授权。

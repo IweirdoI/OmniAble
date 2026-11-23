@@ -3,6 +3,14 @@ description = "认领任务、记录验收与关联 GitHub Issue 和 PR"
 table = ".clerk/data/tasks.csv"
 key = ["id"]
 numbering = "tasks"
+relations_table = ".clerk/data/relations.csv"
+
+[context]
+attachments = []
+
+[[relation]]
+name = "design"
+target = "documents"
 
 [state]
 field = "state"

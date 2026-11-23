@@ -58,6 +58,7 @@ git remote -v
   工作流改造另读 [Agent 工作流实施设计](AGENT_WORKFLOW.md)，按其中任务边界与验收场景实施。
   文件工具与侧栏集成另见 [Agent 文件与网页工作区](AGENT_WORKSPACE.md)。
   涉及语音无障碍、操作录制、离线插件、定时任务或代码解析时，先看 [Windows 桌面 Agent 扩展路线图](DESKTOP_AGENT_ROADMAP.md) 的任务依赖。
+  涉及华为云参赛适配时，先读 [AgentArts 适配方案](designs/DOC-001-agentarts-adaptation.md)，区分文档交付和真实云端验收；设计文稿使用 [Clerk 文稿管理](CLERK.md#设计文档管理)。
 - **编排、冲突、生命周期**：`src/core/orchestrator.py`、`factory.py`、`layer_manager.py`、
   `conflict_resolver.py`、`entry_adapter.py`；对应 `tests/test_core.py`、`test_consolidator.py`、
   `test_logic_fixes.py`、`test_knowledge_conflict_ordering.py`。

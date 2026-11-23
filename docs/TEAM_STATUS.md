@@ -45,5 +45,6 @@
 | TASK-037 | [P2] 验证本地 MCP 工具能否复用插件权限 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/45 | 20261122-204521 |
 | TASK-038 | [P1] 优化 Windows recall 词面补召与 CPU 编码并发 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/47 | 20261122-223625 |
 | TASK-039 | [P2] 修复空白图片无说明时接入接口返回 500 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/49 | 20261123-014121 |
+| TASK-040 | [P1] 制定 AgentArts 参赛适配方案并登记设计文档 | 待审查 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/51 | 20261124-001842 |
 
 <!-- clerk:end tasks -->

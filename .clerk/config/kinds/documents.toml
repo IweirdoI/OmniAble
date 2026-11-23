@@ -1,0 +1,60 @@
+title = "设计文档"
+description = "管理设计正文、版本、实施状态与对应任务；登记不代表实现验收"
+storage = "document"
+dir = "docs/designs"
+filename = "{id}-{slug}.md"
+key = ["id"]
+numbering = "documents"
+
+[context]
+attachments = []
+
+[[field]]
+name = "id"
+type = "text"
+role = "status"
+
+[[field]]
+name = "slug"
+type = "slug"
+required = true
+write = "create"
+
+[[field]]
+name = "title"
+type = "text"
+required = true
+
+[[field]]
+name = "revision"
+type = "text"
+required = true
+
+[[field]]
+name = "implementation"
+type = "text"
+required = true
+
+[[field]]
+name = "task"
+type = "ref"
+target = "tasks"
+required = true
+
+[[field]]
+name = "updated"
+type = "stamp"
+role = "status"
+auto = "now"
+
+[sections]
+required = ["适用范围与状态", "实施步骤", "验收与交付", "待确认事项", "参考资料"]
+
+[index]
+file = "docs/designs/README.md"
+columns = ["file", "title", "revision", "implementation", "task"]
+
+[[view]]
+name = "list"
+columns = ["id", "title", "revision", "implementation", "task"]
+flex = "title"

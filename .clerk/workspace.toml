@@ -22,6 +22,14 @@ write_fetch = true
 pattern = "TASK-{serial:3}"
 counter = "serial"
 
+[ids.documents]
+pattern = "DOC-{serial:3}"
+counter = "serial"
+
+[[path]]
+path = "docs/designs"
+level = "validated"
+
 [[path]]
 path = ".clerk/data"
 level = "sealed"

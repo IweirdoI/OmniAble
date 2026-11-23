@@ -6,6 +6,8 @@
 
 团队任务已接入 [Clerk 协作指南](docs/CLERK.md)，共享状态见 [团队任务状态](docs/TEAM_STATUS.md)。协作者克隆后各自安装工具，配置和记录随 Git/PR 共享。
 
+设计方案由 Clerk 文稿类型管理，入口见 [设计文档索引](docs/designs/README.md)。[AgentArts 参赛适配方案](docs/designs/DOC-001-agentarts-adaptation.md)当前为设计状态，尚未部署验收。
+
 新成员先看 [协作与邀请说明](docs/COLLABORATION.md)、[贡献指南](CONTRIBUTING.md) 和 [团队协作协议](docs/TEAM_AGREEMENT.md)。采用 Issue 认领 → 分支开发 → PR 审查 → 合并到 `master` 的流程，保留 Apache 2.0，新增贡献作 DCO 来源签署。署名、费用与奖金等权益安排由受影响成员另行书面确认。
 
 下文的历史模块分工、项目背景和进度保留为项目背景，以模块角色代替旧成员账户；本次组队成员和任务以新确认的协议及 Issue 为准。贡献记录见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
