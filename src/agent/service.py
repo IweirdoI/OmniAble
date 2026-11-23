@@ -1357,6 +1357,14 @@ class MemoryAgent:
             ctx.check("complete")
             result = {key: state[key] for key in ("answer", "memories", "recall_ms", "warnings", "memory_write")}
             result["context_warnings"] = state["context_warnings"]
+            # 实际送进模型的召回记忆 id（预算筛选后的引用集）——会话存储据此
+            # 关联「回答引用的记忆」，遗忘时可整轮抑制旧回答（TASK-018 复核
+            # 阻塞项 2）。只暴露 id，不把记忆正文带进 API 响应。
+            result["referenced_memory_ids"] = [
+                str(row["memory_id"])
+                for row in state.get("reference_memory", [])
+                if isinstance(row, dict) and row.get("memory_id")
+            ]
             result["reset_history"] = False
             status = STATUS_PARTIAL if ctx.partial else STATUS_COMPLETED
         result["latency_ms"] = (perf_counter()-self._started)*1000

@@ -125,15 +125,18 @@ def agent_chat(req: ChatRequest) -> dict[str, Any]:
     return result
 
 
-def _record_session_stream(gen, req: ChatRequest):
+async def _record_session_stream(gen, req: ChatRequest):
     """流式会话落库包装：捕获 SSE 终态（done/error），done 且 completed 才落库。
 
-    客户端断线（GeneratorExit）时无终态 → 不落库，恢复不会冒充成功；
-    遗忘路由回合不作为对话消息记录，deleted_ids 转交遗忘联动（幂等）。
+    必须是 async generator：上游 agent.chat_stream 是异步生成器，用同步 for
+    迭代会拿不到任何事件（带 session_id 的流式请求返回空正文且不落库——
+    TASK-018 复核阻塞项 1）。客户端断线（GeneratorExit/CancelledError）时
+    无终态 → 不落库，恢复不会冒充成功；遗忘路由回合不作为对话消息记录，
+    deleted_ids 转交遗忘联动（幂等）。
     """
     terminal: dict | None = None
     try:
-        for chunk in gen:
+        async for chunk in gen:
             if isinstance(chunk, str) and chunk.startswith("data: "):
                 try:
                     event = json.loads(chunk[6:].strip())
@@ -143,6 +146,7 @@ def _record_session_stream(gen, req: ChatRequest):
                     terminal = event
             yield chunk
     finally:
+        # 无论正常结束还是断线都会走到这里；只有拿到 done 终态才落库
         if terminal and terminal.get("type") == "done":
             session_store.record_completed_turn(
                 req.user_id, req.session_id, req.message, terminal

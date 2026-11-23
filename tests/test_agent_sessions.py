@@ -278,6 +278,211 @@ def test_api_session_crud_endpoints() -> None:
     assert client.delete(f"/agent/sessions/crud_user/{sid}").status_code == 404
 
 
+def _install_streaming_agent(monkeypatch, *, answer: str = "已记录下载路径。"):
+    """用真实 MemoryAgent + 打桩模型安装到 API：覆盖真实 SSE 异步迭代路径。
+
+    不能用 MemoryAgent 打桩替代——复核阻塞项 1 正是同步 for 迭代异步生成器，
+    只有走真实的 chat_stream 异步生成器才能复现与验证。
+    """
+    from api import server
+    from src.agent.service import ChatRequest as _CR
+    from src.agent.service import MemoryAgent as _MA
+
+    class StreamModel:
+        tools_enabled = False
+        timeout = 60.0
+
+        def complete_stream(self, messages, tools, timeout=None):
+            yield {"kind": "token", "text": answer}
+            yield {"kind": "message",
+                   "message": {"role": "assistant", "content": answer}}
+
+    def factory(orchestrator, **kwargs):
+        return _MA(orchestrator, StreamModel(), stream=kwargs.get("stream", False))
+
+    monkeypatch.setattr(server, "MemoryAgent", factory)
+    return _CR
+
+
+def test_stream_endpoint_with_session_returns_body_and_records(monkeypatch) -> None:
+    """真实 SSE 入口：带 session_id 必须返回非空正文并落库（阻塞项 1）。"""
+    _install_streaming_agent(monkeypatch)
+    sid = session_store.create_session("stream_user")["id"]
+
+    response = client.post("/agent/chat/stream", json={
+        "user_id": "stream_user", "message": "以后文件下载到 D 盘", "session_id": sid,
+    })
+
+    assert response.status_code == 200
+    body = response.text
+    assert body.strip(), "流式响应不得为空正文（同步 for 迭代异步生成器会导致此问题）"
+    assert "data: " in body
+
+    events = [
+        json.loads(line[len("data: "):])
+        for line in body.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert events, "应至少产出一条 SSE 事件"
+    done = next((e for e in events if e.get("type") == "done"), None)
+    assert done is not None, f"缺少 done 终态：{[e.get('type') for e in events]}"
+    assert done.get("answer"), "done 事件应包含非空回答"
+
+    recorded = session_store.get_session("stream_user", sid)
+    assert [m["role"] for m in recorded["messages"]] == ["user", "assistant"], (
+        "带 session_id 的流式成功回合必须落库"
+    )
+    assert recorded["messages"][1]["content"] == done["answer"]
+
+
+def test_stream_wrapper_skips_record_on_client_disconnect(monkeypatch) -> None:
+    """断线回归：流被提前关闭（无 done 终态）时不落库，恢复不冒充成功。"""
+    _install_streaming_agent(monkeypatch)
+    from src.agent.service import ChatRequest as ChatReq, MemoryAgent as Agent
+    from api.server import _record_session_stream, orchestrator
+
+    sid = session_store.create_session("disconnect_user")["id"]
+
+    class StreamModel:
+        tools_enabled = False
+        timeout = 60.0
+
+        def complete_stream(self, messages, tools, timeout=None):
+            yield {"kind": "token", "text": "开"}
+            yield {"kind": "message", "message": {"role": "assistant", "content": "开始回答"}}
+
+    async def scenario():
+        agent = Agent(orchestrator, StreamModel(), stream=True)
+        req = ChatReq(user_id="disconnect_user", message="中途断线", session_id=sid)
+        gen = _record_session_stream(agent.chat_stream(req), req)
+        first = await gen.__anext__()          # 只取第一块，模拟客户端提前关闭
+        await gen.aclose()                     # 触发 finally：无 done 终态
+        return first
+
+    import asyncio
+    first_chunk = asyncio.run(scenario())
+    assert first_chunk, "断线前至少应拿到首个事件块"
+    assert session_store.get_session("disconnect_user", sid)["messages"] == [], (
+        "断线（无 done 终态）不得落库"
+    )
+
+
+def test_api_recalled_memory_ids_drive_suppression(monkeypatch) -> None:
+    """阻塞项 2：删除「回答引用的召回记忆」后，旧回答必须退出模型历史。"""
+    from api import server
+
+    class _RecallAgent(_FakeAgent):
+        def chat(self, request):
+            return {
+                "answer": "按你的 D 盘偏好，建议先改配置。",
+                "memory_write": {"status": "skipped"},
+                "referenced_memory_ids": ["mem-recall-1", "mem-recall-2"],
+                "workflow": {"status": "completed", "route": "agent"},
+            }
+
+    monkeypatch.setattr(server, "MemoryAgent", _RecallAgent)
+    sid = session_store.create_session("recall_user")["id"]
+
+    response = client.post("/agent/chat", json={
+        "user_id": "recall_user", "message": "下载路径怎么设", "session_id": sid,
+    })
+    assert response.status_code == 200
+    assert session_store.build_model_history("recall_user", sid) == [
+        {"role": "user", "content": "下载路径怎么设"},
+        {"role": "assistant", "content": "按你的 D 盘偏好，建议先改配置。"},
+    ]
+
+    suppressed = session_store.suppress_by_memory_ids("recall_user", ["mem-recall-1"])
+    assert suppressed == 2, "召回的任意一条记忆被删，整轮（user+assistant）都应抑制"
+    assert session_store.build_model_history("recall_user", sid) == [], (
+        "旧回答不得留在模型历史中"
+    )
+    assert session_store.suppress_by_memory_ids("recall_user", ["mem-recall-2"]) == 0  # 幂等
+
+
+def test_api_forget_turn_is_not_recorded(monkeypatch) -> None:
+    """阻塞项 2：遗忘指令回合本身不得落库（reset_history / route=forget）。"""
+    from api import server
+
+    class _ForgetAgent(_FakeAgent):
+        def chat(self, request):
+            return {
+                "answer": "已处理遗忘指令，删除 1 条记忆。",
+                "memory_write": {"status": "skipped"},
+                "reset_history": True,
+                "deleted_ids": ["mem-old-1"],
+                "workflow": {"status": "completed", "route": "forget"},
+            }
+
+    monkeypatch.setattr(server, "MemoryAgent", _ForgetAgent)
+    sid = session_store.create_session("forget_turn_user")["id"]
+
+    response = client.post("/agent/chat", json={
+        "user_id": "forget_turn_user", "message": "忘掉我的下载路径偏好", "session_id": sid,
+    })
+    assert response.status_code == 200
+    assert session_store.get_session("forget_turn_user", sid)["messages"] == [], (
+        "遗忘指令不得作为对话记录保存"
+    )
+    assert session_store.build_model_history("forget_turn_user", sid) == []
+
+
+def test_restart_recovery_after_suppression(tmp_store) -> None:
+    """重启恢复：抑制状态与召回关联均需持久化到磁盘。"""
+    sid = tmp_store.create_session("restart_user")["id"]
+    tmp_store.append_turn(
+        "restart_user", sid,
+        user_content="问题 A",
+        assistant_content="回答 A",
+        referenced_memory_ids=["mem-r-1"],
+    )
+    tmp_store.append_turn(
+        "restart_user", sid,
+        user_content="问题 B",
+        assistant_content="回答 B",
+    )
+    tmp_store.suppress_by_memory_ids("restart_user", ["mem-r-1"])
+
+    reopened = SessionStore(tmp_store.path)
+    history = reopened.build_model_history("restart_user", sid)
+    assert history == [
+        {"role": "user", "content": "问题 B"},
+        {"role": "assistant", "content": "回答 B"},
+    ], "重启后被抑制的回合仍须排除在模型历史之外"
+    reopened.close()
+
+
+def test_schema_v1_database_is_migrated(tmp_path) -> None:
+    """旧库兼容：v1 表结构（无 referenced_memory_ids）自动补列，旧记录可读。"""
+    import sqlite3
+
+    path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(str(path))
+    conn.executescript(
+        """
+        CREATE TABLE sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+            title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+            role TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL,
+            memory_id TEXT, stored_memory_ids TEXT,
+            suppressed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+        INSERT INTO sessions VALUES ('s1','legacy','旧会话','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');
+        INSERT INTO messages VALUES ('m1','s1','user','旧消息','completed',NULL,NULL,0,'2026-01-01T00:00:00Z');
+        PRAGMA user_version = 1;
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = SessionStore(path)
+    session = store.get_session("legacy", "s1")
+    assert session is not None and session["messages"][0]["content"] == "旧消息"
+    assert store.build_model_history("legacy", "s1") == [
+        {"role": "user", "content": "旧消息"}
+    ]
+    store.close()
+
+
 def test_api_non_completed_turns_not_recorded(monkeypatch) -> None:
     """部分完成（未核实工具操作）与失败回合不落库，恢复不冒充成功。"""
     from api import server

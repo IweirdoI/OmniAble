@@ -17,9 +17,12 @@
   排除被遗忘（suppressed）与未完成消息；前端不再需要自行携带历史。
   不带 `session_id` 的请求行为完全不变（旧客户端兼容）。
 - **遗忘联动**：/forget（REST）与聊天内遗忘路由删除记忆后，会话库把
-  `memory_id` / `stored_memory_ids` 命中已删 id 的消息标记 suppressed 并将正文
-  替换为占位 `[该条消息已按遗忘指令删除]`——被遗忘文本**不会经恢复或下次请求
-  重新送给模型**（幂等）。
+  `memory_id` / `stored_memory_ids` / **`referenced_memory_ids`** 命中已删 id 的消息
+  标记 suppressed 并将正文替换为占位 `[该条消息已按遗忘指令删除]`——被遗忘文本
+  **不会经恢复或下次请求重新送给模型**（幂等）。
+  - `referenced_memory_ids` 记录**本回合回答实际引用的召回记忆**（预算筛选后的
+    reference_memory），因此删除源记忆后，引用它的旧回答也会整轮退出模型历史
+    （复核阻塞项 2）。
 - 长期记忆的召回仍走 Memory Orchestrator（respect 遗忘），会话恢复只还原展示。
 
 ## 三、恢复语义
@@ -27,9 +30,12 @@
 - 仅**成功完成的回合**落库（user + assistant 双条，`status=completed`）；
   中断、超时、部分完成（未核实工具操作）与客户端断线不落库——
   恢复不会冒充成功（流式入口捕获 SSE 终态，同步入口检查 workflow.status）。
-- 聊天内遗忘路由的回合不作为对话消息记录，`deleted_ids` 转交遗忘联动。
+- **遗忘路由回合不落库**（`reset_history=True` 或 `route=forget`）：遗忘指令本身
+  不得作为对话记录保存（复核阻塞项 2）。
+- 流式包装器必须是 **async generator**（`async for` 迭代 `agent.chat_stream`）：
+  用同步 `for` 迭代异步生成器会导致 SSE 空正文且不落库（复核阻塞项 1，已修）。
 
-## 四、Schema（PRAGMA user_version = 1）
+## 四、Schema（PRAGMA user_version = 2）
 
 ```sql
 sessions(id TEXT PK, user_id TEXT NOT NULL, title TEXT NOT NULL,
@@ -38,8 +44,12 @@ messages(id TEXT PK, session_id TEXT NOT NULL
              REFERENCES sessions(id) ON DELETE CASCADE,
          role TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL,
          memory_id TEXT, stored_memory_ids TEXT,
+         referenced_memory_ids TEXT,
          suppressed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)
 ```
+
+v2 增量：`referenced_memory_ids`（JSON 数组）记录本回合回答引用的召回记忆 id。
+旧库（v1）初始化时自动 `ALTER TABLE` 补列，旧记录该列为 NULL，读取兼容。
 
 ## 五、API（最小集）
 

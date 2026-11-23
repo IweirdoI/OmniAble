@@ -27,14 +27,18 @@
     无既有聊天记录格式可导入（历史仅驻留前端内存）；旧客户端不带
     session_id 时行为与改造前一致（向后兼容）。
 
-Schema（PRAGMA user_version = 1）：
+Schema（PRAGMA user_version = 2）：
     sessions(id TEXT PK, user_id TEXT NOT NULL, title TEXT NOT NULL,
              created_at TEXT NOT NULL, updated_at TEXT NOT NULL)
     messages(id TEXT PK, session_id TEXT NOT NULL
                  REFERENCES sessions(id) ON DELETE CASCADE,
              role TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL,
              memory_id TEXT, stored_memory_ids TEXT,
+             referenced_memory_ids TEXT,
              suppressed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)
+
+    v2 增量：`referenced_memory_ids` 记录该回合**回答实际引用的召回记忆** id。
+    旧库（v1）在初始化时按需 ALTER TABLE 补列，旧记录该列为 NULL（兼容）。
 """
 
 from __future__ import annotations
@@ -53,7 +57,7 @@ FORGOTTEN_PLACEHOLDER = "[该条消息已按遗忘指令删除]"
 
 DEFAULT_DB_PATH = "data/agent_sessions.db"
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 
 def _now() -> str:
@@ -100,6 +104,7 @@ class SessionStore:
                     status TEXT NOT NULL,
                     memory_id TEXT,
                     stored_memory_ids TEXT,
+                    referenced_memory_ids TEXT,
                     suppressed INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 );
@@ -109,6 +114,15 @@ class SessionStore:
                     ON messages(session_id);
                 """
             )
+            # v1 → v2 迁移：旧库补 referenced_memory_ids 列（旧记录为 NULL）
+            columns = {
+                row["name"]
+                for row in self._conn.execute("PRAGMA table_info(messages)").fetchall()
+            }
+            if "referenced_memory_ids" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE messages ADD COLUMN referenced_memory_ids TEXT"
+                )
             self._conn.execute(
                 f"PRAGMA user_version = {_SCHEMA_VERSION}"
             )
@@ -195,8 +209,15 @@ class SessionStore:
     def append_turn(self, user_id: str, session_id: str, *,
                     user_content: str, assistant_content: str,
                     memory_id: str | None = None,
-                    stored_memory_ids: list[str] | None = None) -> bool:
-        """成功回合落库：user + assistant 双条 completed 消息。跨用户 → False。"""
+                    stored_memory_ids: list[str] | None = None,
+                    referenced_memory_ids: list[str] | None = None) -> bool:
+        """成功回合落库：user + assistant 双条 completed 消息。跨用户 → False。
+
+        记忆关联覆盖三类来源（任一类命中即整轮可抑制）：
+          - memory_id：本轮写入的用户输入记忆
+          - stored_memory_ids：consolidate 晋升产生的记忆
+          - referenced_memory_ids：**回答实际引用的召回记忆**（复核阻塞项 2）
+        """
         owned = self._conn.execute(
             "SELECT 1 FROM sessions WHERE id = :sid AND user_id = :u",
             {"sid": session_id, "u": user_id},
@@ -208,20 +229,26 @@ class SessionStore:
             json.dumps(stored_memory_ids, ensure_ascii=False)
             if stored_memory_ids else None
         )
+        referenced_json = (
+            json.dumps(sorted(set(referenced_memory_ids)), ensure_ascii=False)
+            if referenced_memory_ids else None
+        )
         with self._lock:
             # 记忆链接记在本轮两条消息上：遗忘抑制按整轮生效（assistant 回复
             # 是同一回合的相关文本，不单独残留）
             self._conn.executemany(
                 "INSERT INTO messages(id, session_id, role, content, status,"
-                " memory_id, stored_memory_ids, suppressed, created_at)"
-                " VALUES(:id, :sid, :role, :content, 'completed', :mid, :sids, 0, :ts)",
+                " memory_id, stored_memory_ids, referenced_memory_ids,"
+                " suppressed, created_at)"
+                " VALUES(:id, :sid, :role, :content, 'completed', :mid, :sids,"
+                " :refs, 0, :ts)",
                 [
                     {"id": str(uuid4()), "sid": session_id, "role": "user",
                      "content": user_content, "mid": memory_id, "sids": stored_json,
-                     "ts": now},
+                     "refs": referenced_json, "ts": now},
                     {"id": str(uuid4()), "sid": session_id, "role": "assistant",
                      "content": assistant_content, "mid": memory_id, "sids": stored_json,
-                     "ts": now},
+                     "refs": referenced_json, "ts": now},
                 ],
             )
             self._conn.execute(
@@ -260,8 +287,10 @@ class SessionStore:
                                memory_ids: list[str]) -> int:
         """遗忘联动：引用已删记忆的消息标记 suppressed 并替换正文为占位。
 
-        命中规则：message.memory_id 或 message.stored_memory_ids（JSON 数组）
-        与传入 id 有交集。幂等：重复执行对已 suppressed 消息零变化。
+        命中规则：message.memory_id、message.stored_memory_ids 或
+        message.referenced_memory_ids（后两者为 JSON 数组）与传入 id 有交集。
+        后者覆盖「回答引用的召回记忆」——删除源记忆后，旧回答也不会留在
+        模型历史里（复核阻塞项 2）。幂等：重复执行对已 suppressed 消息零变化。
         返回本次新 suppress 的消息数。跨用户隔离：仅在本人会话范围内生效。
         """
         if not memory_ids:
@@ -272,10 +301,13 @@ class SessionStore:
         with self._lock:
             rows = self._conn.execute(
                 """
-                SELECT m.id, m.content, m.memory_id, m.stored_memory_ids, m.suppressed
+                SELECT m.id, m.memory_id, m.stored_memory_ids,
+                       m.referenced_memory_ids, m.suppressed
                 FROM messages m JOIN sessions s ON s.id = m.session_id
                 WHERE s.user_id = :u AND m.suppressed = 0
-                  AND (m.memory_id IS NOT NULL OR m.stored_memory_ids IS NOT NULL)
+                  AND (m.memory_id IS NOT NULL
+                       OR m.stored_memory_ids IS NOT NULL
+                       OR m.referenced_memory_ids IS NOT NULL)
                 """,
                 {"u": user_id},
             ).fetchall()
@@ -284,9 +316,12 @@ class SessionStore:
                 linked = set()
                 if row["memory_id"]:
                     linked.add(row["memory_id"])
-                if row["stored_memory_ids"]:
+                for column in ("stored_memory_ids", "referenced_memory_ids"):
+                    raw = row[column]
+                    if not raw:
+                        continue
                     try:
-                        linked.update(json.loads(row["stored_memory_ids"]))
+                        linked.update(json.loads(raw))
                     except json.JSONDecodeError:
                         continue
                 if linked & targets:
@@ -320,16 +355,22 @@ class SessionStore:
                               user_message: str, result: dict[str, Any]) -> bool:
         """把一个成功完成的回合落库（仅 workflow.status == completed）。
 
-        中断 / 超时 / 部分完成（未核实工具操作）/ 遗忘路由回合不落库，
-        恢复时不会冒充成功（Issue #23 验收口径）。
-        遗忘路由的 deleted_ids 由调用方转交 suppress_by_memory_ids。
+        不落库的回合：
+          - 中断 / 超时 / 部分完成（未核实工具操作）
+          - **遗忘路由回合**（reset_history=True 或 route=forget）——遗忘指令
+            本身不得作为对话记录保存（复核阻塞项 2）
+        恢复时因此不会冒充成功。遗忘路由的 deleted_ids 由调用方转交
+        suppress_by_memory_ids。
         """
         workflow = result.get("workflow") or {}
         if workflow.get("status") != "completed":
             return False
+        if result.get("reset_history") or workflow.get("route") == "forget":
+            return False
         write = result.get("memory_write") or {}
         memory_id = write.get("memory_id") if write.get("status") == "accepted" else None
         stored_ids = write.get("stored_memory_ids") or None
+        referenced_ids = result.get("referenced_memory_ids") or None
         answer = str(result.get("answer") or "")
         return self.append_turn(
             user_id,
@@ -338,4 +379,5 @@ class SessionStore:
             assistant_content=answer,
             memory_id=memory_id,
             stored_memory_ids=stored_ids,
+            referenced_memory_ids=referenced_ids,
         )
