@@ -23,7 +23,7 @@
 | TASK-015 | [P1] 建立前端自动化回归 CI，覆盖聊天流式与响应式主流程 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/14 | 20261122-185731 |
 | TASK-016 | [P1] 按设计完善 Agent 路由、执行预算与结果核验 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/16 | 20261122-151543 |
 | TASK-017 | [P1] 集成 Agent 文件工作区、变更预览与网页侧栏 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/19 | 20261122-151544 |
-| TASK-018 | [P1] Windows Agent 本地会话列表与重启恢复 | 进行中 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/23 | 20261122-215144 |
+| TASK-018 | [P1] Windows Agent 本地会话列表与重启恢复 | 进行中 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/23 | 20261123-210916 |
 | TASK-019 | [P1] Agent 上下文预算与长会话截断 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/24 | 20261122-193044 |
 | TASK-020 | [P1] Agent 文件变更的逐次用户确认 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/25 | 20261122-185525 |
 | TASK-021 | [P1] 统一 Agent 动作目录与调用入口 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/29 | 20261122-204434 |
