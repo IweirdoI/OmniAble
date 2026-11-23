@@ -483,6 +483,153 @@ def test_schema_v1_database_is_migrated(tmp_path) -> None:
     store.close()
 
 
+def test_forget_without_session_id_suppresses_saved_sessions(monkeypatch) -> None:
+    """复核阻塞项 1：不带 session_id 的遗忘也必须抑制已保存会话。
+
+    前端当前会发送无 session_id 的遗忘请求；同步入口此前只在
+    `if req.session_id` 分支内做抑制，导致旧会话内容仍可恢复。
+    """
+    from api import server
+
+    sid = session_store.create_session("nosession_forget")["id"]
+    session_store.append_turn(
+        "nosession_forget", sid,
+        user_content="我的手机号是 13812345678",
+        assistant_content="已记录。",
+        referenced_memory_ids=["mem-phone-9"],
+    )
+
+    class _ForgetAgent(_FakeAgent):
+        def chat(self, request):
+            assert request.session_id is None
+            return {
+                "answer": "已处理遗忘指令。",
+                "memory_write": {"status": "skipped"},
+                "reset_history": True,
+                "deleted_ids": ["mem-phone-9"],
+                "workflow": {"status": "completed", "route": "forget"},
+            }
+
+    monkeypatch.setattr(server, "MemoryAgent", _ForgetAgent)
+    response = client.post("/agent/chat", json={
+        "user_id": "nosession_forget", "message": "忘掉我的手机号",
+        # 故意不带 session_id
+    })
+    assert response.status_code == 200
+    assert session_store.build_model_history("nosession_forget", sid) == [], (
+        "无 session_id 的遗忘请求也必须抑制已保存会话"
+    )
+
+
+def test_stream_forget_suppresses_before_done(monkeypatch) -> None:
+    """复核阻塞项 2：流式遗忘必须**先**抑制、**再**发 done。
+
+    严格时序断言：在包装器 yield 出 done 的**同一迭代步**立即读取历史——
+    若抑制在 finally 才执行，此刻仍能看到旧内容。
+    """
+    import asyncio
+
+    from api.server import _record_session_stream, orchestrator
+    from src.agent.service import ChatRequest as ChatReq, MemoryAgent as Agent
+
+    sid = session_store.create_session("stream_forget")["id"]
+    session_store.append_turn(
+        "stream_forget", sid,
+        user_content="我的工号是 998877",
+        assistant_content="已记录。",
+        referenced_memory_ids=["mem-emp-1"],
+    )
+
+    class _ForgetStreamModel:
+        tools_enabled = False
+        timeout = 60.0
+
+        def complete_stream(self, messages, tools, timeout=None):
+            yield {"kind": "token", "text": "已处理遗忘指令。"}
+            yield {"kind": "message",
+                   "message": {"role": "assistant", "content": "已处理遗忘指令。"}}
+
+    class _ForgetAgent(Agent):
+        def _execute(self, request):
+            result = super()._execute(request)
+            result["reset_history"] = True
+            result["deleted_ids"] = ["mem-emp-1"]
+            result["workflow"] = {**(result.get("workflow") or {}),
+                                  "status": "completed", "route": "forget"}
+            return result
+
+    async def scenario():
+        agent = _ForgetAgent(orchestrator, _ForgetStreamModel(), stream=True)
+        req = ChatReq(user_id="stream_forget", message="忘掉我的工号", session_id=sid)
+        history_at_done = None
+        async for chunk in _record_session_stream(agent.chat_stream(req), req):
+            if isinstance(chunk, str) and chunk.startswith("data: "):
+                event = json.loads(chunk[len("data: "):].strip())
+                if event.get("type") == "done":
+                    # 收到 done 的这一迭代步就要能看到抑制结果
+                    history_at_done = session_store.build_model_history(
+                        "stream_forget", sid
+                    )
+        return history_at_done
+
+    history = asyncio.run(scenario())
+    assert history == [], (
+        "done 终态下发时旧内容必须已不可恢复（抑制先于终态，不得留到 finally）"
+    )
+
+
+def test_late_turn_after_forget_is_not_recorded(tmp_store) -> None:
+    """复核阻塞项 3：先召回、再遗忘、最后尝试落库 → 旧内容仍无法恢复。
+
+    真实并发时序：请求 A 召回记忆 M 并开始生成；请求 B 遗忘 M（此时 A 的
+    消息尚不存在，抑制扫不到）；A 完成后落库。墓碑必须挡住这一回合。
+    """
+    sid = tmp_store.create_session("late_user")["id"]
+
+    # 1) 遗忘发生（墓碑写入，此刻无任何消息可抑制）
+    result = tmp_store.forget_memories("late_user", ["mem-late-1"])
+    assert result["messages_suppressed"] == 0
+    assert result["forgotten_recorded"] == 1
+
+    # 2) 迟到的回合尝试落库（关联已遗忘记忆）
+    recorded = tmp_store.append_turn(
+        "late_user", sid,
+        user_content="之前问过的事",
+        assistant_content="根据你的记录……（旧回答）",
+        referenced_memory_ids=["mem-late-1"],
+    )
+    assert recorded is False, "关联已遗忘记忆的迟到回合必须被拒绝落库"
+    assert tmp_store.build_model_history("late_user", sid) == []
+    assert tmp_store.get_session("late_user", sid)["messages"] == []
+
+    # 3) 不相关的新回合仍可正常落库
+    assert tmp_store.append_turn(
+        "late_user", sid, user_content="新问题", assistant_content="新回答",
+    ) is True
+    assert len(tmp_store.build_model_history("late_user", sid)) == 2
+
+    # 4) 重启后墓碑仍生效
+    reopened = SessionStore(tmp_store.path)
+    assert reopened.append_turn(
+        "late_user", sid, user_content="再次迟到", assistant_content="旧内容",
+        referenced_memory_ids=["mem-late-1"],
+    ) is False
+    reopened.close()
+
+
+def test_forget_memories_is_idempotent(tmp_store) -> None:
+    """forget_memories 幂等：重复遗忘不重复抑制、墓碑不重复计数。"""
+    sid = tmp_store.create_session("idem_user")["id"]
+    tmp_store.append_turn(
+        "idem_user", sid, user_content="q", assistant_content="a",
+        memory_id="mem-idem",
+    )
+    first = tmp_store.forget_memories("idem_user", ["mem-idem"])
+    assert first == {"forgotten_recorded": 1, "messages_suppressed": 2}
+    second = tmp_store.forget_memories("idem_user", ["mem-idem"])
+    assert second == {"forgotten_recorded": 0, "messages_suppressed": 0}
+
+
 def test_api_non_completed_turns_not_recorded(monkeypatch) -> None:
     """部分完成（未核实工具操作）与失败回合不落库，恢复不冒充成功。"""
     from api import server

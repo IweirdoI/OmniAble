@@ -16,13 +16,18 @@
 - **改造后**：请求带 `session_id` 时由**服务端**从会话库构建 history——
   排除被遗忘（suppressed）与未完成消息；前端不再需要自行携带历史。
   不带 `session_id` 的请求行为完全不变（旧客户端兼容）。
-- **遗忘联动**：/forget（REST）与聊天内遗忘路由删除记忆后，会话库把
-  `memory_id` / `stored_memory_ids` / **`referenced_memory_ids`** 命中已删 id 的消息
-  标记 suppressed 并将正文替换为占位 `[该条消息已按遗忘指令删除]`——被遗忘文本
-  **不会经恢复或下次请求重新送给模型**（幂等）。
+- **遗忘联动**：REST `/forget`、聊天内遗忘路由（同步与流式）统一调用
+  `SessionStore.forget_memories()`，它一次完成两件事：
+  1. **抑制现存消息**——`memory_id` / `stored_memory_ids` /
+     **`referenced_memory_ids`** 命中已删 id 的回合，user+assistant 双双标记
+     suppressed、正文替换为占位 `[该条消息已按遗忘指令删除]`
+  2. **写墓碑**——把已遗忘记忆 id 记入 `forgotten_memories` 表
+
+  因此被遗忘文本**不会经恢复、下次请求、或晚到的回合重新送给模型**（幂等）。
   - `referenced_memory_ids` 记录**本回合回答实际引用的召回记忆**（预算筛选后的
-    reference_memory），因此删除源记忆后，引用它的旧回答也会整轮退出模型历史
-    （复核阻塞项 2）。
+    reference_memory），因此删除源记忆后，引用它的旧回答也会整轮退出历史。
+  - **抑制不依赖 `session_id`**：前端当前仍会发送不带 session 的遗忘请求，
+    同步与流式入口都在无 session 时照常扫描该用户全部已保存会话。
 - 长期记忆的召回仍走 Memory Orchestrator（respect 遗忘），会话恢复只还原展示。
 
 ## 三、恢复语义
@@ -31,11 +36,15 @@
   中断、超时、部分完成（未核实工具操作）与客户端断线不落库——
   恢复不会冒充成功（流式入口捕获 SSE 终态，同步入口检查 workflow.status）。
 - **遗忘路由回合不落库**（`reset_history=True` 或 `route=forget`）：遗忘指令本身
-  不得作为对话记录保存（复核阻塞项 2）。
+  不得作为对话记录保存。
+- **迟到回合拦截**：落库前用墓碑校验本回合关联的 memory id；若任一已被遗忘，
+  整轮拒绝落库——覆盖「遗忘前已召回、遗忘成功后才完成」的并发时序。
 - 流式包装器必须是 **async generator**（`async for` 迭代 `agent.chat_stream`）：
-  用同步 `for` 迭代异步生成器会导致 SSE 空正文且不落库（复核阻塞项 1，已修）。
+  用同步 `for` 迭代异步生成器会导致 SSE 空正文且不落库。
+- **流式时序**：包装器在检测到终态后**先**完成落库与遗忘抑制、**再**把
+  `done` 下发——客户端收到成功终态时读历史不会看到旧内容。
 
-## 四、Schema（PRAGMA user_version = 2）
+## 四、Schema（PRAGMA user_version = 3）
 
 ```sql
 sessions(id TEXT PK, user_id TEXT NOT NULL, title TEXT NOT NULL,
@@ -46,10 +55,14 @@ messages(id TEXT PK, session_id TEXT NOT NULL
          memory_id TEXT, stored_memory_ids TEXT,
          referenced_memory_ids TEXT,
          suppressed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)
+forgotten_memories(user_id TEXT NOT NULL, memory_id TEXT NOT NULL,
+                   forgotten_at TEXT NOT NULL,
+                   PRIMARY KEY (user_id, memory_id))
 ```
 
-v2 增量：`referenced_memory_ids`（JSON 数组）记录本回合回答引用的召回记忆 id。
-旧库（v1）初始化时自动 `ALTER TABLE` 补列，旧记录该列为 NULL，读取兼容。
+- v2 增量：`referenced_memory_ids`（JSON 数组）记录本回合回答引用的召回记忆 id。
+- v3 增量：`forgotten_memories` 墓碑表，阻断迟到回合把旧内容写回历史。
+- 旧库（v1/v2）初始化时自动 `ALTER TABLE` 补列 / `CREATE TABLE` 建表，兼容读取。
 
 ## 五、API（最小集）
 

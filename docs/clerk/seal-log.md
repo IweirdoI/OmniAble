@@ -7,3 +7,4 @@
 - 20261122-161746 Linnea <2312809203@qq.com>: 记录 TASK-014 API 部分合入 master（PR #22 / merge 03e44dc），UI 待 TASK-012
 - 20261122-205039 Cursor Agent <cursoragent@cursor.com>: 合并 master 后重算 TASK-011 认领补记与桌面路线图任务的封存哈希
 - 20261122-220944 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: merge origin/master into TASK-007 branch: union seal history, re-seal merged task table (claims kept, mainline tasks kept)
+- 20261123-204040 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: merge origin/master into TASK-018 branch: union seal history and re-seal merged task table

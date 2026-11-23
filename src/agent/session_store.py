@@ -27,7 +27,7 @@
     无既有聊天记录格式可导入（历史仅驻留前端内存）；旧客户端不带
     session_id 时行为与改造前一致（向后兼容）。
 
-Schema（PRAGMA user_version = 2）：
+Schema（PRAGMA user_version = 3）：
     sessions(id TEXT PK, user_id TEXT NOT NULL, title TEXT NOT NULL,
              created_at TEXT NOT NULL, updated_at TEXT NOT NULL)
     messages(id TEXT PK, session_id TEXT NOT NULL
@@ -36,9 +36,15 @@ Schema（PRAGMA user_version = 2）：
              memory_id TEXT, stored_memory_ids TEXT,
              referenced_memory_ids TEXT,
              suppressed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)
+    forgotten_memories(user_id TEXT NOT NULL, memory_id TEXT NOT NULL,
+                       forgotten_at TEXT NOT NULL,
+                       PRIMARY KEY (user_id, memory_id))
 
     v2 增量：`referenced_memory_ids` 记录该回合**回答实际引用的召回记忆** id。
-    旧库（v1）在初始化时按需 ALTER TABLE 补列，旧记录该列为 NULL（兼容）。
+    v3 增量：`forgotten_memories` 是已遗忘记忆的墓碑表——遗忘成功即写入，
+    迟到回合落库时校验关联 id，命中则不落库（复核阻塞项 3：遗忘前已召回、
+    遗忘后才完成的回合无法把旧内容重新写回历史）。
+    旧库（v1/v2）在初始化时按需补列/建表，旧记录兼容。
 """
 
 from __future__ import annotations
@@ -57,7 +63,7 @@ FORGOTTEN_PLACEHOLDER = "[该条消息已按遗忘指令删除]"
 
 DEFAULT_DB_PATH = "data/agent_sessions.db"
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 
 def _now() -> str:
@@ -112,6 +118,12 @@ class SessionStore:
                     ON sessions(user_id, updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_messages_session
                     ON messages(session_id);
+                CREATE TABLE IF NOT EXISTS forgotten_memories (
+                    user_id TEXT NOT NULL,
+                    memory_id TEXT NOT NULL,
+                    forgotten_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, memory_id)
+                );
                 """
             )
             # v1 → v2 迁移：旧库补 referenced_memory_ids 列（旧记录为 NULL）
@@ -224,6 +236,16 @@ class SessionStore:
         ).fetchone()
         if owned is None:
             return False
+        # 迟到回合拦截（复核阻塞项 3）：本回合关联的记忆若已被遗忘，
+        # 整轮不落库——遗忘前已召回、遗忘后才完成的回答不得重新进入历史
+        linked_ids = [
+            *([memory_id] if memory_id else []),
+            *(stored_memory_ids or []),
+            *(referenced_memory_ids or []),
+        ]
+        if linked_ids and self.forgotten_ids(user_id, linked_ids):
+            return False
+
         now = _now()
         stored_json = (
             json.dumps(stored_memory_ids, ensure_ascii=False)
@@ -282,6 +304,56 @@ class SessionStore:
             {"role": row["role"], "content": row["content"]}
             for row in reversed(rows)
         ]
+
+    def forget_memories(self, user_id: str, memory_ids: list[str]) -> dict:
+        """遗忘联动唯一入口：写墓碑 + 抑制现存消息（幂等）。
+
+        调用方（REST /forget、聊天内遗忘路由、流式终态）只需调用本方法，
+        即同时获得：
+          1. 现存消息抑制——引用这些 id 的回合正文替换为占位、退出模型历史
+          2. 墓碑记录——此后晚到的回合（本人遗忘前已召回、遗忘后才完成）
+             在落库时被拦下，无法把旧内容重新写回历史（复核阻塞项 3）
+        """
+        remembered = self._remember_forgotten(user_id, memory_ids)
+        suppressed = self.suppress_by_memory_ids(user_id, memory_ids)
+        return {"forgotten_recorded": remembered, "messages_suppressed": suppressed}
+
+    def _remember_forgotten(self, user_id: str, memory_ids: list[str]) -> int:
+        targets = sorted({str(mid) for mid in memory_ids if mid})
+        if not targets:
+            return 0
+        now = _now()
+        with self._lock:
+            before = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM forgotten_memories WHERE user_id = :u",
+                {"u": user_id},
+            ).fetchone()["n"]
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO forgotten_memories"
+                "(user_id, memory_id, forgotten_at) VALUES(:u, :m, :ts)",
+                [{"u": user_id, "m": mid, "ts": now} for mid in targets],
+            )
+            self._conn.commit()
+            after = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM forgotten_memories WHERE user_id = :u",
+                {"u": user_id},
+            ).fetchone()["n"]
+        return after - before
+
+    def forgotten_ids(self, user_id: str,
+                      memory_ids: list[str]) -> set[str]:
+        """返回这些 id 中已被遗忘的部分（墓碑查询）。"""
+        targets = sorted({str(mid) for mid in memory_ids if mid})
+        if not targets:
+            return set()
+        placeholders = ",".join("?" for _ in targets)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT memory_id FROM forgotten_memories"
+                f" WHERE user_id = ? AND memory_id IN ({placeholders})",
+                [user_id, *targets],
+            ).fetchall()
+        return {row["memory_id"] for row in rows}
 
     def suppress_by_memory_ids(self, user_id: str,
                                memory_ids: list[str]) -> int:

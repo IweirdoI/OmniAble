@@ -115,45 +115,65 @@ def agent_chat(req: ChatRequest) -> dict[str, Any]:
             detail={"message": "执行超过请求时间预算已停止；请缩小任务范围后重试。",
                     "workflow": agent._workflow("timed_out", exc.reason)},
         ) from exc
+    # 会话落库与遗忘联动分离（TASK-018 复核阻塞项 1）：
+    #   - 落库只在带 session_id 时进行（无会话的请求无可记录目标）
+    #   - 遗忘抑制**不依赖** session_id——前端当前仍会发送不带 session_id 的
+    #     遗忘请求，必须扫描该用户全部已保存会话
     if req.session_id:
-        # 仅成功完成的回合落库（中断/失败/部分完成不落库，恢复不冒充成功）；
-        # 遗忘路由删除的记忆联动标记会话消息（幂等，正文替换为占位）
+        # 仅成功完成的回合落库（中断/失败/部分完成不落库，恢复不冒充成功）
         session_store.record_completed_turn(req.user_id, req.session_id, req.message, result)
-        deleted_ids = result.get("deleted_ids") or []
-        if deleted_ids:
-            session_store.suppress_by_memory_ids(req.user_id, deleted_ids)
+    deleted_ids = result.get("deleted_ids") or []
+    if deleted_ids:
+        session_store.forget_memories(req.user_id, deleted_ids)
     return result
 
 
+def _finalize_session_turn(req: ChatRequest, terminal: dict) -> None:
+    """回合收尾：落库（带 session_id 时）→ 遗忘抑制（总是）→ 迟到回合防护。
+
+    顺序固定：先落库再抑制（抑制要覆盖本回合刚写入的消息），并记录已遗忘
+    记忆 id（tombstone）供迟到回合落库时校验。
+    """
+    if req.session_id and terminal.get("type") == "done":
+        session_store.record_completed_turn(
+            req.user_id, req.session_id, req.message, terminal
+        )
+    deleted_ids = terminal.get("deleted_ids") or []
+    if deleted_ids:
+        session_store.forget_memories(req.user_id, deleted_ids)
+
+
 async def _record_session_stream(gen, req: ChatRequest):
-    """流式会话落库包装：捕获 SSE 终态（done/error），done 且 completed 才落库。
+    """流式会话落库/遗忘联动包装：捕获 SSE 终态（done/error）。
 
     必须是 async generator：上游 agent.chat_stream 是异步生成器，用同步 for
     迭代会拿不到任何事件（带 session_id 的流式请求返回空正文且不落库——
-    TASK-018 复核阻塞项 1）。客户端断线（GeneratorExit/CancelledError）时
-    无终态 → 不落库，恢复不会冒充成功；遗忘路由回合不作为对话消息记录，
-    deleted_ids 转交遗忘联动（幂等）。
+    复核阻塞项 1）。
+
+    顺序保证（复核阻塞项 2）：检测到终态后**先**完成落库与遗忘抑制，**再**
+    把终态下发给客户端——客户端收到 done 时读历史不会看到旧内容。
+    客户端断线时无终态 → 不落库，恢复不会冒充成功。
     """
     terminal: dict | None = None
+    finalized = False
     try:
         async for chunk in gen:
+            event = None
             if isinstance(chunk, str) and chunk.startswith("data: "):
                 try:
                     event = json.loads(chunk[6:].strip())
                 except (ValueError, TypeError):
                     event = None
-                if isinstance(event, dict) and event.get("type") in ("done", "error"):
-                    terminal = event
+            if isinstance(event, dict) and event.get("type") in ("done", "error"):
+                terminal = event
+                # 先收尾，再放行终态事件
+                _finalize_session_turn(req, terminal)
+                finalized = True
             yield chunk
     finally:
-        # 无论正常结束还是断线都会走到这里；只有拿到 done 终态才落库
-        if terminal and terminal.get("type") == "done":
-            session_store.record_completed_turn(
-                req.user_id, req.session_id, req.message, terminal
-            )
-        deleted_ids = (terminal or {}).get("deleted_ids") or []
-        if deleted_ids:
-            session_store.suppress_by_memory_ids(req.user_id, deleted_ids)
+        # 断线等异常路径：若已拿到终态但尚未收尾，补一次（幂等）
+        if terminal is not None and not finalized:
+            _finalize_session_turn(req, terminal)
 
 
 @app.post("/agent/chat/stream")
@@ -188,8 +208,9 @@ async def agent_chat_stream(req: ChatRequest):
                     if not agent._worker_started:
                         slots.release()
         gen = agent.chat_stream(req, on_finished=slots.release)
-        if req.session_id:
-            gen = _record_session_stream(gen, req)
+        # 包装器总是启用：遗忘抑制不依赖 session_id（前端仍会发无会话的
+        # 遗忘请求），落库仍只在有 session_id 时发生（见 _finalize_session_turn）
+        gen = _record_session_stream(gen, req)
         return RunResponse(gen,
                            media_type="text/event-stream",
                            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -764,9 +785,10 @@ def recall(req: RecallRequest) -> dict[str, Any]:
 @app.post("/forget")
 def forget(req: ForgetRequest) -> dict[str, Any]:
     deleted_ids = orchestrator.forget(req.user_id, req.instruction)
-    # 遗忘联动（TASK-018 / Issue #23）：引用已删记忆的会话消息标记 suppressed
-    # （正文替换为占位），保证相关文本不经恢复或下次请求重新送给模型（幂等）
-    session_store.suppress_by_memory_ids(req.user_id, deleted_ids)
+    # 遗忘联动（TASK-018 / Issue #23）：写墓碑 + 抑制引用这些记忆的会话消息
+    # （正文替换为占位），保证相关文本不经恢复、下次请求或**晚到的回合**
+    # 重新送给模型（幂等）
+    session_store.forget_memories(req.user_id, deleted_ids)
     return {
         "user_id": req.user_id,
         "instruction": req.instruction,
