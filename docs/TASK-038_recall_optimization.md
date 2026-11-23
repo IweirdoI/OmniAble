@@ -3,6 +3,7 @@
 - 执行：HXFhappiness ｜ 日期：2026-11-23 ｜ 分支：`hxf/task-038-recall-profiling`
 - 对照基线：TASK-007 / PR #46（`docs/Windows性能验收_20261122.md`、`docs/evidence/task-007-perf/`）
 - 金标：沿用固定金标，未改动
+- 同机双后端结果、原始样本与复现命令见 [合入后复测](evidence/task-038-retest/README.md)。
 
 ## 一、阶段直测（先测量再优化，Issue 要求）
 

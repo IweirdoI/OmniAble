@@ -1,0 +1,511 @@
+{
+  "commit": "77464a7a9783d42cfb54de903f6e026655be5ad5",
+  "generated_at": "2026-11-24T02:37:11+08:00",
+  "env": {
+    "os": "Windows-11-10.0.26200-SP0",
+    "processor": "AMD64 Family 25 Model 116 Stepping 1, AuthenticAMD",
+    "ram_gb": 27.7,
+    "python": "3.12.9",
+    "torch": "2.15.0+cpu",
+    "sentence_transformers": "6.0.1",
+    "numpy": "2.5.5",
+    "pymilvus": "2.6.17",
+    "backend": "milvus-lite",
+    "milvus_lite": "3.2.2",
+    "model": "BAAI/bge-m3",
+    "model_revision": "5617a9f61b028005a4858fdac845db406aefb181",
+    "device": "cpu",
+    "dimension": 1024,
+    "fallback": false,
+    "torch_threads": 4,
+    "torch_interop_threads": 1,
+    "cache": "off"
+  },
+  "corpus": {
+    "sha256": "37726d2c3439b41629d99688057e0a96715e123010ed71e4afe8cb5454f1b002",
+    "seed": 42,
+    "gold_docs": 14,
+    "scale": 1000
+  },
+  "model_start_ms": 17611.209900001995,
+  "quality": {
+    "recall_at_5": 0.9,
+    "hit_at_1": 0.9,
+    "queries": [
+      {
+        "hit5": true,
+        "hit1": true
+      },
+      {
+        "hit5": false,
+        "hit1": false
+      },
+      {
+        "hit5": true,
+        "hit1": true
+      },
+      {
+        "hit5": true,
+        "hit1": true
+      },
+      {
+        "hit5": true,
+        "hit1": true
+      },
+      {
+        "hit5": true,
+        "hit1": true
+      },
+      {
+        "hit5": true,
+        "hit1": true
+      },
+      {
+        "hit5": true,
+        "hit1": true
+      },
+      {
+        "hit5": true,
+        "hit1": true
+      },
+      {
+        "hit5": true,
+        "hit1": true
+      }
+    ]
+  },
+  "serial": {
+    "index": 361,
+    "first_ms": 1211.4894000114873,
+    "samples_ms": [
+      1231.885199988028,
+      1194.2426999739837,
+      1199.3429999856744,
+      1214.3931999744382,
+      1251.3242999848444,
+      1227.2212999814656,
+      1224.1716000135057,
+      1218.9996000088286,
+      1199.0789000119548,
+      1229.0206000034232
+    ],
+    "p50_ms": 1221.5856000111671,
+    "p95_ms": 1242.576704986277,
+    "max_ms": 1251.3242999848444
+  },
+  "concurrency": {
+    "workers": 4,
+    "rounds": 5,
+    "wall_s": 20.58250499999849,
+    "ops_per_sec": 0.971699023029581,
+    "failure_rate": 0.0,
+    "worker_samples": [
+      [
+        {
+          "index": 0,
+          "latency_ms": 4025.087199988775,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 13,
+          "latency_ms": 4332.582799979718,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 26,
+          "latency_ms": 4801.573900011135,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 39,
+          "latency_ms": 4158.43589999713,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 52,
+          "latency_ms": 3262.785900005838,
+          "ok": true,
+          "error_type": null
+        }
+      ],
+      [
+        {
+          "index": 7,
+          "latency_ms": 4082.7714999904856,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 20,
+          "latency_ms": 3217.5782000122126,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 33,
+          "latency_ms": 3812.0390999829397,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 46,
+          "latency_ms": 4110.4220999986865,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 59,
+          "latency_ms": 4344.353899999987,
+          "ok": true,
+          "error_type": null
+        }
+      ],
+      [
+        {
+          "index": 14,
+          "latency_ms": 3240.207199996803,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 27,
+          "latency_ms": 3776.5805999806616,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 40,
+          "latency_ms": 4443.7754999962635,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 53,
+          "latency_ms": 4054.4968000031076,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 66,
+          "latency_ms": 4145.489800022915,
+          "ok": true,
+          "error_type": null
+        }
+      ],
+      [
+        {
+          "index": 21,
+          "latency_ms": 2199.7528000210878,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 34,
+          "latency_ms": 2940.7671999942977,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 47,
+          "latency_ms": 4008.2600000023376,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 60,
+          "latency_ms": 4144.20819998486,
+          "ok": true,
+          "error_type": null
+        },
+        {
+          "index": 73,
+          "latency_ms": 3377.56230001105,
+          "ok": true,
+          "error_type": null
+        }
+      ]
+    ],
+    "samples_ms": [
+      4025.087199988775,
+      4332.582799979718,
+      4801.573900011135,
+      4158.43589999713,
+      3262.785900005838,
+      4082.7714999904856,
+      3217.5782000122126,
+      3812.0390999829397,
+      4110.4220999986865,
+      4344.353899999987,
+      3240.207199996803,
+      3776.5805999806616,
+      4443.7754999962635,
+      4054.4968000031076,
+      4145.489800022915,
+      2199.7528000210878,
+      2940.7671999942977,
+      4008.2600000023376,
+      4144.20819998486,
+      3377.56230001105
+    ],
+    "p50_ms": 4039.7919999959413,
+    "p95_ms": 4461.665419997008,
+    "max_ms": 4801.573900011135
+  },
+  "phase_traces": [
+    {
+      "index": 0,
+      "stages": {
+        "vector_query": {
+          "ms": 566.484,
+          "candidates": 20,
+          "embedding_ms": 432.49659999855794,
+          "search_ms": 133.83119998616166
+        },
+        "vector_convert": {
+          "ms": 0.467,
+          "kept": 20
+        },
+        "intent": {
+          "ms": 0.545,
+          "knowledge_intent": true,
+          "missing_terms": 0,
+          "should_lexical": true
+        },
+        "expanded_query": {
+          "ms": 0.207,
+          "rewritten": false
+        },
+        "rewrite_query": {
+          "ms": 0.004,
+          "candidates": 0
+        },
+        "lexical_fetch": {
+          "ms": 317.726,
+          "candidates": 1000
+        },
+        "lexical_match": {
+          "ms": 78.458,
+          "hits": 1000,
+          "pool": 1000
+        },
+        "merge": {
+          "ms": 0.976,
+          "merged": 1000
+        },
+        "rerank": {
+          "ms": 204.744,
+          "final": 5
+        },
+        "total": {
+          "ms": 1169.63,
+          "strategy": "query_memory+lexical"
+        }
+      }
+    },
+    {
+      "index": 13,
+      "stages": {
+        "vector_query": {
+          "ms": 574.637,
+          "candidates": 20,
+          "embedding_ms": 440.8795000053942,
+          "search_ms": 133.62310000229627
+        },
+        "vector_convert": {
+          "ms": 0.391,
+          "kept": 20
+        },
+        "intent": {
+          "ms": 0.449,
+          "knowledge_intent": true,
+          "missing_terms": 0,
+          "should_lexical": true
+        },
+        "expanded_query": {
+          "ms": 0.164,
+          "rewritten": false
+        },
+        "rewrite_query": {
+          "ms": 0.003,
+          "candidates": 0
+        },
+        "lexical_fetch": {
+          "ms": 310.217,
+          "candidates": 1000
+        },
+        "lexical_match": {
+          "ms": 68.374,
+          "hits": 1000,
+          "pool": 1000
+        },
+        "merge": {
+          "ms": 0.536,
+          "merged": 1000
+        },
+        "rerank": {
+          "ms": 225.781,
+          "final": 5
+        },
+        "total": {
+          "ms": 1180.572,
+          "strategy": "query_memory+lexical"
+        }
+      }
+    },
+    {
+      "index": 26,
+      "stages": {
+        "vector_query": {
+          "ms": 593.105,
+          "candidates": 20,
+          "embedding_ms": 456.67580000008456,
+          "search_ms": 136.3054999965243
+        },
+        "vector_convert": {
+          "ms": 0.289,
+          "kept": 20
+        },
+        "intent": {
+          "ms": 0.353,
+          "knowledge_intent": true,
+          "missing_terms": 0,
+          "should_lexical": true
+        },
+        "expanded_query": {
+          "ms": 0.124,
+          "rewritten": false
+        },
+        "rewrite_query": {
+          "ms": 0.002,
+          "candidates": 0
+        },
+        "lexical_fetch": {
+          "ms": 270.946,
+          "candidates": 1000
+        },
+        "lexical_match": {
+          "ms": 97.71,
+          "hits": 1000,
+          "pool": 1000
+        },
+        "merge": {
+          "ms": 0.567,
+          "merged": 1000
+        },
+        "rerank": {
+          "ms": 262.53,
+          "final": 5
+        },
+        "total": {
+          "ms": 1225.642,
+          "strategy": "query_memory+lexical"
+        }
+      }
+    },
+    {
+      "index": 39,
+      "stages": {
+        "vector_query": {
+          "ms": 573.998,
+          "candidates": 20,
+          "embedding_ms": 444.15150000713766,
+          "search_ms": 129.7276000259444
+        },
+        "vector_convert": {
+          "ms": 0.284,
+          "kept": 20
+        },
+        "intent": {
+          "ms": 0.332,
+          "knowledge_intent": true,
+          "missing_terms": 0,
+          "should_lexical": true
+        },
+        "expanded_query": {
+          "ms": 0.118,
+          "rewritten": false
+        },
+        "rewrite_query": {
+          "ms": 0.002,
+          "candidates": 0
+        },
+        "lexical_fetch": {
+          "ms": 284.453,
+          "candidates": 1000
+        },
+        "lexical_match": {
+          "ms": 86.169,
+          "hits": 1000,
+          "pool": 1000
+        },
+        "merge": {
+          "ms": 0.571,
+          "merged": 1000
+        },
+        "rerank": {
+          "ms": 256.761,
+          "final": 5
+        },
+        "total": {
+          "ms": 1202.705,
+          "strategy": "query_memory+lexical"
+        }
+      }
+    },
+    {
+      "index": 52,
+      "stages": {
+        "vector_query": {
+          "ms": 555.081,
+          "candidates": 20,
+          "embedding_ms": 426.195199979702,
+          "search_ms": 128.57880000956357
+        },
+        "vector_convert": {
+          "ms": 0.377,
+          "kept": 20
+        },
+        "intent": {
+          "ms": 0.362,
+          "knowledge_intent": true,
+          "missing_terms": 0,
+          "should_lexical": true
+        },
+        "expanded_query": {
+          "ms": 0.089,
+          "rewritten": false
+        },
+        "rewrite_query": {
+          "ms": 0.003,
+          "candidates": 0
+        },
+        "lexical_fetch": {
+          "ms": 312.711,
+          "candidates": 1000
+        },
+        "lexical_match": {
+          "ms": 103.985,
+          "hits": 1000,
+          "pool": 1000
+        },
+        "merge": {
+          "ms": 0.75,
+          "merged": 1000
+        },
+        "rerank": {
+          "ms": 298.937,
+          "final": 5
+        },
+        "total": {
+          "ms": 1272.317,
+          "strategy": "query_memory+lexical"
+        }
+      }
+    }
+  ],
+  "peak_working_set_bytes": 2322743296
+}
