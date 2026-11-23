@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 import hashlib
 import math
+import os
 import re
 import threading
+from collections import OrderedDict
 from typing import Any
 
 from src.common.interfaces import EmbeddingProvider
@@ -16,6 +18,22 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MODEL = "BAAI/bge-m3"
 _MODEL_CACHE: dict[tuple[str, str | None], Any] = {}
 _MODEL_LOCK = threading.Lock()
+
+# 查询向量缓存与编码并发策略（TASK-038 / Issue #47）
+# 实测（BGE-M3 CPU，Windows，Windows 10 / Zen3）：
+#   1 串行编码 P50 116ms；4 并发 P50 378ms（3.2x）、P95 688ms，吞吐仅 8.15→9.15 ops/s（+12%）
+#   → CPU 争抢为主，外部并发并不能提高吞吐。
+#   尝试串行化模型调用后：P50 恢复到 117ms，但队尾 P95 恶化到 1488ms、吞吐降到 7.73
+#   → 排队把延迟集中到队尾，对「P95 ≤ 500ms」目标反而更差。
+# 结论（按实测选择）：**不串行化**（保留开关供对照），采用**有界 LRU 查询向量缓存**——
+# 重复查询直接命中（0ms），这是该环境下唯一不牺牲 P95/吞吐的收益点。
+# 缓存键为纯文本；向量只依赖文本与模型配置（不含租户数据），跨用户共享安全；
+# 模型名/维度/归一化参数在实例构造时固定，实例级缓存天然按「模型+维度+归一化」隔离；
+# 容量由 OS_AGENT_EMBEDDING_CACHE_SIZE 控制（0 关闭，默认 1024，进程内 LRU）。
+_CACHE_SIZE = int(os.getenv("OS_AGENT_EMBEDDING_CACHE_SIZE", "1024"))
+_SERIALIZE_ENCODE = os.getenv("OS_AGENT_EMBEDDING_SERIALIZE", "0").strip().lower() in {
+    "1", "true", "yes", "on",
+}
 
 
 class LocalEmbeddingAdapter(EmbeddingProvider):
@@ -37,6 +55,11 @@ class LocalEmbeddingAdapter(EmbeddingProvider):
         self._allow_stub_fallback = allow_stub_fallback
         self._fallback_mode = False
         self._model: Any | None = None
+        # 查询向量 LRU 缓存（键：原文；值：归一化后的向量副本）
+        self._cache: OrderedDict[str, list[float]] = OrderedDict()
+        self._cache_lock = threading.Lock()
+        # 编码串行化：避免多线程并发调用同一模型导致 CPU 争抢与 P95 抖动
+        self._encode_gate = threading.Semaphore(1)
 
     def _ensure_model(self) -> Any:
         if self._model is not None:
@@ -93,6 +116,38 @@ class LocalEmbeddingAdapter(EmbeddingProvider):
         if model is None:
             return [self._hash_embed(text) for text in texts]
 
+        results: list[list[float] | None] = [None] * len(texts)
+        missing: list[int] = []
+        if _CACHE_SIZE > 0:
+            with self._cache_lock:
+                for index, text in enumerate(texts):
+                    cached = self._cache.get(text)
+                    if cached is not None:
+                        self._cache.move_to_end(text)
+                        results[index] = list(cached)
+                    else:
+                        missing.append(index)
+        else:
+            missing = list(range(len(texts)))
+
+        if missing:
+            payload = [texts[index] for index in missing]
+            if _SERIALIZE_ENCODE:
+                with self._encode_gate:
+                    vectors = self._encode(model, payload)
+            else:
+                vectors = self._encode(model, payload)
+            for index, vector in zip(missing, vectors, strict=True):
+                results[index] = vector
+            if _CACHE_SIZE > 0:
+                with self._cache_lock:
+                    for index, vector in zip(missing, vectors, strict=True):
+                        self._cache[texts[index]] = vector
+                    while len(self._cache) > _CACHE_SIZE:
+                        self._cache.popitem(last=False)
+        return results  # type: ignore[return-value]  # missing 已覆盖全部 None
+
+    def _encode(self, model: Any, texts: list[str]) -> list[list[float]]:
         vectors = model.encode(
             texts,
             normalize_embeddings=self._normalize,
@@ -101,6 +156,11 @@ class LocalEmbeddingAdapter(EmbeddingProvider):
         if self._dimension is None:
             self._dimension = len(vectors[0])
         return [vector.tolist() for vector in vectors]
+
+    def cache_stats(self) -> dict[str, int]:
+        """查询向量缓存规模（观测用；不影响行为）。"""
+        with self._cache_lock:
+            return {"entries": len(self._cache), "capacity": _CACHE_SIZE}
 
     @property
     def dimension(self) -> int:

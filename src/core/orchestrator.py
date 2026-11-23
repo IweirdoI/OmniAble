@@ -1022,6 +1022,7 @@ class MemoryOrchestrator:
         query: RetrievalQuery,
         *,
         filters: dict | None = None,
+        trace: dict | None = None,
     ) -> RetrievalResult:
         """包装knowledge query_memory，供 Agent / 前端检索。
 
@@ -1029,9 +1030,21 @@ class MemoryOrchestrator:
         召回夹带 D 盘、旧端口等过期版本。查版本历史时传
         ``filters={"is_latest": False}`` 或
         ``filters={"include_superseded_preferences": True}``（返回全部版本）。
+
+        ``trace``（TASK-038 / Issue #47）：可选分项计时字典。传入时按阶段写入
+        毫秒耗时与候选数量，供验收直接测量链路瓶颈；默认 None 不产生额外输出，
+        生产路径行为不变。
         """
 
         started = perf_counter()
+
+        def _mark(stage: str, since: float, **extra) -> float:
+            now = perf_counter()
+            if trace is not None:
+                trace[stage] = {"ms": round((now - since) * 1000, 3), **extra}
+            return now
+
+        mark = started
         # 外部 filters 不得覆盖可信 user_id（防止跨用户召回）。
         caller_filters = {k: v for k, v in (filters or {}).items() if k != "user_id"}
         include_superseded = bool(
@@ -1091,10 +1104,19 @@ class MemoryOrchestrator:
             ),
             milvus=self._milvus,
         )
+        mark = _mark(
+            "vector_query",
+            mark,
+            candidates=len(response.items),
+            # query_memory 内部拆分：编码与存储检索（TASK-038）
+            embedding_ms=response.embedding_ms,
+            search_ms=response.search_ms,
+        )
 
         items = [self._query_hit_to_memory_item(hit) for hit in response.items]
         if not include_superseded:
             items = [item for item in items if self._item_is_latest(item)]
+        mark = _mark("vector_convert", mark, kept=len(items))
 
         auto_semantic = (
             query.retrieval_mode == "auto"
@@ -1104,8 +1126,13 @@ class MemoryOrchestrator:
         if query.retrieval_mode == "semantic" or auto_semantic:
             # Explicit open-domain route: preserve vector order and all trusted
             # scope/version filters, without office-topic lexical rejection.
+            total_ms = (perf_counter() - started) * 1000
+            if trace is not None:
+                trace["total"] = {"ms": round(total_ms, 3),
+                                  "strategy": "query_memory:auto-semantic" if auto_semantic
+                                  else "query_memory:semantic"}
             return RetrievalResult(items=items[:max(query.top_k, 0)],
-                                   latency_ms=(perf_counter() - started) * 1000,
+                                   latency_ms=total_ms,
                                    strategy="query_memory:auto-semantic" if auto_semantic
                                    else "query_memory:semantic")
 
@@ -1125,8 +1152,18 @@ class MemoryOrchestrator:
         should_lexical = query.memory_type != MemoryType.PREFERENCE and (
             know or bool(missing_terms)
         )
+        if trace is not None:
+            trace["intent"] = {
+                "ms": round((perf_counter() - mark) * 1000, 3),
+                "knowledge_intent": bool(know),
+                "missing_terms": len(missing_terms),
+                "should_lexical": should_lexical,
+            }
+        mark = perf_counter()
         if should_lexical:
             rewrite = expanded_query(query_text)
+            mark = _mark("expanded_query", mark,
+                         rewritten=bool(rewrite and rewrite.strip() != query_text.strip()))
             extra_hits = []
             if rewrite and rewrite.strip() != query_text.strip():
                 extra = query_memory(
@@ -1141,14 +1178,18 @@ class MemoryOrchestrator:
                 extra_hits = [self._query_hit_to_memory_item(hit) for hit in extra.items]
                 if not include_superseded:
                     extra_hits = [item for item in extra_hits if self._item_is_latest(item)]
+            mark = _mark("rewrite_query", mark, candidates=len(extra_hits))
             pool = [
                 self._query_hit_to_memory_item(hit)
                 for hit in self._milvus.search(None, request_filters, top_k=10_000)
             ]
             if not include_superseded:
                 pool = [item for item in pool if self._item_is_latest(item)]
+            mark = _mark("lexical_fetch", mark, candidates=len(pool))
             lexical = lexical_hits(query_text, pool)
+            mark = _mark("lexical_match", mark, hits=len(lexical), pool=len(pool))
             items = merge_items(items, extra_hits, lexical)
+            mark = _mark("merge", mark, merged=len(items))
             strategy = "query_memory+lexical"
 
         if query.memory_type is None:
@@ -1163,9 +1204,13 @@ class MemoryOrchestrator:
             items = rerank_and_filter(query_text, items, query.top_k, allow_empty=True, project_context=pool)
         else:
             items = items[: query.top_k]
+        mark = _mark("rerank", mark, final=len(items))
+        total_ms = (perf_counter() - started) * 1000
+        if trace is not None:
+            trace["total"] = {"ms": round(total_ms, 3), "strategy": strategy}
         return RetrievalResult(
             items=items,
-            latency_ms=(perf_counter() - started) * 1000,
+            latency_ms=total_ms,
             strategy=strategy,
         )
 

@@ -325,30 +325,72 @@ _TOKEN_HIT_WEIGHT_SHORT = 1 # 重叠针：短中文片段（噪声风险高，�
 def term_overlap(query: str, content: str) -> int:
     """查询词在正文中的命中分；只统计词面，不引入具体答案。"""
 
+    return _overlap_prepared(prepare_query_overlap(query), content)
+
+
+class PreparedOverlap:
+    """查询侧预编译结果（TASK-038）.
+
+    「查询侧」计算（主题组识别、套话剥离后的 distinctive_terms、同义针展开）
+    与候选正文无关。原实现对 N 个候选各重复计算一次（含正则分词与 2~4 字
+    片段展开），是词面阶段的主要浪费。预编译一次后对 N 个候选只做正文匹配，
+    结果与原实现完全等价。
+    """
+
+    __slots__ = ("active", "specific", "terms")
+
+    def __init__(self, active, specific, terms):
+        self.active = active      # 命中的主题组
+        self.specific = specific  # 需要正文佐证的特定主题组
+        self.terms = terms        # ((term_lower, needles, weight), ...)
+
+
+def prepare_query_overlap(query: str) -> PreparedOverlap:
+    """把 term_overlap 的查询侧计算提前做一次（与正文无关）。"""
+    remainder = (query or "").lower()
+    active = [group for group in _TOPICS if any(_contains(remainder, w) for w in group)]
+    # Generic document/share words cannot alone justify a specific topic query.
+    specific = [g for g in active if g not in _TOPICS[-2:]]
+    for group in active:
+        for word in sorted(group, key=len, reverse=True):
+            remainder = remainder.replace(word, " ")
+    terms = []
+    for term in sorted(distinctive_terms(remainder), key=len, reverse=True):
+        needles = tuple(_overlap_needles(term))
+        if not needles:
+            continue
+        # 权重在循环内按命中针决定；预编译时按原逻辑取首个针的权重规则，
+        # 与 term_overlap 的「命中即 break」语义一致（见 _overlap_prepared）。
+        terms.append((term.lower(), needles))
+    return PreparedOverlap(tuple(active), tuple(specific), tuple(terms))
+
+
+def _overlap_prepared(prepared: PreparedOverlap, content: str) -> int:
+    """用预编译的查询侧对单个正文打分（与 term_overlap 完全等价）。"""
     body = (content or "").lower()
     if not body:
         return 0
     score = 0
-    remainder = query.lower()
-    active = [group for group in _TOPICS if any(_contains(remainder, w) for w in group)]
-    # Generic document/share words cannot alone justify a specific topic query.
-    specific = [g for g in active if g not in _TOPICS[-2:]]
-    if specific and not any(any(_contains(body, w) for w in g) for g in specific):
+    if prepared.specific and not any(
+        any(_contains(body, w) for w in group) for group in prepared.specific
+    ):
         return 0
-    for group in active:
+    for group in prepared.active:
         if any(_contains(body, w) for w in group):
             score += _TOPIC_HIT_WEIGHT
-        for word in sorted(group, key=len, reverse=True):
-            remainder = remainder.replace(word, " ")
     covered: list[str] = []
-    for term in sorted(distinctive_terms(remainder), key=len, reverse=True):
-        if any(term.lower() in old for old in covered):
+    for term_lower, needles in prepared.terms:
+        if any(term_lower in old for old in covered):
             continue
-        for needle in _overlap_needles(term):
+        for needle in needles:
             if _contains(body, needle):
                 # 长英文/长 token 命中权重更高，短中文片段权重低（噪声多）
-                score += _TOKEN_HIT_WEIGHT_LONG if len(needle) >= 4 or needle.isascii() else _TOKEN_HIT_WEIGHT_SHORT
-                covered.append(term.lower())
+                score += (
+                    _TOKEN_HIT_WEIGHT_LONG
+                    if len(needle) >= 4 or needle.isascii()
+                    else _TOKEN_HIT_WEIGHT_SHORT
+                )
+                covered.append(term_lower)
                 break
     return score
 
@@ -552,9 +594,11 @@ def merge_items(*groups: Iterable[MemoryItem]) -> list[MemoryItem]:
 
 
 def lexical_hits(query: str, pool: Iterable[MemoryItem]) -> list[MemoryItem]:
+    # 查询侧预编译一次，对 pool 内每条只做正文匹配（TASK-038）
+    prepared = prepare_query_overlap(query)
     scored: list[tuple[int, MemoryItem]] = []
     for item in pool:
-        overlap = term_overlap(query, item.content or "")
+        overlap = _overlap_prepared(prepared, item.content or "")
         if overlap > 0:
             scored.append((overlap, item))
     scored.sort(key=lambda pair: pair[0], reverse=True)
@@ -589,9 +633,11 @@ def rerank_and_filter(
     for alias in sorted(projects, key=len, reverse=True):
         topic_text = re.sub(re.escape(alias), " ", topic_text, flags=re.I)
     terms = distinctive_terms(topic_text)
+    # 查询侧预编译一次：rank_key 与词面过滤共用，避免逐条重复分词（TASK-038）
+    prepared_overlap = prepare_query_overlap(topic_text)
 
     def rank_key(item: MemoryItem) -> tuple[int, int, int, int, float]:
-        overlap = term_overlap(topic_text, item.content or "")
+        overlap = _overlap_prepared(prepared_overlap, item.content or "")
         project_hit = 1 if projects and item_matches_projects(item, projects) else 0
         document_hit = 1 if is_documentish(item) else 0
         pref_hit = 1 if item.memory_type == MemoryType.PREFERENCE else 0
@@ -608,7 +654,7 @@ def rerank_and_filter(
     if terms and not (pref and not know):
         relevant: list[MemoryItem] = []
         for item in working:
-            if term_overlap(topic_text, item.content or "") > 0:
+            if _overlap_prepared(prepared_overlap, item.content or "") > 0:
                 relevant.append(item)
         if relevant or allow_empty:
             working = relevant
