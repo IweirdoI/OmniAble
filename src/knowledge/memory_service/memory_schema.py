@@ -82,6 +82,10 @@ class QueryMemoryRequest(BaseModel):
 class QueryMemoryResponse(BaseModel):
     items: list[dict[str, Any]]
     latency_ms: float = 0.0
+    # 分项耗时（TASK-038 / Issue #47）：编码与存储检索分开计时，便于在
+    # 完整 recall 链路内定位瓶颈。additive 可选字段，缺省 None 保持兼容。
+    embedding_ms: float | None = None
+    search_ms: float | None = None
 
 
 class UpdateMemoryRequest(BaseModel):

@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 import hashlib
 import math
+import os
 import re
 import threading
+from collections import OrderedDict
 from typing import Any
 
 from src.common.interfaces import EmbeddingProvider
@@ -16,6 +18,22 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MODEL = "BAAI/bge-m3"
 _MODEL_CACHE: dict[tuple[str, str | None], Any] = {}
 _MODEL_LOCK = threading.Lock()
+
+# 查询向量缓存与编码并发策略（TASK-038 / Issue #47）
+# 实测（BGE-M3 CPU，Windows，Windows 10 / Zen3）：
+#   1 串行编码 P50 116ms；4 并发 P50 378ms（3.2x）、P95 688ms，吞吐仅 8.15→9.15 ops/s（+12%）
+#   → CPU 争抢为主，外部并发并不能提高吞吐。
+#   尝试串行化模型调用后：P50 恢复到 117ms，但队尾 P95 恶化到 1488ms、吞吐降到 7.73
+#   → 排队把延迟集中到队尾，对「P95 ≤ 500ms」目标反而更差。
+# 结论（按实测选择）：**不串行化**（保留开关供对照），采用**有界 LRU 查询向量缓存**——
+# 重复查询直接命中（0ms），这是该环境下唯一不牺牲 P95/吞吐的收益点。
+# 查询键使用实例独立的带密钥摘要。摄取与更新正文不使用查询缓存。
+# 模型名、维度与归一化参数由实例确定。
+# 容量由 OS_AGENT_EMBEDDING_CACHE_SIZE 控制（0 关闭，默认 1024，进程内 LRU）。
+_CACHE_SIZE = int(os.getenv("OS_AGENT_EMBEDDING_CACHE_SIZE", "1024"))
+_SERIALIZE_ENCODE = os.getenv("OS_AGENT_EMBEDDING_SERIALIZE", "0").strip().lower() in {
+    "1", "true", "yes", "on",
+}
 
 
 class LocalEmbeddingAdapter(EmbeddingProvider):
@@ -37,6 +55,12 @@ class LocalEmbeddingAdapter(EmbeddingProvider):
         self._allow_stub_fallback = allow_stub_fallback
         self._fallback_mode = False
         self._model: Any | None = None
+        # Keep request text out of the cache, and never cache ingestion content.
+        self._cache_key = os.urandom(32)
+        self._cache: OrderedDict[bytes, tuple[float, ...]] = OrderedDict()
+        self._cache_lock = threading.Lock()
+        # 编码串行化：避免多线程并发调用同一模型导致 CPU 争抢与 P95 抖动
+        self._encode_gate = threading.Semaphore(1)
 
     def _ensure_model(self) -> Any:
         if self._model is not None:
@@ -88,19 +112,64 @@ class LocalEmbeddingAdapter(EmbeddingProvider):
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        model = self._ensure_model()
+        if model is None:
+            return [self._hash_embed(text) for text in texts]
+        return self._encode(model, texts)
+
+    def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        if _CACHE_SIZE <= 0:
+            return self.embed(texts)
+        if not texts:
+            return []
 
         model = self._ensure_model()
         if model is None:
             return [self._hash_embed(text) for text in texts]
 
-        vectors = model.encode(
-            texts,
-            normalize_embeddings=self._normalize,
-            show_progress_bar=False,
-        )
+        cache_keys = [hashlib.blake2b(text.encode("utf-8", errors="surrogatepass"),
+                                    key=self._cache_key, digest_size=32).digest()
+                      for text in texts]
+        results: list[list[float]] = [[] for _ in texts]
+        missing: list[int] = []
+        with self._cache_lock:
+            for index, key in enumerate(cache_keys):
+                cached = self._cache.get(key)
+                if cached is None:
+                    missing.append(index)
+                else:
+                    self._cache.move_to_end(key)
+                    results[index] = list(cached)
+
+        if missing:
+            payload = [texts[index] for index in missing]
+            vectors = self._encode(model, payload)
+            with self._cache_lock:
+                for index, vector in zip(missing, vectors, strict=True):
+                    results[index] = vector
+                    key = cache_keys[index]
+                    self._cache[key] = tuple(vector)
+                    self._cache.move_to_end(key)
+                while len(self._cache) > _CACHE_SIZE:
+                    self._cache.popitem(last=False)
+        return results
+
+    def _encode(self, model: Any, texts: list[str]) -> list[list[float]]:
+        if _SERIALIZE_ENCODE:
+            with self._encode_gate:
+                return self._encode_batch(model, texts)
+        return self._encode_batch(model, texts)
+
+    def _encode_batch(self, model: Any, texts: list[str]) -> list[list[float]]:
+        vectors = model.encode(texts, normalize_embeddings=self._normalize, show_progress_bar=False)
         if self._dimension is None:
             self._dimension = len(vectors[0])
         return [vector.tolist() for vector in vectors]
+
+    def cache_stats(self) -> dict[str, int]:
+        """查询向量缓存规模（观测用；不影响行为）。"""
+        with self._cache_lock:
+            return {"entries": len(self._cache), "capacity": _CACHE_SIZE}
 
     @property
     def dimension(self) -> int:

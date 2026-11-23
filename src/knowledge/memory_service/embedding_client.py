@@ -23,5 +23,9 @@ class EmbeddingClient:
     def embed(self, content: str) -> list[float]:
         return self._provider.embed([content])[0]
 
+    def embed_query(self, query: str) -> list[float]:
+        encode = getattr(self._provider, "embed_queries", self._provider.embed)
+        return encode([query])[0]
+
     def embed_batch(self, contents: list[str]) -> list[list[float]]:
         return self._provider.embed(contents)

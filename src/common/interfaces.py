@@ -210,6 +210,10 @@ class EmbeddingProvider(ABC):
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Batch embedding via local backend or dev fallback."""
 
+    def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        """Embed retrieval queries. Providers may cache repeated queries."""
+        return self.embed(texts)
+
 
 class StorageBackend(ABC):
     """Owner: TBD (core协调) | Lightweight edge storage."""
