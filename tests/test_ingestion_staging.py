@@ -18,6 +18,7 @@ from src.common.models import DataSource, NormalizedRecord
 from src.core import factory
 from src.ingestion import IngestionPipeline, RejectCode, StagingStore
 from src.ingestion.models import IngestionResult, PipelineStage
+from tests.test_ingestion_files import _png_bytes
 
 
 def _count_rows(db_path: Path, table: str) -> int:
@@ -732,3 +733,50 @@ def test_default_staging_store_uses_rule_based_redaction(tmp_path: Path) -> None
     assert content_row is not None
     # 手机号命中规则，被规则级脱敏处理（不应是裸号）。
     assert "13800138000" not in content_row[0]
+
+
+def test_blank_image_without_caption_writes_empty_audit_with_semantic_redactor(
+    tmp_path: Path,
+) -> None:
+    """空白图片在 normalize 前被拒绝时也应落审计，且不对空正文调用脱敏。
+
+    回归 #49：semantic redactor 已配置而 ``result.record is None`` 时，
+    append_event 曾无条件访问 ``record.content``，使业务拒绝变成 HTTP 500。
+    """
+
+    redacted_values: list[str] = []
+
+    def semantic_redact(text: str) -> str:
+        redacted_values.append(text)
+        return text
+
+    with StagingStore(
+        str(tmp_path / "blank-image.db"),
+        raw_archive_mode="off",
+        semantic_redact=semantic_redact,
+    ) as store:
+        result = IngestionPipeline(staging_store=store).process_file(
+            "blank.png",
+            _png_bytes(),
+            user_id="u-blank",
+        )
+
+        assert result.accepted is False
+        assert result.record is None
+        assert result.reject_code in {
+            RejectCode.NORMALIZATION_FAILED,
+            RejectCode.EMPTY_CONTENT,
+        }
+        assert result.staging_event_id
+
+        with sqlite3.connect(store.db_path) as connection:
+            row = connection.execute(
+                "SELECT accepted, reject_code, content FROM ingestion_events WHERE id = ?",
+                (result.staging_event_id,),
+            ).fetchone()
+
+    assert row is not None
+    assert row[0] == 0
+    assert row[1] == result.reject_code.value
+    assert row[2] is None
+    assert redacted_values == []

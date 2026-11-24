@@ -2,6 +2,8 @@
 
 Run from repository root: .venv/Scripts/python frontend/tests/serve_api.py
 All generated fixtures/state stay in ignored tmp/frontend-ingestion-* directories.
+The chat endpoint uses a local synthetic streaming model only; it never calls an
+external model service.
 """
 import os
 import sys
@@ -36,5 +38,28 @@ print(f'FIXTURE_DIR={out}', flush=True)
 
 from api.server import app
 import uvicorn
+
+
+class SyntheticModel:
+    """Small streaming model so the browser recall step never calls a real LLM."""
+
+    tools_enabled = False
+    timeout = 5
+    context_window_tokens = 32768
+
+    def __init__(self, context_window_tokens=32768, **_kwargs):
+        self.context_window_tokens = context_window_tokens
+
+    def complete_stream(self, messages, tools=None, timeout=None):
+        yield {"kind": "token", "text": "已根据记忆整理回答。"}
+        yield {"kind": "message", "message": {"content": "已根据记忆整理回答。"}}
+
+
+# MemoryAgent resolves ChatModel from src.agent.service at request time.
+import api.server as server
+import src.agent.service as service
+
+server.ChatModel = SyntheticModel
+service.ChatModel = SyntheticModel
 
 uvicorn.run(app, host='127.0.0.1', port=18086, log_level='warning')
