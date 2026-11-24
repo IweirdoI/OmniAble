@@ -115,3 +115,33 @@ test('invalid terminal batch is rejected before successful-history callbacks', a
     frame({ type: 'done', answer: 'unconfirmed' }) + frame({ type: 'error', message: 'duplicate' })) }))
   assert.deepEqual(events, [])
 })
+
+test('confirmation_request/result are tracked per message and expire at terminal', () => {
+  const msg = { content: '', steps: [], status: 'running' }
+  applyChatEvent(msg, {
+    type: 'confirmation_request', confirm_id: 'cfm-1', run_id: 'run-1',
+    tool_call_id: 'w1', action: 'write_file', path: 'notes.md',
+    target_exists: false, expected_revision: null,
+    summary: '写入 3 字符：notes.md', decision_token: 'tok-123',
+  })
+  assert.equal(msg.confirmations.length, 1)
+  const card = msg.confirmations[0]
+  assert.equal(card.id, 'cfm-1')
+  assert.equal(card.action, 'write_file')
+  assert.equal(card.path, 'notes.md')
+  assert.equal(card.targetExists, false)
+  assert.equal(card.token, 'tok-123')
+  assert.equal(card.status, 'pending')
+
+  applyChatEvent(msg, { type: 'confirmation_result', confirm_id: 'cfm-1', resolution: 'approved' })
+  assert.equal(card.status, 'approved')
+
+  applyChatEvent(msg, {
+    type: 'confirmation_request', confirm_id: 'cfm-2', run_id: 'run-1',
+    tool_call_id: 'w2', action: 'delete_file', path: 'old.md',
+    target_exists: true, expected_revision: 'abc', summary: '删除文件：old.md',
+    decision_token: 'tok-456',
+  })
+  applyChatEvent(msg, { type: 'done', workflow: { status: 'partial' }, answer: '未完成' })
+  assert.equal(msg.confirmations[1].status, 'expired', '运行结束后未决确认卡失效')
+})
