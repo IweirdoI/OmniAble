@@ -663,11 +663,21 @@ def extract_preferences(req: PreferenceExtractRequest) -> dict[str, Any]:
 def preference_profile(
     user_id: str,
     scene_id: str | None = None,
+    global_only: bool = False,
 ) -> dict[str, Any]:
     """结构化偏好画像（以权威长期存储为准）。"""
 
-    profile = orchestrator.get_preference_profile(user_id, scene_id=scene_id)
-    return {"user_id": user_id, "scene_id": scene_id, "profile": profile}
+    profile = orchestrator.get_preference_profile(
+        user_id,
+        scene_id=scene_id,
+        global_only=global_only,
+    )
+    return {
+        "user_id": user_id,
+        "scene_id": scene_id,
+        "global_only": global_only,
+        "profile": profile,
+    }
 
 
 @app.get("/preferences/{user_id}/history")

@@ -587,3 +587,66 @@ def test_staging_purge_endpoint_uses_configured_defaults(tmp_path) -> None:
     assert body["audit_deleted"] == 1
     assert "raw_cutoff" in body
     assert "audit_cutoff" in body
+
+
+def test_preference_profile_global_only_excludes_scene_features() -> None:
+    """全局画像不应混入其它场景的偏好，场景画像仍可取到场景值。"""
+
+    result = orchestrator.extract_preferences_from_text(
+        "办公场景下用 Excel 处理数据",
+        user_id="scope_user",
+        scene_id="office",
+    )
+    assert result.stored
+
+    global_response = client.get(
+        "/preferences/scope_user/profile",
+        params={"global_only": "true"},
+    )
+    office_response = client.get(
+        "/preferences/scope_user/profile",
+        params={"scene_id": "office"},
+    )
+
+    assert global_response.status_code == 200
+    assert office_response.status_code == 200
+    assert global_response.json()["global_only"] is True
+    assert "tool_selection.data_processing_tool" not in global_response.json()["profile"]["kv"]
+    assert (
+        office_response.json()["profile"]["kv"]["tool_selection.data_processing_tool"]
+        == "excel"
+    )
+
+
+def test_preference_profile_isolates_two_users_and_two_scenes() -> None:
+    """跨用户、跨场景的同 key 偏好分别可查，不互相串值。"""
+
+    for user_id in ("scope_user_a", "scope_user_b"):
+        assert orchestrator.extract_preferences_from_text(
+            "办公场景下用 Excel 处理数据",
+            user_id=user_id,
+            scene_id="office",
+        ).stored
+        assert orchestrator.extract_preferences_from_text(
+            "用 Python 跑数据分析",
+            user_id=user_id,
+            scene_id="data_analysis",
+        ).stored
+
+    for user_id in ("scope_user_a", "scope_user_b"):
+        office = client.get(
+            f"/preferences/{user_id}/profile",
+            params={"scene_id": "office"},
+        ).json()
+        analysis = client.get(
+            f"/preferences/{user_id}/profile",
+            params={"scene_id": "data_analysis"},
+        ).json()
+        assert (
+            office["profile"]["kv"]["tool_selection.data_processing_tool"]
+            == "excel"
+        )
+        assert (
+            analysis["profile"]["kv"]["tool_selection.data_processing_tool"]
+            == "python"
+        )
