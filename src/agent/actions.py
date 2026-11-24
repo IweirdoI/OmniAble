@@ -106,18 +106,6 @@ def exec_root() -> str:
 _exec_root = exec_root
 
 
-def _run_local_tool(name: str, args: dict) -> tuple[bool, str]:
-    """执行基础工具（service._tools 与旧测试使用的入口）。
-
-    参数校验查自动作目录，执行直接调用动作的 execute；参数非法时抛
-    ValueError，由 service._tools 统一归类为 invalid_arguments。
-    """
-    action = _ACTION_BY_NAME.get(name)
-    if action is None:
-        raise ValueError("invalid tool")
-    return action.execute(**action.validate(args))
-
-
 def mutating_actions() -> frozenset[str]:
     """变更类动作名集合（过去硬编码在 service.py 的 {'write_file', ...}）。"""
     return frozenset(action.name for action in ACTIONS if action.mutates)
@@ -702,11 +690,15 @@ def get_action(name: str) -> Action | None:
 
 
 def actions_available(ctx: ActionContext) -> tuple[Action, ...]:
-    """按能力开关返回当前可用的动作序列（顺序与原 service.py 注册顺序一致）。"""
+    """按能力开关返回当前可用的动作序列（顺序与原 service.py 注册顺序一致）。
+
+    search_memory 的回调（search_memory/memory_payload）在执行时才需要，
+    注册模型工具列表时不要求已注入。
+    """
     available: list[Action] = []
     for action in ACTIONS:
         if action.name == "search_memory":
-            if ctx.use_memory and ctx.tools_enabled and ctx.search_memory is not None:
+            if ctx.use_memory and ctx.tools_enabled:
                 available.append(action)
         elif action.name == "exec_terminal":
             if ctx.exec_enabled and ctx.tools_enabled:
@@ -756,23 +748,29 @@ def dispatch_action(name: str, args: dict, ctx: ActionContext) -> tuple[bool, st
     if action not in actions_available(ctx):
         return False, "不支持的工具：未获允许或当前不可用。", "tool_unavailable"
     try:
+        kwargs = action.validate(args)
         if action.name == "search_memory":
-            kwargs = action.validate(args)
-            assert ctx.search_memory is not None and ctx.memory_payload is not None
+            # 契约：与其他动作一致返回三元组 (ok, content, error_code)。
+            if ctx.search_memory is None or ctx.memory_payload is None:
+                return False, "记忆检索上下文未注入，无法执行。", "tool_unavailable"
             hits = ctx.search_memory(kwargs["query"])
-            return ctx.memory_payload(hits), None
-        if hasattr(action, "budget_key") and action.budget_key == "exec":
-            kwargs = action.validate(args)
-            remaining = (ctx.timeout_limit if ctx.timeout_limit is not None else _EXEC_DEFAULT_TIMEOUT)
-            if kwargs.get("timeout") is not None:
-                remaining = min(remaining, kwargs["timeout"])
+            ok, content = ctx.memory_payload(hits)
+        elif action.budget_key == "exec":
+            # 请求级时钟：超时 = 动作自身上限与调用方传入的剩余时间较小值
+            # （调用方在 ActionContext.timeout_limit 里传 clamp 后的剩余秒数）。
+            remaining = (kwargs.get("timeout") or _EXEC_DEFAULT_TIMEOUT)
+            if ctx.timeout_limit is not None:
+                remaining = min(remaining, ctx.timeout_limit)
             if remaining < 1:
                 return False, "执行超时，已停止。", "timeout"
             ok, content = action.execute(kwargs["command"], int(max(1, remaining)), require_success=True)
-            return ok, content, None
-        kwargs = action.validate(args)
-        ok, content = action.execute(**kwargs)
-        return ok, content, None
+        elif action.name == "web_fetch" and ctx.timeout_limit is not None:
+            # 抓取超时同样受请求剩余时间约束（_web_fetch 内部再 clamp 到自身上限）
+            ok, content = action.execute(kwargs["url"], float(ctx.timeout_limit))
+        else:
+            ok, content = action.execute(**kwargs)
+        # 执行层失败兜底：与原 service._tools 的 error or "tool_failed" 口径一致
+        return ok, content, ("tool_failed" if not ok else None)
     except ValueError as exc:
         _ = exc
         return False, "工具参数无效，未完成操作。", "invalid_arguments"

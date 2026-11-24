@@ -411,7 +411,6 @@ from src.agent.actions import (  # noqa: E402
     _edit_file,
     _delete_file,
     _web_fetch,
-    _run_local_tool,
     _WEB_FETCH_TIMEOUT,
     _EXEC_MAX_TIMEOUT,
     _EXEC_DEFAULT_TIMEOUT,
@@ -569,17 +568,14 @@ class MemoryAgent:
         enabled = (self.model.tools_enabled and state["rounds"] < self.budget.max_tool_rounds
                    and not (ctx and (ctx.partial or ctx.tool_calls >= self.budget.max_total_tool_calls
                             or ctx.consecutive_tool_failures >= self.budget.max_consecutive_tool_failures)))
-        # 按可用性动态注册工具：记忆检索需要开启记忆，终端执行需要单独开关
-        tools = []
-        if enabled and state["request"].use_memory:
-            tools.append(SEARCH_TOOL)
-        if enabled and self.exec_enabled:
-            tools.append(EXEC_TOOL)
-        if enabled:  # 基础工具随主开关开放
-            tools.extend([READ_FILE_TOOL, LIST_DIR_TOOL, DATETIME_TOOL, CALCULATE_TOOL,
-                          SEARCH_FILES_TOOL, SEARCH_CONTENT_TOOL, WRITE_FILE_TOOL, EDIT_FILE_TOOL, DELETE_FILE_TOOL])
-        if enabled and self.web_enabled:
-            tools.append(WEB_FETCH_TOOL)
+        # 按可用性动态注册工具：与执行共用同一动作目录（TASK-021）——
+        # search_memory 需开启记忆，exec/web 各自独立开关，顺序与原注册一致。
+        tools = tools_for_model(_ActionContext(
+            tools_enabled=bool(enabled),
+            use_memory=state["request"].use_memory,
+            exec_enabled=self.exec_enabled,
+            web_enabled=self.web_enabled,
+        ))
         # Check at the final outbound boundary, including history, tool results,
         # and model-generated tool arguments carried into subsequent rounds.
         security = getattr(self.memory, "security", None)
@@ -697,6 +693,32 @@ class MemoryAgent:
         ctx = self._ctx
         context_warnings = list(state["context_warnings"])
         ctx.current_rounds += 1
+
+        # 统一动作目录（TASK-021）：模型 tool_call 与 UI/API 直调共用
+        # dispatch_action。记忆检索的请求级状态（items/tool_memory_ids/
+        # TOOL_WARNING）经回调在闭包内更新，语义与旧 if/elif 分支一致。
+        def _memory_search(query: str):
+            return self._search(state["request"], query)
+
+        def _memory_payload(hits):
+            items.update({item["id"]: item for item in hits})
+            records, truncated = memory_records(state["preference_profile"], hits,
+                state["request"].scene_id, only_matched_preferences=True)
+            selected = select_memory(records, self.budget.tool_result_tokens)
+            tool_memory_ids.update(memory_source_ids(selected))
+            if (truncated or len(selected) < len(records)) and TOOL_WARNING not in context_warnings:
+                context_warnings.append(TOOL_WARNING)
+            return True, memory_json(selected)
+
+        ctx_action = _ActionContext(
+            use_memory=state["request"].use_memory,
+            tools_enabled=self.model.tools_enabled,
+            exec_enabled=self.exec_enabled,
+            web_enabled=self.web_enabled,
+            timeout_limit=ctx.remaining_seconds(),
+            search_memory=_memory_search,
+            memory_payload=_memory_payload,
+        )
         for call in state["tool_calls"]:
             ctx.check("before_tool")
             name = call.get("function", {}).get("name", "?")
@@ -718,7 +740,7 @@ class MemoryAgent:
                 else:
                     fingerprint = hashlib.sha256(json.dumps([name, args], sort_keys=True,
                         ensure_ascii=False).encode()).hexdigest()
-                    mutates = name in {"write_file", "edit_file", "delete_file", "exec_terminal"}
+                    mutates = name in mutating_actions()
                     if mutates and fingerprint in ctx.mutations:
                         error, content = "duplicate_mutation", "本请求已尝试过相同变更，不会自动重复执行。"
                     else:
@@ -733,37 +755,11 @@ class MemoryAgent:
                         executed = True
                         if mutates:
                             ctx.mutations.add(fingerprint)
-                        if name == "search_memory" and state["request"].use_memory and self.model.tools_enabled:
-                            query = args.get("query")
-                            if set(args) != {"query"} or not isinstance(query, str) or not 1 <= len(query.strip()) <= 2000:
-                                raise ValueError("invalid query")
-                            hits = self._search(state["request"], query)
-                            items.update({item["id"]: item for item in hits})
-                            records, truncated = memory_records(state["preference_profile"], hits,
-                                state["request"].scene_id, only_matched_preferences=True)
-                            selected = select_memory(records, self.budget.tool_result_tokens)
-                            tool_memory_ids.update(memory_source_ids(selected))
-                            if (truncated or len(selected) < len(records)) and TOOL_WARNING not in context_warnings:
-                                context_warnings.append(TOOL_WARNING)
-                            ok, content = True, memory_json(selected)
-                        elif name == "exec_terminal" and self.exec_enabled and self.model.tools_enabled:
-                            command, timeout = args.get("command"), args.get("timeout")
-                            if (not isinstance(command, str) or not command.strip() or set(args) - {"command", "timeout"}
-                                    or timeout is not None and (type(timeout) is not int or not 1 <= timeout <= _EXEC_MAX_TIMEOUT)):
-                                raise ValueError("invalid command")
-                            remaining = ctx.clamp_timeout(timeout or _EXEC_DEFAULT_TIMEOUT)
-                            if remaining < 1:
-                                raise RunTimedOut()
-                            ok, content = _exec_terminal(command, int(remaining), require_success=True)
-                        elif name in _LOCAL_TOOL_NAMES and self.model.tools_enabled:
-                            ok, content = _run_local_tool(name, args)
-                        elif name == "web_fetch" and self.web_enabled and self.model.tools_enabled:
-                            url = args.get("url")
-                            if set(args) != {"url"} or not isinstance(url, str) or not url.strip():
-                                raise ValueError("invalid url")
-                            ok, content = _web_fetch(url, ctx.clamp_timeout(_WEB_FETCH_TIMEOUT))
-                        else:
-                            error, content = "tool_unavailable", "不支持的工具：未获允许或当前不可用。"
+                        ok, content, dispatch_error = dispatch_action(name, args, ctx_action)
+                        if dispatch_error == "timeout":
+                            raise RunTimedOut()
+                        if dispatch_error:
+                            error = dispatch_error
             except (KeyError, TypeError, ValueError):
                 error, content = "invalid_arguments", "工具参数无效，未完成操作。"
             except OSError:

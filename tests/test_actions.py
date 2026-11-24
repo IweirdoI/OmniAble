@@ -115,15 +115,16 @@ def test_dispatch_respects_capability_gates(tmp_path, monkeypatch) -> None:
     assert ok is False and error == "tool_unavailable"
 
 
-def test_local_tool_wrapper_keeps_legacy_contract(tmp_path, monkeypatch) -> None:
-    """service._run_local_tool 兼容包装：未知动作抛 ValueError，合法动作等价。"""
+def test_dispatch_rejects_unknown_and_matches_direct_call(tmp_path, monkeypatch) -> None:
+    """未知动作经 dispatch 结构化拒绝；合法动作与直接调用等价。"""
     monkeypatch.setenv("AGENT_EXEC_CWD", str(tmp_path))
     (tmp_path / "f.txt").write_text("内容", encoding="utf-8")
-    with pytest.raises(ValueError):
-        A._run_local_tool("not_a_tool", {})
-    ok_wrapper, text_wrapper = A._run_local_tool("read_file", {"path": "f.txt"})
+    ctx = ActionContext(tools_enabled=True)
+    ok, content, error = dispatch_action("not_a_tool", {}, ctx)
+    assert ok is False and error == "tool_unavailable"
+    ok_d, text_d, err_d = dispatch_action("read_file", {"path": "f.txt"}, ctx)
     ok_direct, text_direct = A._read_file("f.txt")
-    assert ok_wrapper == ok_direct is True and text_wrapper == text_direct
+    assert ok_d == ok_direct is True and text_d == text_direct and err_d is None
 
 
 def test_exec_terminal_direct_entry_requires_allowlist(tmp_path, monkeypatch) -> None:
@@ -133,5 +134,80 @@ def test_exec_terminal_direct_entry_requires_allowlist(tmp_path, monkeypatch) ->
     ok, content, error = dispatch_action(
         "exec_terminal", {"command": "git status"}, ctx)
     assert ok is False
-    assert error is None  # 工具自身返回 (False, 说明)，非参数错误
+    assert error == "tool_failed"  # 工具自身拒绝：(False, 说明) 兜底错误码
     assert "未获主机预先许可" in content
+
+
+def test_search_memory_dispatch_returns_triple() -> None:
+    """search_memory 经 dispatch 返回与其它动作一致的三元组（复审项 3）。"""
+    ctx = ActionContext(
+        tools_enabled=True, use_memory=True,
+        search_memory=lambda query: [{"id": "m-1", "content": query, "score": 0.9}],
+        memory_payload=lambda hits: (True, '[{"id": "m-1"}]'),
+    )
+    ok, content, error = dispatch_action("search_memory", {"query": "偏好"}, ctx)
+    assert ok is True and error is None
+    assert content == '[{"id": "m-1"}]'
+    # 回调缺失时结构化拒绝，不抛 AssertionError 出破坏调用方解包
+    ok2, _, error2 = dispatch_action(
+        "search_memory", {"query": "偏好"},
+        ActionContext(tools_enabled=True, use_memory=True))
+    assert ok2 is False and error2 == "tool_unavailable"
+
+
+# ---------------------------------------------------------------------------
+# 桌面/API 直调入口（api/workspace.py）：与模型同目录、同开关、等价结果
+# ---------------------------------------------------------------------------
+
+def test_workspace_actions_api_equivalence_and_rejections(tmp_path, monkeypatch):
+    """同一只读动作经 API 与 dispatch 等价；缺宿主凭据/跨工作区在执行前拒绝。"""
+    from fastapi.testclient import TestClient
+    from api.server import app
+
+    monkeypatch.setenv("AGENT_EXEC_CWD", str(tmp_path))
+    monkeypatch.setenv("AGENT_ENABLE_WORKSPACE", "1")
+    (tmp_path / "note.txt").write_text("动作目录正文", encoding="utf-8")
+
+    with TestClient(app) as client:
+        # 工具主开关关闭：与模型一致，动作 API 整体拒绝
+        monkeypatch.setenv("AGENT_ENABLE_TOOLS", "0")
+        listing = client.get("/workspace/actions").json()
+        assert listing["enabled"] is False and listing["actions"] == []
+        assert client.post("/workspace/actions/calculate",
+                           json={"arguments": {"expression": "1+1"}}).status_code == 404
+
+        # 开关开启：目录列出 9 个基础工具（无 search/exec/web/mutating）
+        monkeypatch.setenv("AGENT_ENABLE_TOOLS", "1")
+        names = {a["name"] for a in client.get("/workspace/actions").json()["actions"]}
+        assert "calculate" in names and "read_file" in names
+        assert "search_memory" not in names and "exec_terminal" not in names
+        assert "write_file" not in names
+
+        # 等价性：API 与 dispatch_action 直调同一动作，结果一致
+        direct_ok, direct_text, _ = dispatch_action(
+            "read_file", {"path": "note.txt"}, ActionContext(tools_enabled=True))
+        resp = client.post("/workspace/actions/read_file",
+                           json={"arguments": {"path": "note.txt"}})
+        assert resp.status_code == 200 and direct_ok is True
+        assert resp.json()["result"] == direct_text
+
+        # 拒绝场景 1：缺少宿主凭据（宿主专属动作，拒绝理由不随开关波动）→ 403
+        assert client.post("/workspace/actions/write_file",
+                           json={"arguments": {"path": "x.txt", "content": "y"}}).status_code == 403
+        assert client.post("/workspace/actions/exec_terminal",
+                           json={"arguments": {"command": "git status"}}).status_code == 403
+        # search_memory 需要请求级记忆上下文 → 403
+        assert client.post("/workspace/actions/search_memory",
+                           json={"arguments": {"query": "x"}}).status_code == 403
+
+        # 拒绝场景 2：跨工作区（沙箱外路径）在执行前拒绝 → 400 + error_code
+        resp = client.post("/workspace/actions/read_file",
+                           json={"arguments": {"path": "../../outside.txt"}})
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["ok"] is False and body["error_code"] in {"tool_error", "invalid_arguments", "tool_failed"}
+        assert body["detail"], "跨工作区拒绝必须携带说明（如：路径受保护或超出工作区范围。）"
+
+        # 未知动作 → 404
+        assert client.post("/workspace/actions/rm_rf",
+                           json={"arguments": {}}).status_code == 404
