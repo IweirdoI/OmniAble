@@ -329,561 +329,93 @@ class ChatModel:
                 yield {"kind": "message", "message": message}
 
 
-SEARCH_TOOL = {"type": "function", "function": {
-    "name": "search_memory", "description": "按新的关键词补充检索当前用户的记忆。",
-    "parameters": {"type": "object", "properties": {"query": {"type": "string"}},
-                   "required": ["query"], "additionalProperties": False},
-}}
-
 # ---------------------------------------------------------------------------
-# exec_terminal：受控沙箱内的单条终端命令执行
+# 统一动作目录（TASK-021 / Issue #29）
 # ---------------------------------------------------------------------------
-# 说明：本工具在你的本机运行，等同于把命令行交给模型。为降低风险采用多重约束：
-#   1) 默认关闭，需显式设置 AGENT_ENABLE_EXEC_TOOL=1
-#   2) 不使用 shell（shell=False，shlex 分词），杜绝命令注入
-#   3) 拒绝命令链/管道/命令替换（; & | 反引号）
-#   4) 拒绝破坏性、提权、系统配置类命令（见 _EXEC_DENIED_EXE）
-#   5) 拒绝访问沙箱根目录之外的绝对路径与 .. 逃逸
-#   6) 强制超时 + 输出截断，避免拖死进程或撑爆上下文
-EXEC_TOOL = {"type": "function", "function": {
-    "name": "exec_terminal",
-    "description": (
-        "在受控沙箱目录（项目根目录）内执行一条终端命令，返回退出码与输出。"
-        "仅支持单条命令，不支持管道 |、重定向和命令链（;、&&）。"
-        "可用于列目录、查看文件、运行测试与脚本、查看 git 状态等。"
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "command": {"type": "string", "description": "要执行的单条命令，例如 git status"},
-            "timeout": {"type": "integer", "minimum": 1, "maximum": 60,
-                        "description": "超时秒数，默认 15，最大 60"},
-        },
-        "required": ["command"],
-        "additionalProperties": False,
-    },
-}}
+# 此前 12 个工具的 schema 常量、`_run_local_tool` 的逐分支校验与 `_tools`
+# 节点里的第二层 if/elif 执行分散在本文件三处。现在全部收敛到
+# src/agent/actions.py：每个动作一条 Action 记录（schema / 校验 / 执行 /
+# 能力开关 / 变更标记 / 工件核验），模型 tool_call 与 UI/API 直调共用
+# `dispatch_action` 唯一入口，保证同一动作经任一入口等价。
+# 下方旧名称是兼容别名，指向目录里的同一条目（测试与既有引用不变）。
+from src.agent.actions import (  # noqa: E402
+    ACTIONS,
+    EXEC_TERMINAL as EXEC_TOOL,
+    SEARCH_CONTENT as SEARCH_CONTENT_TOOL,
+    SEARCH_FILES as SEARCH_FILES_TOOL,
+    WEB_FETCH as WEB_FETCH_TOOL,
+    ActionContext as _ActionContext,
+    Action,
+    actions_available,
+    artifact_actions,
+    audit_entry,
+    dispatch_action,
+    exec_root,
+    get_action,
+    mutation_fingerprint,
+    mutating_actions,
+    tools_for_model,
+)
+from src.agent.actions import (  # noqa: E402  兼容别名（旧符号名）
+    LIST_DIRECTORY as LIST_DIR_TOOL,
+    GET_CURRENT_DATETIME as DATETIME_TOOL,
+    CALCULATE as CALCULATE_TOOL,
+    READ_FILE as READ_FILE_TOOL,
+    WRITE_FILE as WRITE_FILE,
+    EDIT_FILE as EDIT_FILE_TOOL,
+    DELETE_FILE as DELETE_FILE_TOOL,
+)
 
-# 明确拒绝的可执行文件名（小写、去扩展名）：破坏性 / 提权 / 系统配置 / 嵌套 shell
-_EXEC_DENIED_EXE = frozenset({
-    "rm", "rmdir", "del", "erase", "format", "mkfs", "dd",
-    "shutdown", "reboot", "halt", "poweroff", "init",
-    "sudo", "su", "doas", "runas",
-    "chmod", "chown", "chgrp", "passwd", "useradd", "userdel", "usermod",
-    "systemctl", "service", "kill", "killall", "pkill", "taskkill",
-    "reg", "regedit", "bcdedit", "diskpart", "takeown", "icacls",
-    "at", "schtasks", "wmic", "cmd", "powershell", "pwsh", "bash", "sh", "zsh",
-})
-_EXEC_MAX_TIMEOUT = 60
-_EXEC_DEFAULT_TIMEOUT = 15
-_EXEC_OUTPUT_LIMIT = 8000
+SEARCH_TOOL = get_action("search_memory").function_schema
+SEARCH_CONTENT_TOOL = get_action("search_content").function_schema
+READ_FILE_TOOL = get_action("read_file").function_schema
+SEARCH_FILES_TOOL = get_action("search_files").function_schema
+SEARCH_TOOL = SEARCH_TOOL
+# exec_terminal 需要请求级时钟：保留旧符号的运行时校验注释，实现见 actions.py
+EXEC_TERMINAL_ACTION = get_action("exec_terminal")
+EXEC_TERMINAL_SCHEMA = EXEC_TERMINAL_ACTION.function_schema
+EXEC_TOOL = EXEC_TERMINAL_SCHEMA
+# 兼容别名：旧字段语义保持不变
+# 随主开关开放的基础工具（原 9 个：只读 + 受控写入，均在沙箱内）；
+# search_memory / exec_terminal / web_fetch 各有独立开关，不在此列。
+_LOCAL_TOOL_NAMES = frozenset(
+    action.name for action in ACTIONS
+    if action.name not in {"search_memory", "exec_terminal", "web_fetch"})
+_MUTATING_WRITE_ACTIONS = frozenset({"write_file", "edit_file", "delete_file"})
+_MUTATING_ARTIFACT_ACTIONS = _MUTATING_WRITE_ACTIONS
 
+# 工具 schema 常量（旧名）：由目录条目生成，供 _model 注册与既有引用使用
+READ_FILE_TOOL = get_action("read_file").function_schema
+LIST_DIR_TOOL = get_action("list_directory").function_schema
+DATETIME_TOOL = get_action("get_current_datetime").function_schema
+CALCULATE_TOOL = get_action("calculate").function_schema
+WEB_FETCH_TOOL = get_action("web_fetch").function_schema
+SEARCH_FILES_TOOL = get_action("search_files").function_schema
+SEARCH_CONTENT_TOOL = get_action("search_content").function_schema
+WRITE_FILE_TOOL = get_action("write_file").function_schema
+EDIT_FILE_TOOL = get_action("edit_file").function_schema
+DELETE_FILE_TOOL = get_action("delete_file").function_schema
 
-def _exec_root() -> str:
-    """沙箱根目录，可用 AGENT_EXEC_CWD 覆盖，默认进程工作目录。"""
-    return os.path.abspath(os.getenv("AGENT_EXEC_CWD") or os.getcwd())
-
-
-def _strip_wrapping_quotes(token: str) -> str:
-    """去掉一对包裹性引号。
-
-    Windows 下 shlex 以 posix=False 分词时会保留反斜杠（路径必需），但不会剥离
-    引号，导致可执行文件带着字面引号而找不到，因此需要手动剥离外层引号。
-    """
-    if len(token) >= 2 and token[0] == token[-1] and token[0] in ('"', "'"):
-        return token[1:-1]
-    return token
-
-
-def _exec_terminal(command: str, timeout: int | None = None, *, require_success: bool = False) -> tuple[bool, str]:
-    """在沙箱根目录中执行单条命令（不使用 shell）。
-
-    Returns:
-        (是否真正执行了命令, 回传给模型的文本结果)
-    """
-    cmd = (command or "").strip()
-    if not cmd:
-        return False, "命令为空。"
-    if len(cmd) > 2000:
-        return False, "命令过长（上限 2000 字符）。"
-    for ch in (";", "&", "|", "`", "\n", "\r"):
-        if ch in cmd:
-            return False, "不支持命令链、管道与命令替换（; & | `），请改为单条命令。"
-
-    try:
-        parts = [_strip_wrapping_quotes(tok)
-                 for tok in shlex.split(cmd, posix=(os.name != "nt"))]
-    except ValueError:
-        return False, "命令解析失败：引号不匹配。"
-    if not parts or not parts[0]:
-        return False, "命令为空。"
-
-    exe = os.path.splitext(os.path.basename(parts[0]))[0].lower()
-    if exe in _EXEC_DENIED_EXE:
-        return False, f"命令 {exe!r} 属于危险命令，已拒绝执行。"
-
-    root = _exec_root()
-    for arg in parts[1:]:
-        if os.path.isabs(arg) or arg.startswith(".."):
-            try:
-                target = os.path.abspath(os.path.join(root, arg))
-                if os.path.commonpath([target, root]) != root:
-                    return False, f"拒绝访问沙箱目录之外的路径：{arg}"
-            except ValueError:
-                return False, f"拒绝访问沙箱目录之外的路径：{arg}"
-
-    seconds = _EXEC_DEFAULT_TIMEOUT if timeout is None else int(timeout)
-    # A cwd restriction and blacklist are not an OS sandbox. Accept only exact
-    # commands pre-authorized by the host, never arbitrary model-written code.
-    try:
-        approved = json.loads(os.getenv("AGENT_EXEC_ALLOWED_COMMANDS", "[]"))
-        if not isinstance(approved, list) or not all(isinstance(item, str) for item in approved):
-            raise ValueError("invalid allowlist")
-        allowed_parts = [[_strip_wrapping_quotes(t) for t in shlex.split(item, posix=(os.name != "nt"))] for item in approved]
-    except (ValueError, TypeError):
-        return False, "主机命令许可配置无效，已拒绝执行。"
-    if parts not in allowed_parts:
-        return False, "此命令未获主机预先许可，已拒绝执行。"
-    seconds = max(1, min(seconds, _EXEC_MAX_TIMEOUT))
-    try:
-        done = subprocess.run(
-            parts, cwd=root, timeout=seconds, shell=False,
-            capture_output=True, text=True, errors="replace",
-        )
-    except subprocess.TimeoutExpired:
-        return False, f"命令超时（超过 {seconds} 秒），已终止。"
-    except FileNotFoundError:
-        return False, f"找不到可执行文件：{parts[0]}"
-    except OSError as exc:
-        return False, f"执行失败：{exc}"
-
-    output = (done.stdout or "") + (done.stderr or "")
-    if len(output) > _EXEC_OUTPUT_LIMIT:
-        output = output[:_EXEC_OUTPUT_LIMIT] + "\n...（输出已截断）"
-    status = "成功" if done.returncode == 0 else f"失败（退出码 {done.returncode}）"
-    return (done.returncode == 0 if require_success else True), f"[沙箱根目录 {root}]\n执行{status}：{cmd}\n{output}".strip()
-
-
-# ---------------------------------------------------------------------------
-# 基础只读/计算工具：全部限制在沙箱根目录内（与 exec_terminal 同一沙箱）
-# ---------------------------------------------------------------------------
-READ_FILE_TOOL = {"type": "function", "function": {
-    "name": "read_file",
-    "description": "读取沙箱目录（项目根目录）内某个文本文件的内容并返回。用于查看源码、配置、日志等。只读，不会修改文件。",
-    "parameters": {"type": "object",
-                   "properties": {"path": {"type": "string", "description": "相对沙箱根目录的路径，例如 src/agent/service.py"}},
-                   "required": ["path"], "additionalProperties": False},
-}}
-LIST_DIR_TOOL = {"type": "function", "function": {
-    "name": "list_directory",
-    "description": "列出沙箱目录（项目根目录）内某个目录的内容，区分目录(d)/文件(f)。只读。",
-    "parameters": {"type": "object",
-                   "properties": {"path": {"type": "string", "description": "相对沙箱根目录的目录路径，留空或 '.' 表示根目录"}},
-                   "required": [], "additionalProperties": False},
-}}
-DATETIME_TOOL = {"type": "function", "function": {
-    "name": "get_current_datetime",
-    "description": "获取当前日期与时间（本地与 UTC），用于需要「今天/现在/几天后」等时间信息的场景。",
-    "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
-}}
-CALCULATE_TOOL = {"type": "function", "function": {
-    "name": "calculate",
-    "description": "安全地计算一个纯数值数学表达式，支持 + - * / % ** // 与括号。用于日期差值、数量统计等需要精确计算的场景。不支持变量或函数调用。",
-    "parameters": {"type": "object",
-                   "properties": {"expression": {"type": "string", "description": "数学表达式，例如 365 * 3 + (12 * 30)"}},
-                   "required": ["expression"], "additionalProperties": False},
-}}
-WEB_FETCH_TOOL = {"type": "function", "function": {
-    "name": "web_fetch",
-    "description": "抓取一个 http/https 网页的文本内容并返回（仅文本，自动截断）。用于查阅在线文档、网页资料等。需服务端开启联网。",
-    "parameters": {"type": "object",
-                   "properties": {"url": {"type": "string", "description": "以 http:// 或 https:// 开头的完整网址"}},
-                   "required": ["url"], "additionalProperties": False},
-}}
-SEARCH_FILES_TOOL = {"type": "function", "function": {
-    "name": "search_files",
-    "description": "在沙箱目录内按文件名模式递归搜索文件/目录，支持 glob（如 *.py、src/**/*.ts）。用于定位文件位置。只读。",
-    "parameters": {"type": "object",
-                   "properties": {
-                       "pattern": {"type": "string", "description": "glob 模式，例如 *.py 或 src/**/*.ts"},
-                       "path": {"type": "string", "description": "相对沙箱根目录的起始目录，留空或 '.' 表示根目录"}},
-                   "required": ["pattern"], "additionalProperties": False},
-}}
-SEARCH_CONTENT_TOOL = {"type": "function", "function": {
-    "name": "search_content",
-    "description": "在沙箱目录内的文件中按正则搜索文本内容（grep），可限定文件名 glob 与上下文行数。用于查找代码、配置中的关键字。只读。",
-    "parameters": {"type": "object",
-                   "properties": {
-                       "pattern": {"type": "string", "description": "正则表达式，要搜索的文本内容"},
-                       "path": {"type": "string", "description": "相对沙箱根目录的起始目录，留空或 '.' 表示根目录"},
-                       "glob": {"type": "string", "description": "文件名过滤（glob），例如 *.py，默认 *（全部文件）"},
-                       "context": {"type": "integer", "description": "匹配行上下各显示的上下文行数，默认 0，最大 5"},
-                       "case_sensitive": {"type": "boolean", "description": "是否区分大小写，默认 false（不区分）"}},
-                   "required": ["pattern"], "additionalProperties": False},
-}}
-WRITE_FILE_TOOL = {"type": "function", "function": {
-    "name": "write_file",
-    "description": "在沙箱目录内写入一个文本文件。默认仅创建新文件；若文件已存在会被拒绝，需设置 overwrite=true 覆盖。用于生成脚本、配置或草稿。",
-    "parameters": {"type": "object",
-                   "properties": {
-                       "path": {"type": "string", "description": "相对沙箱根目录的文件路径，例如 scripts/run.py"},
-                       "content": {"type": "string", "description": "要写入的完整文本内容"},
-                       "overwrite": {"type": "boolean", "description": "是否覆盖已存在的文件，默认 false"}},
-                   "required": ["path", "content"], "additionalProperties": False},
-}}
-EDIT_FILE_TOOL = {"type": "function", "function": {
-    "name": "edit_file",
-    "description": "在沙箱目录内某个已有的文本文件中，将 old_string 替换为 new_string。若 old_string 出现多次且未设置 replace_all，会被拒绝以避免歧义。用于精确修改文件。",
-    "parameters": {"type": "object",
-                   "properties": {
-                       "path": {"type": "string", "description": "相对沙箱根目录的已存在文件路径"},
-                       "old_string": {"type": "string", "description": "要被替换的原文本（不能为空）"},
-                       "new_string": {"type": "string", "description": "替换后的新文本"},
-                       "replace_all": {"type": "boolean", "description": "是否替换全部匹配，默认 false（仅替换首个，多次出现会报错）"}},
-                   "required": ["path", "old_string", "new_string"], "additionalProperties": False},
-}}
-
-DELETE_FILE_TOOL = {"type": "function", "function": {
-    "name": "delete_file", "description": "删除用户明确指定的工作区文本文件；保留恢复记录。不支持目录删除，不用于遗忘记忆。",
-    "parameters": {"type": "object", "properties": {"path": {"type": "string"}},
-                   "required": ["path"], "additionalProperties": False},
-}}
-
-# 随主开关开放的基础工具名称集合（只读 + 受控写入，均在沙箱内）
-_LOCAL_TOOL_NAMES = frozenset({
-    "read_file", "list_directory", "get_current_datetime", "calculate",
-    "search_files", "search_content", "write_file", "edit_file", "delete_file",
-})
-
-_READ_FILE_LIMIT = 8000
-_LIST_DIR_LIMIT = 200
-_WEB_FETCH_LIMIT = 8000
-_WEB_FETCH_TIMEOUT = 15
-_WEB_FETCH_MAX_BYTES = 256 * 1024
-_SEARCH_FILES_LIMIT = 200
-_SEARCH_CONTENT_LIMIT = 200
-_SEARCH_CONTENT_SCAN_LIMIT = 3000
-_WRITE_FILE_LIMIT = 64 * 1024
-
-
-def _sandbox_resolve(path: str, root: str) -> str | None:
-    try:
-        return str(Workspace(root).resolve(path))
-    except (WorkspaceError, OSError, ValueError):
-        return None
-
-
-def _read_file(path: str) -> tuple[bool, str]:
-    try:
-        item = get_workspace().read(path)
-        data = item['content']
-        if len(data) > _READ_FILE_LIMIT:
-            data = data[:_READ_FILE_LIMIT] + '\n...（文件内容已截断）'
-        return True, f"[文件 {item['path']}]\n{data}"
-    except (WorkspaceError, OSError) as exc:
-        return False, str(exc) if isinstance(exc, WorkspaceError) else '读取失败。'
-
-
-def _list_directory(path: str | None) -> tuple[bool, str]:
-    try:
-        item = get_workspace().listing(path or '.', limit=_LIST_DIR_LIMIT)
-        lines = [('d' if e['kind'] == 'directory' else 'f') + ' ' + e['name'] for e in item['entries']]
-        if item['next_offset'] is not None:
-            lines.append('...（目录已截断）')
-        return True, f"[目录 {path or '.'}]\n" + '\n'.join(lines)
-    except (WorkspaceError, OSError) as exc:
-        return False, str(exc) if isinstance(exc, WorkspaceError) else '列目录失败。'
-
-
-def _get_current_datetime() -> tuple[bool, str]:
-    import datetime as _dt
-    now = _dt.datetime.now()
-    utc = _dt.datetime.now(_dt.timezone.utc)
-    return True, (f"本地时间：{now.isoformat(timespec='seconds')}\n"
-                  f"UTC 时间：{utc.isoformat(timespec='seconds')}\n"
-                  f"时间戳：{int(now.timestamp())}")
-
-
-_ALLOWED_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)
-
-
-def _safe_eval_node(node):
-    if isinstance(node, ast.Expression):
-        return _safe_eval_node(node.body)
-    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-        return node.value
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-        return (+1 if isinstance(node.op, ast.UAdd) else -1) * _safe_eval_node(node.operand)
-    if isinstance(node, ast.BinOp) and isinstance(node.op, _ALLOWED_BINOPS):
-        left = _safe_eval_node(node.left)
-        right = _safe_eval_node(node.right)
-        if isinstance(node.op, ast.Add):
-            return left + right
-        if isinstance(node.op, ast.Sub):
-            return left - right
-        if isinstance(node.op, ast.Mult):
-            return left * right
-        if isinstance(node.op, ast.Div):
-            return left / right
-        if isinstance(node.op, ast.FloorDiv):
-            return left // right
-        if isinstance(node.op, ast.Mod):
-            return left % right
-        if isinstance(node.op, ast.Pow):
-            return left ** right
-    raise ValueError("不支持的表达式（仅允许数字与 + - * / % ** // 及括号）")
-
-
-def _calculate(expression: str) -> tuple[bool, str]:
-    expr = (expression or "").strip()
-    if not expr:
-        return False, "表达式为空。"
-    if len(expr) > 500:
-        return False, "表达式过长（上限 500 字符）。"
-    if any(ch.isalpha() for ch in expr):
-        return False, "仅支持数字与运算符（+ - * / % ** // 及括号），不允许变量或函数调用。"
-    try:
-        result = _safe_eval_node(ast.parse(expr, mode="eval"))
-    except (ValueError, SyntaxError, ZeroDivisionError) as exc:
-        return False, f"计算失败：{exc}"
-    if isinstance(result, float) and result.is_integer():
-        result = int(result)
-    return True, f"{expr} = {result}"
-
-
-def _web_fetch(url: str, timeout: float | None = None) -> tuple[bool, str]:
-    """抓取网页文本；timeout 取抓取上限与请求剩余时间的较小值。"""
-    url = (url or "").strip()
-    if not url:
-        return False, "URL 为空。"
-    if len(url) > 2000:
-        return False, "URL 过长。"
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return False, "仅支持 http/https 链接。"
-    from src.security.outbound import is_external_url_safe
-
-    if not is_external_url_safe(url):
-        return False, "出于安全策略，禁止访问内网、回环或链路本地地址（SSRF 防护）。"
-    effective = _WEB_FETCH_TIMEOUT if timeout is None else max(1.0, min(_WEB_FETCH_TIMEOUT, float(timeout)))
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "MOKOA-Agent/1.0"})
-        with urllib.request.urlopen(req, timeout=effective) as resp:
-            raw = resp.read(_WEB_FETCH_MAX_BYTES + 1)
-            ctype = resp.headers.get("Content-Type", "")
-    except (urllib.error.URLError, ValueError, OSError) as exc:
-        return False, f"抓取失败：{exc}"
-    if len(raw) > _WEB_FETCH_MAX_BYTES:
-        raw = raw[:_WEB_FETCH_MAX_BYTES]
-    try:
-        text = raw.decode("utf-8", errors="replace")
-    except Exception:
-        return False, "返回内容非文本，已跳过。"
-    text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
-    if len(text) > _WEB_FETCH_LIMIT:
-        text = text[:_WEB_FETCH_LIMIT] + "\n...（网页内容已截断）"
-    return True, f"[抓取 {url} | {ctype}]\n{text}"
-
-
-def _search_files(pattern: str, path: str | None = None) -> tuple[bool, str]:
-    """在沙箱内按 glob 模式递归搜索文件/目录。"""
-    root = _exec_root()
-    base = _sandbox_resolve(path or ".", root)
-    if base is None:
-        return False, f"拒绝访问沙箱目录之外的路径：{path}"
-    if not os.path.isdir(base):
-        return False, f"目录不存在：{path or '.'}"
-    pattern = (pattern or "").strip()
-    if not pattern:
-        return False, "搜索模式为空。"
-    if len(pattern) > 200:
-        return False, "搜索模式过长（上限 200 字符）。"
-    try:
-        matches = [os.path.relpath(str(p), root)
-                   for p in pathlib.Path(base).glob(pattern)
-                   if _sandbox_resolve(str(p), root) is not None][:_SEARCH_FILES_LIMIT+1]
-    except (ValueError, OSError) as exc:
-        return False, f"搜索失败：{exc}"
-    matches.sort()
-    truncated = len(matches) > _SEARCH_FILES_LIMIT
-    if truncated:
-        matches = matches[:_SEARCH_FILES_LIMIT]
-    if not matches:
-        return True, f"[搜索 {pattern}] 未找到匹配。"
-    text = "\n".join(matches)
-    if truncated:
-        text += f"\n...（仅显示前 {_SEARCH_FILES_LIMIT} 项）"
-    return True, f"[搜索 {pattern}]\n{text}"
-
-
-def _search_content(pattern: str, path: str | None = None, glob: str = "*",
-                    context: int = 0, case_sensitive: bool = False) -> tuple[bool, str]:
-    """在沙箱内按正则搜索文件内容（grep），可限定文件名 glob 与上下文行数。"""
-    root = _exec_root()
-    base = _sandbox_resolve(path or ".", root)
-    if base is None:
-        return False, f"拒绝访问沙箱目录之外的路径：{path}"
-    if not os.path.isdir(base):
-        return False, f"目录不存在：{path or '.'}"
-    pattern = (pattern or "").strip()
-    if not pattern:
-        return False, "搜索内容为空。"
-    if len(pattern) > 500:
-        return False, "搜索内容过长（上限 500 字符）。"
-    try:
-        regex = re.compile(pattern, 0 if case_sensitive else re.IGNORECASE)
-    except re.error as exc:
-        return False, f"正则表达式无效：{exc}"
-    glob = glob or "*"
-    context = max(0, min(int(context or 0), 5))
-    results: list[str] = []
-    scanned = 0
-    for dirpath, _dirnames, filenames in os.walk(base):
-        _dirnames[:] = [d for d in _dirnames if _sandbox_resolve(os.path.join(dirpath, d), root) is not None]
-        if len(results) >= _SEARCH_CONTENT_LIMIT:
-            break
-        for name in filenames:
-            if len(results) >= _SEARCH_CONTENT_LIMIT:
-                break
-            if not fnmatch.fnmatch(name, glob):
-                continue
-            full = os.path.join(dirpath, name)
-            rel = os.path.relpath(full, root)
-            if _sandbox_resolve(full, root) is None:
-                continue
-            try:
-                with open(full, "rb") as fb:
-                    if b"\x00" in fb.read(1024):
-                        continue  # 跳过二进制文件
-                with open(full, "r", encoding="utf-8", errors="replace") as fh:
-                    lines = fh.read(_WRITE_FILE_LIMIT).splitlines()
-            except OSError:
-                continue
-            scanned += 1
-            if scanned > _SEARCH_CONTENT_SCAN_LIMIT:
-                break
-            for i, line in enumerate(lines):
-                if regex.search(line):
-                    lo = max(0, i - context)
-                    hi = min(len(lines), i + context + 1)
-                    snippet = []
-                    for j in range(lo, hi):
-                        marker = ">" if j == i else " "
-                        snippet.append(f"{marker}{j + 1}: {lines[j]}")
-                    results.append(f"{rel}\n  " + "\n  ".join(snippet))
-                    if len(results) >= _SEARCH_CONTENT_LIMIT:
-                        break
-    if not results:
-        return True, f"[搜索内容 {pattern}] 未找到匹配。"
-    text = "\n".join(results)
-    if len(results) >= _SEARCH_CONTENT_LIMIT:
-        text += f"\n...（仅显示前 {_SEARCH_CONTENT_LIMIT} 项）"
-    return True, f"[搜索内容 {pattern} | glob={glob} | 扫描 {scanned} 个文件]\n{text}"
-
-
-def _write_file(path: str, content: str, overwrite: bool = False) -> tuple[bool, str]:
-    try:
-        workspace = get_workspace()
-        target = workspace.resolve(path)
-        expected = None
-        if target.exists():
-            if not overwrite:
-                return False, '文件已存在，如需覆盖请设置 overwrite=true，或修改写入路径。'
-            expected = workspace.read(path)['revision']
-        workspace.write(path, content, expected)
-        return True, f'已写入 {path}（{len(content)} 字符）。'
-    except (WorkspaceError, OSError) as exc:
-        return False, str(exc) if isinstance(exc, WorkspaceError) else '写入失败。'
-
-
-def _edit_file(path: str, old_string: str, new_string: str,
-               replace_all: bool = False) -> tuple[bool, str]:
-    if not isinstance(old_string, str) or not old_string:
-        return False, 'old_string 不能为空。'
-    if not isinstance(new_string, str):
-        return False, 'new_string 必须是字符串。'
-    try:
-        workspace = get_workspace()
-        item = workspace.read(path)
-        data = item['content']
-        count = data.count(old_string)
-        if not count:
-            return False, '未在文件中找到 old_string。'
-        if count > 1 and not replace_all:
-            return False, f'old_string 出现 {count} 次，存在歧义；请提供更具体的字符串，或设置 replace_all=true。'
-        content = data.replace(old_string, new_string) if replace_all else data.replace(old_string, new_string, 1)
-        workspace.write(path, content, item['revision'])
-        return True, f'已更新 {path}（替换 {count if replace_all else 1} 处）。'
-    except (WorkspaceError, OSError) as exc:
-        return False, str(exc) if isinstance(exc, WorkspaceError) else '更新失败。'
-
-
-def _delete_file(path: str) -> tuple[bool, str]:
-    try:
-        workspace = get_workspace()
-        item = workspace.read(path)
-        workspace.delete(path, item['revision'])
-        return True, f'已删除文件 {item["path"]}；可从侧栏变更记录恢复。'
-    except (WorkspaceError, OSError) as exc:
-        return False, str(exc) if isinstance(exc, WorkspaceError) else '删除失败。'
-
-
-def _run_local_tool(name: str, args: dict) -> tuple[bool, str]:
-    """执行基础工具，传播底层 (ok, content) 成功标志（参数非法时抛 ValueError）。
-
-    ok 必须来自底层函数的真实结果，不能用错误文本猜测（设计 §4）。
-    """
-    if name == "delete_file":
-        if set(args) != {"path"} or not isinstance(args["path"], str):
-            raise ValueError("invalid tool")
-        return _delete_file(args["path"])
-    if name == "read_file":
-        path = args.get("path")
-        if not isinstance(path, str) or not path.strip() or set(args) != {"path"}:
-            raise ValueError("invalid tool")
-        return _read_file(path)
-    if name == "list_directory":
-        if set(args) - {"path"}:
-            raise ValueError("invalid tool")
-        return _list_directory(args.get("path"))
-    if name == "get_current_datetime":
-        if args:
-            raise ValueError("invalid tool")
-        return _get_current_datetime()
-    if name == "calculate":
-        expr = args.get("expression")
-        if not isinstance(expr, str) or not expr.strip() or set(args) != {"expression"}:
-            raise ValueError("invalid tool")
-        return _calculate(expr)
-    if name == "search_files":
-        pattern = args.get("pattern")
-        if not isinstance(pattern, str) or not pattern.strip() or set(args) - {"pattern", "path"}:
-            raise ValueError("invalid tool")
-        return _search_files(pattern, args.get("path"))
-    if name == "search_content":
-        pattern = args.get("pattern")
-        if not isinstance(pattern, str) or not pattern.strip():
-            raise ValueError("invalid tool")
-        if set(args) - {"pattern", "path", "glob", "context", "case_sensitive"}:
-            raise ValueError("invalid tool")
-        return _search_content(
-            pattern, args.get("path"), args.get("glob", "*"),
-            args.get("context", 0), bool(args.get("case_sensitive", False)))
-    if name == "write_file":
-        path = args.get("path")
-        content = args.get("content")
-        if not isinstance(path, str) or not isinstance(content, str) or set(args) - {"path", "content", "overwrite"}:
-            raise ValueError("invalid tool")
-        return _write_file(path, content, bool(args.get("overwrite", False)))
-    if name == "edit_file":
-        path = args.get("path")
-        old_string = args.get("old_string")
-        new_string = args.get("new_string")
-        if not isinstance(path, str) or not isinstance(old_string, str) or not isinstance(new_string, str) \
-                or set(args) - {"path", "old_string", "new_string", "replace_all"}:
-            raise ValueError("invalid tool")
-        return _edit_file(path, old_string, new_string, bool(args.get("replace_all", False)))
-    raise ValueError("invalid tool")
+# 执行函数与沙箱根目录/超时常量：实现已迁至 actions.py，这里按旧名重导出
+from src.agent.actions import (  # noqa: E402
+    _exec_root,
+    _exec_terminal,
+    _read_file,
+    _list_directory,
+    _get_current_datetime,
+    _calculate,
+    _safe_eval_node,
+    _search_files,
+    _search_content,
+    _write_file,
+    _edit_file,
+    _delete_file,
+    _web_fetch,
+    _run_local_tool,
+    _WEB_FETCH_TIMEOUT,
+    _EXEC_MAX_TIMEOUT,
+    _EXEC_DEFAULT_TIMEOUT,
+)
 
 
 SYSTEM = """你是麒忆智脑（MOKOA）的记忆助理，不是通用聊天机器人，也不是 ChatGPT 产品发布说明。
@@ -1464,3 +996,10 @@ class MemoryAgent:
             # Cooperative cancellation, without blocking the event loop or releasing
             # the worker's slot before an uninterruptible call actually exits.
             ctx.cancel("client_disconnected")
+
+
+# ---------------------------------------------------------------------------
+# 兼容别名（TASK-021）：tests/test_agent.py、tests/test_workspace.py、
+# tests/test_outbound_privacy.py 仍按旧名导入这些实现函数。
+# 实现已迁至 src/agent/actions.py，上方统一重导出，此处不再重复导入。
+# ---------------------------------------------------------------------------
