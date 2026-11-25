@@ -19,6 +19,10 @@ from src.common.config import load_default_config
 
 (ROOT / 'tmp').mkdir(exist_ok=True)
 out = Path(tempfile.mkdtemp(prefix='frontend-ingestion-', dir=ROOT / 'tmp'))
+os.environ['OS_AGENT_SESSIONS_DB'] = str(out / 'sessions.db')
+# The three suites share one loopback IP and burst above the production
+# limit. Rate limiting is covered separately by the API tests.
+os.environ['API_RATE_LIMIT_MAX'] = '1000'
 cfg = load_default_config()
 cfg['storage']['staging_sqlite'] = str(out / 'staging.db')
 cfg['storage']['staging_auto_purge_interval_seconds'] = 0

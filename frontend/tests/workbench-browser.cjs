@@ -3,10 +3,11 @@
 //
 //   PLAYWRIGHT_MODULE=/path/to/playwright node frontend/tests/workbench-browser.cjs
 //
-// PLAYWRIGHT_MODULE can point at an existing Playwright installation. The script
-// uses the locally installed Edge channel and does not install dependencies.
+// PLAYWRIGHT_MODULE can point at an existing Playwright installation. Windows
+// defaults to Edge; other platforms use Playwright Chromium.
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const assert = require('node:assert/strict')
+const { captureFailure, launchOptions } = require('./browser-artifacts.cjs')
 
 const base = new URL(process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5174')
 base.searchParams.set('view', 'chat')
@@ -22,11 +23,12 @@ const waitForLive = async (page) => {
 }
 
 ;(async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true })
+  const browser = await chromium.launch(launchOptions())
   const errors = []
+  let page = null
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
-    const page = await context.newPage()
+    page = await context.newPage()
     const profileRequests = []
     page.setDefaultTimeout(15000)
     page.on('request', request => {
@@ -342,6 +344,9 @@ const waitForLive = async (page) => {
 
     assert.deepEqual(errors, [])
     console.log('All workbench browser checks passed.')
+  } catch (error) {
+    await captureFailure(page, 'workbench', error)
+    throw error
   } finally {
     await browser.close()
   }

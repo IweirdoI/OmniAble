@@ -1,6 +1,6 @@
 # GitHub Actions CI for 麒忆智脑 (MOKOA) OS Agent Memory system
-# Runs the Python test suite on every push / PR to main.
-# Mirrors the local dev setup: Python 3.12 + project venv + requirements.txt.
+# Runs Python tests, frontend unit/build checks and the isolated browser suite
+# on every push / PR to main or master.
 
 name: CI
 
@@ -27,6 +27,55 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
+  browser:
+    # Keep the browser system dependencies on the tested Ubuntu release.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install API test dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install -r requirements-windows.txt
+
+      - name: Install frontend and browser dependencies
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run browser regression
+        run: |
+          source .venv/bin/activate
+          bash frontend/tests/run-browser-ci.sh
+
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-browser-artifacts
+          path: frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   test:
     runs-on: ubuntu-latest
