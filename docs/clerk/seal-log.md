@@ -13,3 +13,4 @@
 - 20261125-085806 Linnea <2312809203@qq.com>: Merge task records verified against both parents
 - 20261125-090234 Linnea <2312809203@qq.com>: Merge task records verified against both parents
 - 20261125-090718 Linnea <2312809203@qq.com>: Import submitted TASK-020 claim and review from PR #54
+- 20261125-194520 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: TASK-025 认领与开工记录：分支 hxf/task-025-offline-profile，offline_profile.py 能力清单/出站裁决/审计已实现，回归 9 项，全量 927 passed

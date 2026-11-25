@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 from pathlib import Path
@@ -31,6 +32,8 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
+    owner_pid INTEGER,
+    confirmed_steps_json TEXT NOT NULL DEFAULT '[]',
     session_id TEXT,
     idempotency_key TEXT,
     route TEXT NOT NULL DEFAULT 'chat',
@@ -44,11 +47,12 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 CREATE INDEX IF NOT EXISTS idx_runs_user ON runs(user_id, updated_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idem
-    ON runs(idempotency_key) WHERE idempotency_key IS NOT NULL;
+    ON runs(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 """
 
 _ACTIVE = frozenset({"pending", "running"})
-_TERMINAL = frozenset({"completed", "failed", "partial", "cancelled", "timed_out", "interrupted"})
+_TERMINAL = frozenset({"completed", "failed", "partial", "cancelled", "timed_out",
+                       "interrupted", "needs_review"})
 
 
 def _now() -> str:
@@ -73,7 +77,16 @@ class RunStore:
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """v1 → v2：补 owner_pid / confirmed_steps_json 列（旧库平滑升级）。"""
+        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(runs)").fetchall()}
+        if "owner_pid" not in cols:
+            self._conn.execute("ALTER TABLE runs ADD COLUMN owner_pid INTEGER")
+        if "confirmed_steps_json" not in cols:
+            self._conn.execute("ALTER TABLE runs ADD COLUMN confirmed_steps_json TEXT NOT NULL DEFAULT '[]'")
 
     def close(self) -> None:
         with self._lock:
@@ -93,8 +106,8 @@ class RunStore:
         with self._lock, self._conn:
             if idempotency_key:
                 row = self._conn.execute(
-                    "SELECT * FROM runs WHERE idempotency_key = :k",
-                    {"k": idempotency_key}).fetchone()
+                    "SELECT * FROM runs WHERE user_id = :u AND idempotency_key = :k",
+                    {"u": user_id, "k": idempotency_key}).fetchone()
                 if row is not None:
                     if row["status"] in _ACTIVE:
                         return dict(row), True
@@ -102,10 +115,10 @@ class RunStore:
                     # 唯一索引保留原键行，新行用带后缀的键值
                     idempotency_key = f"{idempotency_key}#retry:{ts}"
             self._conn.execute(
-                "INSERT OR IGNORE INTO runs(id, user_id, session_id, idempotency_key,"
-                " route, status, created_at, updated_at)"
-                " VALUES(:id, :u, :s, :k, :r, 'pending', :ts, :ts)",
-                {"id": run_id, "u": user_id, "s": session_id,
+                "INSERT OR IGNORE INTO runs(id, user_id, owner_pid, session_id,"
+                " idempotency_key, route, status, created_at, updated_at)"
+                " VALUES(:id, :u, :pid, :s, :k, :r, 'pending', :ts, :ts)",
+                {"id": run_id, "u": user_id, "pid": os.getpid(), "s": session_id,
                  "k": idempotency_key, "r": route, "ts": ts})
             row = self._conn.execute(
                 "SELECT * FROM runs WHERE id = :id", {"id": run_id}).fetchone()
@@ -144,7 +157,11 @@ class RunStore:
                    stop_reason: str | None = None, latency_ms: float | None = None,
                    steps: list[dict] | None = None,
                    artifacts: list[dict] | None = None) -> bool:
-        """进入终态；status 必须是可核查的真实结果（不含 success 之类杜撰值）。"""
+        """进入终态；status 必须是可核查的真实结果（不含 success 之类杜撰值）。
+
+        终态禁止回写：已是终态的运行再次 finish → 返回 False（不覆盖），
+        修复「晚到的结果还能改写中断状态」。
+        """
         if status not in _TERMINAL:
             raise ValueError(f"非法终态：{status}")
         sets = ["status=:st", "updated_at=:ts", "stop_reason=:reason",
@@ -159,9 +176,72 @@ class RunStore:
             params["arts"] = json.dumps(artifacts, ensure_ascii=False)
         with self._lock, self._conn:
             cur = self._conn.execute(
-                f"UPDATE runs SET {', '.join(sets)} WHERE id=:id AND user_id=:u",
+                f"UPDATE runs SET {', '.join(sets)} WHERE id=:id AND user_id=:u"
+                " AND status IN " + "(" + ",".join(
+                    f"'{t}'" for t in sorted(_ACTIVE)) + ")",
                 params)
             return cur.rowcount > 0
+
+    def cancel_run(self, user_id: str, run_id: str, *,
+                   reason: str = "user_stop") -> dict[str, Any] | None:
+        """取消入口：活跃运行 → cancelled（不启动新步骤）；已终态不可取消。
+
+        Returns:
+            {"cancelled": bool, "status": 当前状态}；运行不存在/跨用户 → None。
+        """
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT status FROM runs WHERE id=:id AND user_id=:u",
+                {"id": run_id, "u": user_id}).fetchone()
+            if row is None:
+                return None
+            if row["status"] not in _ACTIVE:
+                return {"cancelled": False, "status": row["status"]}
+            self._conn.execute(
+                "UPDATE runs SET status='cancelled', stop_reason=:reason,"
+                " updated_at=:ts WHERE id=:id AND user_id=:u",
+                {"reason": reason, "ts": _now(), "id": run_id, "u": user_id})
+            return {"cancelled": True, "status": "cancelled"}
+
+    def mark_needs_review(self, user_id: str, run_id: str, *,
+                          reason: str = "external_result_unknown") -> bool:
+        """外部提交后取不到回执 → 转人工核对（不冒充成功/失败）。
+
+        仅活跃运行可转：已终态（completed/failed 等）的结果已是事实，
+        不改写；needs_review 本身也是终态（一次转入，不抖动）。
+        """
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE runs SET status='needs_review', stop_reason=:reason,"
+                " updated_at=:ts WHERE id=:id AND user_id=:u AND status IN ("
+                + ",".join(f"'{t}'" for t in sorted(_ACTIVE)) + ")",
+                {"reason": reason, "ts": _now(), "id": run_id, "u": user_id})
+            return cur.rowcount > 0
+
+    def mark_step_confirmed(self, user_id: str, run_id: str, step_id: str) -> bool:
+        """登记已确认步骤：恢复/重试时跳过，不重复执行。"""
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT confirmed_steps_json FROM runs WHERE id=:id AND user_id=:u",
+                {"id": run_id, "u": user_id}).fetchone()
+            if row is None:
+                return False
+            confirmed = set(json.loads(row["confirmed_steps_json"] or "[]"))
+            confirmed.add(str(step_id))
+            self._conn.execute(
+                "UPDATE runs SET confirmed_steps_json=:c, updated_at=:ts"
+                " WHERE id=:id AND user_id=:u",
+                {"c": json.dumps(sorted(confirmed), ensure_ascii=False),
+                 "ts": _now(), "id": run_id, "u": user_id})
+            return True
+
+    def confirmed_steps(self, user_id: str, run_id: str) -> list[str]:
+        """已确认步骤 id（恢复时跳过这些步骤）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT confirmed_steps_json FROM runs WHERE id=:id AND user_id=:u",
+                {"id": run_id, "u": user_id}).fetchone()
+        return json.loads(row["confirmed_steps_json"] or "[]") if row else []
 
     # -- 查询（严格用户隔离） ------------------------------------------------
 
@@ -185,20 +265,36 @@ class RunStore:
         return {"total": total, "runs": [self._expand(r) for r in rows]}
 
     def find_recent_incomplete(self, user_id: str, *, limit: int = 20) -> list[dict[str, Any]]:
-        """重启/中断恢复候选：本用户 pending/running 的运行（按时间倒序）。"""
+        """重启/中断恢复候选：**已失去进程主人**（owner_pid 不在本进程或
+        owner_pid 为空）的 pending/running（按时间倒序）——活跃所有权与
+        恢复候选分开：本进程正在执行的运行绝不进入候选（修「恢复把活跃
+        运行标成中断却返回空候选」）。"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM runs WHERE user_id=:u AND status IN ('pending','running')"
                 " ORDER BY updated_at DESC LIMIT :l", {"u": user_id, "l": limit}).fetchall()
-        return [self._expand(r) for r in rows]
+        current_pid = os.getpid()
+        orphans = []
+        for row in rows:
+            owner = row["owner_pid"]
+            if owner is None or owner != current_pid:
+                orphans.append(self._expand(row))
+        return orphans[:limit]
 
     def passivate_incomplete(self, user_id: str, *, now: str | None = None) -> int:
-        """服务重启/会话清理时把活跃运行标注为 interrupted（不冒充成功）。"""
+        """服务重启/会话清理：只把**孤儿**运行（不属于本进程）标注为
+        interrupted 并返回候选清单；本进程正在执行的运行不受影响。"""
+        orphans = self.find_recent_incomplete(user_id, limit=1000)
+        if not orphans:
+            return 0
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "UPDATE runs SET status='interrupted', stop_reason='service_restart',"
-                " updated_at=:ts WHERE user_id=:u AND status IN ('pending','running')",
-                {"ts": now or _now(), "u": user_id})
+                " updated_at=:ts WHERE user_id=:u AND status IN ('pending','running')"
+                " AND id IN (" + ",".join(
+                    ":id" + str(i) for i in range(len(orphans))) + ")",
+                {"ts": now or _now(), "u": user_id,
+                 **{f"id{i}": record["id"] for i, record in enumerate(orphans)}})
             return cur.rowcount
 
     # -- 内部 ---------------------------------------------------------------
@@ -209,3 +305,38 @@ class RunStore:
         record["steps"] = json.loads(record.pop("steps_json") or "[]")
         record["artifacts"] = json.loads(record.pop("artifacts_json") or "[]")
         return record
+
+
+def test_find_recent_incomplete_only_orphans(store) -> None:
+    """候选 = 孤儿运行（owner_pid 非本进程或 NULL）；本进程活跃不在候选。
+
+    （复核项：活跃所有权与恢复候选分开。上组 test_progress_recording 里
+    本进程 mark_running 的运行不再被视为「恢复候选」，恢复也不会误改它。）
+    """
+    store.begin_run("u_a", "mine-1")
+    store.mark_running("u_a", "mine-1")
+    assert store.find_recent_incomplete("u_a") == []  # 本进程运行不是恢复候选
+
+    import sqlite3 as _sq
+    with store._lock, store._conn:
+        store._conn.execute(
+            "INSERT INTO runs(id, user_id, owner_pid, status, created_at, updated_at)"
+            " VALUES('dead-1', 'u_a', 999999, 'running', 't', 't')")
+    candidates = store.find_recent_incomplete("u_a")
+    assert [c["id"] for c in candidates] == ["dead-1"]
+
+
+def test_finish_run_allows_terminal_transition_to_needs_review(store) -> None:
+    """needs_review 白名单转变：外部结果未知后晚到 completed 不得覆盖。"""
+    store.begin_run("u_a", "rn-3")
+    store.mark_running("u_a", "rn-3")
+    store.mark_needs_review("u_a", "rn-3")
+    # finish_run 的非覆盖条件应包含 needs_review
+    assert store.finish_run("u_a", "rn-3", "completed") is False
+    assert store.get_run("u_a", "rn-3")["status"] == "needs_review"
+
+    # interrupted 同样禁回写
+    store.begin_run("u_a", "rn-4")
+    store.mark_running("u_a", "rn-4")
+    store.finish_run("u_a", "rn-4", "interrupted")
+    assert store.finish_run("u_a", "rn-4", "completed") is False
