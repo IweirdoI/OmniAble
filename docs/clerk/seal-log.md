@@ -14,3 +14,4 @@
 - 20261125-090234 Linnea <2312809203@qq.com>: Merge task records verified against both parents
 - 20261125-090718 Linnea <2312809203@qq.com>: Import submitted TASK-020 claim and review from PR #54
 - 20261125-235217 Linnea <2312809203@qq.com>: PR #60: re-seal after verifying all records from both parents
+- 20261125-235822 Linnea <2312809203@qq.com>: PR #58: import original TASK-025 claim only, verified against master and contributor head
