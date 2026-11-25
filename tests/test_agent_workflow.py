@@ -133,8 +133,8 @@ def test_duplicate_mutation_is_not_reexecuted(memory, tmp_path, monkeypatch):
 @pytest.mark.parametrize("kind", ["calls", "failures", "rounds"])
 def test_budgets_stop_actual_execution(memory, monkeypatch, kind):
     import src.agent.service as service
-    operation = Mock(return_value=(kind != "failures", "result"))
-    monkeypatch.setattr(service, "_run_local_tool", operation)
+    operation = Mock(return_value=(kind != "failures", "result", None))
+    monkeypatch.setattr(service, "dispatch_action", operation)
     budget = WorkflowBudget(max_total_tool_calls=1) if kind == "calls" else WorkflowBudget(max_consecutive_tool_failures=1) if kind == "failures" else WorkflowBudget(max_tool_rounds=1)
     calls = [call("calculate", {"expression": "1+1"}, ident) for ident in ("one", "two")]
     answers = [{"tool_calls": calls}, {"content": "回答"}] if kind != "rounds" else [{"tool_calls": calls[:1]}, {"tool_calls": calls}]

@@ -132,7 +132,7 @@ def test_actual_tool_payload_and_warnings_reach_stream_terminal(monkeypatch):
     budget = WorkflowBudget(tool_result_tokens=900)
     llm = model({"tool_calls": [tool_call("read-1", {"path": "guide.txt"})]}, {"content": "已回答"}, tools=True)
     memory = Mock()
-    monkeypatch.setattr(service, "_run_local_tool", lambda name, args: (True, "资料" * 5000))
+    monkeypatch.setattr(service, "dispatch_action", lambda name, args, ctx=None: (True, "资料" * 5000, None))
     llm.complete_stream.side_effect = lambda *args, **kwargs: iter([{
         "kind": "message", "message": llm.complete(*args, **kwargs),
     }])
@@ -184,7 +184,7 @@ def test_oversized_tool_request_ends_partial_without_an_unpaired_model_call(monk
 
     llm = model({"tool_calls": [tool_call("read-1", {"path": "文" * 6000})]}, tools=True)
     memory = Mock()
-    monkeypatch.setattr(service, "_run_local_tool", lambda name, args: (True, "已读"))
+    monkeypatch.setattr(service, "dispatch_action", lambda name, args, ctx=None: (True, "已读", None))
     result = MemoryAgent(memory, llm, budget=WorkflowBudget(context_window_tokens=14000)).chat(ChatRequest(
         user_id="synthetic", message="读取工作区指南", use_memory=False,
     ))

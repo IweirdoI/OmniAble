@@ -474,7 +474,8 @@ def test_search_content_sandbox():
     ok, text = _search_content("def _read_file", path="src/agent", glob="*.py")
     assert ok is True
     assert "def _read_file" in text
-    assert "service.py" in text
+    # TASK-021 后 _read_file 实现位于 actions.py（原 service.py）
+    assert "actions.py" in text
     # 越界被拒
     assert _search_content("x", path="..")[0] is False
     # 非法正则被拒

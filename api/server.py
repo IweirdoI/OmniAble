@@ -273,6 +273,7 @@ async def auth_middleware(request: Request, call_next):
     if auth_header.startswith("Bearer "):
         token = auth_header[len("Bearer ") :].strip()
         if token and token == _API_AUTH_TOKEN:
+            request.state.api_authenticated = True
             return await call_next(request)
     return JSONResponse(
         status_code=401,

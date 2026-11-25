@@ -1,6 +1,10 @@
 """Opt-in local filesystem API, under the server's existing auth middleware."""
-from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+import os
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 from src.agent.workspace import WorkspaceError, get_workspace, workspace_enabled
 
 router = APIRouter(prefix='/workspace', tags=['workspace'])
@@ -9,6 +13,23 @@ router = APIRouter(prefix='/workspace', tags=['workspace'])
 def enabled():
     if not workspace_enabled():
         raise WorkspaceError('工作区未启用；请在服务端设置 AGENT_ENABLE_WORKSPACE=1 并指定 AGENT_EXEC_CWD。', 403)
+
+
+def agent_tools_enabled() -> bool:
+    """与模型侧 ChatModel 相同的工具主开关（AGENT_ENABLE_TOOLS）。
+
+    面板按钮与模型共用授权（Issue #29）：模型不可用的动作，本 API 同样拒绝。
+    """
+    return os.getenv('AGENT_ENABLE_TOOLS', '0') == '1'
+
+
+def read_only_actions():
+    """列出当前可直调的只读动作（模型同目录、同开关；变更类不列出）。"""
+    from src.agent.actions import ActionContext, actions_available
+
+    ctx = ActionContext(tools_enabled=agent_tools_enabled())
+    return [action for action in actions_available(ctx)
+            if not action.mutates and action.name != 'search_memory']
 
 
 class FileVersion(BaseModel):
@@ -64,3 +85,54 @@ def restore(req: FileVersion):
 @router.post('/accept', dependencies=[Depends(enabled)])
 def accept(req: FileVersion):
     return get_workspace().resolve_change(req.path, req.revision, False)
+
+
+# ---------------------------------------------------------------------------
+# 统一动作入口（TASK-021 / Issue #29）：面板按钮与模型共用目录与授权。
+# 只开放只读动作；变更类动作需宿主会话与逐次确认（TASK-020），不在本入口。
+# ---------------------------------------------------------------------------
+
+class ActionCall(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+def require_action_host(request: Request):
+    if not getattr(request.state, 'api_authenticated', False):
+        raise HTTPException(status_code=401, detail='工作区动作需要已验证的宿主 API 令牌。')
+
+
+@router.get('/actions')
+def list_actions():
+    return {'enabled': agent_tools_enabled(),
+            'actions': [{'name': a.name, 'mutates': a.mutates,
+                         'arguments_version': a.arguments_version,
+                         'result_version': a.result_version} for a in read_only_actions()]}
+
+
+@router.post('/actions/{name}', dependencies=[Depends(require_action_host), Depends(enabled)])
+def call_action(name: str, call: ActionCall):
+    """与模型同一 `dispatch_action`：同一只读动作经任一入口返回等价结果。"""
+    from src.agent.actions import ActionContext, actions_available, dispatch_action, get_action
+
+    action = get_action(name)
+    # 开关与模型侧完全一致：主开关 + exec/web 各自独立开关
+    ctx = ActionContext(
+        tools_enabled=agent_tools_enabled(),
+        exec_enabled=os.getenv('AGENT_ENABLE_EXEC_TOOL', '0') == '1',
+        web_enabled=os.getenv('AGENT_ENABLE_WEB_TOOL', '0') == '1',
+    )
+    if action is None:
+        raise HTTPException(status_code=404, detail=f'动作不存在：{name}')
+    if action.mutates or action.name in {'exec_terminal', 'web_fetch', 'search_memory'}:
+        # 宿主专属动作（拒绝理由不随开关波动）：变更类需宿主会话与逐次
+        # 确认（TASK-020）；exec/web 需宿主级许可；search_memory 需请求级
+        # 记忆上下文。本机 API 不代发（Issue #29）。
+        raise HTTPException(status_code=403, detail='该动作需要宿主会话与执行确认，不能经本机 API 直调。')
+    if action not in actions_available(ctx):
+        raise HTTPException(status_code=404, detail=f'动作未开启：{name}')
+    ok, content, error_code = dispatch_action(name, call.arguments, ctx)
+    if not ok:
+        return JSONResponse(status_code=400, content={
+            'ok': False, 'action': name, 'error_code': error_code, 'detail': content})
+    return {'ok': True, 'action': name, 'result': content}

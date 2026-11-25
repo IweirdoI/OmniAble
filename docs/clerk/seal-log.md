@@ -11,3 +11,4 @@
 - 20261124-020237 Linnea <2312809203@qq.com>: PR #50: verified full union of master tasks and TASK-038 claim; rebuild generated seals
 - 20261125-085340 Linnea <2312809203@qq.com>: Merge task records verified against both parents
 - 20261125-085806 Linnea <2312809203@qq.com>: Merge task records verified against both parents
+- 20261125-090234 Linnea <2312809203@qq.com>: Merge task records verified against both parents
