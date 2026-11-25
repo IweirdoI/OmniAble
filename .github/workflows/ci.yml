@@ -29,7 +29,9 @@ jobs:
       - run: npm run build
 
   browser:
-    runs-on: ubuntu-latest
+    # Playwright 1.55 supports Ubuntu 24.04; ubuntu-latest currently resolves
+    # to 26.04, where its bundled Chromium refuses to install.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

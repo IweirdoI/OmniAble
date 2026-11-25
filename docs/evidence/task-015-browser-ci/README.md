@@ -5,7 +5,7 @@
 ## 交付结构
 
 - `.github/workflows/ci.yml` 新增 `browser` 作业：
-  - Ubuntu + Python 3.12 + Node 22；
+  - Ubuntu 24.04 + Python 3.12 + Node 22（Playwright 1.55 不支持当前 26.04 runner）；
   - 安装 `requirements-windows.txt` 中的隔离 API 依赖；
   - 使用 `frontend/package-lock.json` 安装 pinned Playwright；
   - `npx playwright install --with-deps chromium`；
