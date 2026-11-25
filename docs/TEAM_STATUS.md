@@ -18,7 +18,7 @@
 | TASK-010 | [P1] 显示记忆面板部分刷新失败，避免旧数据冒充已同步 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/9 | 20261122-185731 |
 | TASK-011 | [P1] 确定聊天与记忆工作台视觉规范和关键页面方案 | 已完成 | 123456s-ai | https://github.com/IweirdoI/mokoa-windows/issues/10 | 20261122-203727 |
 | TASK-012 | [P1] 落地工作台 UI 改版，恢复手机操作并完善键盘可用性 | 已完成 | 123456s-ai | https://github.com/IweirdoI/mokoa-windows/issues/11 | 20261123-014119 |
-| TASK-013 | [P2] 贯通聊天、偏好画像和记忆查询的场景选择 | 待审查 | 123456s-ai | https://github.com/IweirdoI/mokoa-windows/issues/12 | 20261124-235923 |
+| TASK-013 | [P2] 贯通聊天、偏好画像和记忆查询的场景选择 | 已完成 | 123456s-ai | https://github.com/IweirdoI/mokoa-windows/issues/12 | 20261125-085718 |
 | TASK-014 | [P2] 增加可分页的长期记忆浏览与筛选，独立于本轮聊天召回 | 进行中 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/13 | 20261122-161744 |
 | TASK-015 | [P1] 建立前端自动化回归 CI，覆盖聊天流式与响应式主流程 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/14 | 20261122-185731 |
 | TASK-016 | [P1] 按设计完善 Agent 路由、执行预算与结果核验 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/16 | 20261122-151543 |
