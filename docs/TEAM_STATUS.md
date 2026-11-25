@@ -25,7 +25,7 @@
 | TASK-017 | [P1] 集成 Agent 文件工作区、变更预览与网页侧栏 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/19 | 20261122-151544 |
 | TASK-018 | [P1] Windows Agent 本地会话列表与重启恢复 | 进行中 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/23 | 20261123-210916 |
 | TASK-019 | [P1] Agent 上下文预算与长会话截断 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/24 | 20261122-193044 |
-| TASK-020 | [P1] Agent 文件变更的逐次用户确认 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/25 | 20261122-185525 |
+| TASK-020 | [P1] Agent 文件变更的逐次用户确认 | 待审查 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/25 | 20261125-090722 |
 | TASK-021 | [P1] 统一 Agent 动作目录与调用入口 | 待审查 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/29 | 20261124-171829 |
 | TASK-022 | [P1] 持久化执行记录、取消与中断恢复 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/30 | 20261122-204438 |
 | TASK-023 | [P1] 制定可离线验证的插件包格式与版本契约 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/31 | 20261122-204441 |
