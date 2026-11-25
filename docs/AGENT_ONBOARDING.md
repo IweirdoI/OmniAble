@@ -72,7 +72,8 @@ git remote -v
   对应 `tests/test_knowledge.py`、`test_retrieval_crosslang.py`、`test_recall_strategy.py`。
 - **隐私与遗忘**：`src/security/service.py`、`forget_parser.py`、`knowledge_forget.py`、
   `index_crypto.py` 及实际调用链；对应 `tests/test_security.py`、`test_knowledge_forget.py`、
-  `test_outbound_privacy.py` 和隐私专项测试。安全报告方式见 [SECURITY.md](../SECURITY.md)。
+  `test_outbound_privacy.py` 和隐私专项测试。流程及插件数据见 [数据保留边界](DATA_RETENTION.md)。
+  安全报告方式见 [SECURITY.md](../SECURITY.md)。
 - **Windows Embedding 与存储**：`src/embedding/embedding_interface.py`、各后端实现和
   [Windows 验收说明](WINDOWS.md#task-007-目标配置验收)；对应 `tests/test_embedding.py` 和后端契约测试。
 - **前端**：`frontend/src/`、`frontend/vite.config.js`、`frontend/package.json`，

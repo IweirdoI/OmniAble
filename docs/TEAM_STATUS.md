@@ -39,7 +39,7 @@
 | TASK-031 | [P1] 实现本地定时任务与错过执行的处理 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/39 | 20261122-204505 |
 | TASK-032 | [P2] 实现只读代码解析插件与可追溯依赖图 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/40 | 20261122-204508 |
 | TASK-033 | [P2] 把 AI 代码解释与依赖图联动到源码 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/41 | 20261122-204511 |
-| TASK-034 | [P1] 划清流程和插件数据与长期记忆的保留边界 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/42 | 20261122-204513 |
+| TASK-034 | [P1] 划清流程和插件数据与长期记忆的保留边界 | 待审查 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/42 | 20261124-185112 |
 | TASK-035 | [P1] 验收断网桌面与无障碍端到端使用场景 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/43 | 20261122-204516 |
 | TASK-036 | [P2] 将录制和回放扩展到获准的 Windows 应用 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/44 | 20261122-204519 |
 | TASK-037 | [P2] 验证本地 MCP 工具能否复用插件权限 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/45 | 20261122-204521 |
