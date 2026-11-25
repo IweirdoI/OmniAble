@@ -26,6 +26,7 @@ const renderMarkdown = (src) => {
 }
 
 const demoPreferences = [
+  { id: 'pref-tone', key: 'response_tone', value: '回答先给结论，再给可执行步骤。', scene: 'global', version: 1, active: true, confidence: 0.9 },
   { id: 'pref-language-v2', key: 'response_language', value: '默认使用中文回答，并优先给出可执行步骤。', scene: 'coding', version: 2, active: true, confidence: 0.98 },
   { id: 'pref-language-v1', key: 'response_language', value: '使用中文进行回答。', scene: 'coding', version: 1, active: false, confidence: 0.91 },
   { id: 'pref-download', key: 'download_path', value: '下载文件默认保存到 D:/Downloads。', scene: 'os_operation', version: 1, active: true, confidence: 0.96 },
@@ -49,6 +50,12 @@ const demoStats = () => ({
     milvus: { count: 6 },
   },
 })
+
+const SCENES = [
+  { id: 'global', label: '全局', hint: '通用偏好与跨场景记忆' },
+  { id: 'coding', label: '编程', hint: '代码、工具与项目上下文' },
+  { id: 'office', label: '办公', hint: '文档、表格与办公流程' },
+]
 
 const greetingMessage = {
   id: 1,
@@ -237,12 +244,20 @@ createApp({
     const agentHistory = ref([])
     const useMemory = ref(true)
     const saveMemory = ref(true)
+    const scene = ref('global')
+    const sceneMeta = computed(() => SCENES.find((item) => item.id === scene.value) || SCENES[0])
+    const sceneId = computed(() => scene.value === 'global' ? null : scene.value)
     const messages = ref([greeting()])
     const memories = ref([...demoMemories])
     const panelState = reactive({})
     const stats = computed(() => live.value ? panelState.stats.data : demoStats())
     const preferences = computed(() => live.value ? panelState.history.data : demoPreferences)
     const profile = computed(() => live.value ? panelState.profile.data : null)
+    const scopedHistory = computed(() => {
+      const items = preferences.value || []
+      if (scene.value === 'global') return items.filter((item) => !item.scene || item.scene === 'global')
+      return items.filter((item) => !item.scene || item.scene === 'global' || item.scene === scene.value)
+    })
     const latency = ref('演示数据')
     const panelLabels = { idle: '待同步', loading: '同步中', success: '已同步', error: '读取失败', stale: '更新失败 · 显示旧数据' }
     const failedPanel = (key) => ['error', 'stale'].includes(panelState[key]?.status)
@@ -293,7 +308,12 @@ createApp({
     }
 
     const activePreferences = computed(() => {
-      if (!live.value) return demoPreferences.filter((item) => item.active)
+      if (!live.value) {
+        const items = demoPreferences.filter((item) => item.active)
+        return scene.value === 'global'
+          ? items.filter((item) => item.scene === 'global')
+          : items.filter((item) => item.scene === 'global' || item.scene === scene.value)
+      }
       return (profile.value?.features ?? []).map((item) => ({
         id: item.feature_id || item.preference_key,
         key: item.preference_key,
@@ -394,7 +414,10 @@ createApp({
         const result = await call(`/preferences/${encodedUser}?latest_only=false&top_k=100`, {}, 180000)
         return result.items.map(mapPreference).sort((a, b) => b.version - a.version)
       }
-      const result = await call(`/preferences/${encodedUser}/profile`, {}, 30000)
+      const profileQuery = scene.value === 'global'
+        ? '?global_only=true'
+        : `?scene_id=${encodeURIComponent(scene.value)}`
+      const result = await call(`/preferences/${encodedUser}/profile${profileQuery}`, {}, 30000)
       if (!Array.isArray(result.profile?.features)) throw new Error('画像响应无效')
       return result.profile
     }, now)
@@ -497,6 +520,7 @@ createApp({
         await streamChat({
           user_id: user.value.trim(), message: text,
           history: agentHistory.value.slice(-20),
+          scene_id: sceneId.value,
           use_memory: useMemory.value, save_memory: saveMemory.value,
         }, (event) => {
           if (requestSession !== sessionKey.value) return
@@ -672,6 +696,29 @@ createApp({
       await loadDashboard({ quiet: false })
     }
 
+    const switchScene = async (next) => {
+      const target = SCENES.find((item) => item.id === next)
+      if (!target || target.id === scene.value) return
+      if (sending.value || ingesting.value || syncing.value) {
+        return tell('当前操作完成后再切换场景')
+      }
+      scene.value = target.id
+      agentHistory.value = []
+      messages.value = [greeting()]
+      memories.value = []
+      events.value = []
+      latency.value = '尚未检索'
+      forgetInstruction.value = ''
+      forgetResult.value = EMPTY_FORGET
+      memorySync.reset()
+      if (chatScroll.value) chatScroll.value.scrollTop = 0
+      if (!live.value) return tell(`已切换到${target.label}场景，旧对话已清空（演示模式）`)
+      const refreshed = await loadDashboard({ quiet: true })
+      tell(refreshed
+        ? `已切换到${target.label}场景，旧对话已清空，画像与记忆已刷新`
+        : `已切换到${target.label}场景，旧对话已清空；部分数据未能同步`)
+    }
+
     const onUserKeydown = (event) => {
       if (event.key === 'Enter') {
         event.preventDefault()
@@ -728,6 +775,7 @@ createApp({
       events, forgetInstruction, forgetResult, toast, announcement, chatScroll, memoryContent,
       tabs, activePreferences, statusText, connect, loadDashboard, switchUser, syncCurrent,
       onUserKeydown, sendMessage, handleComposerKeydown, onComposerFocus, composer,
+      scene, scenes: SCENES, sceneMeta, sceneId, switchScene, scopedHistory,
       openIngestion, usePrompt, prepareForget, forget, renderMarkdown,
       showPanel, conversationTitle, conversationMeta, focusChat,
       pluginCatalog, pluginCapabilityLabels, installedPlugins, installedPluginCount,
@@ -803,9 +851,15 @@ createApp({
             <div class="chat-heading">
               <span class="section-kicker">临时会话</span>
               <h1 class="chat-title" id="chat-title" tabindex="-1">对话</h1>
-              <p>消息只在本次打开期间保留，可随时打开工作区或记忆面板。</p>
+              <p>当前场景：{{ sceneMeta.label }} · 消息只在本次打开期间保留，切换场景会清空当前对话。</p>
             </div>
             <div class="chat-header-actions">
+              <label class="scene-control" for="scene-select">
+                <span>场景</span>
+                <select id="scene-select" data-testid="scene-select" :value="scene" :disabled="sending || ingesting || syncing" :title="sceneMeta.hint" @change="switchScene($event.target.value)">
+                  <option v-for="item in scenes" :key="item.id" :value="item.id">{{ item.label }}</option>
+                </select>
+              </label>
               <button class="secondary-button new-chat-button" type="button" :disabled="sending" @click="newChat()">＋ 新对话</button>
               <button class="ghost-button panel-toggle" type="button" :aria-expanded="sidebarOpen" @click="toggleSidebar($event.currentTarget)">{{ sidebarOpen ? '收起面板' : '打开面板' }}</button>
             </div>
@@ -927,19 +981,20 @@ createApp({
                   <section class="side-section activity-section"><div class="section-title"><h3>最近活动</h3><span>本次打开期间</span></div><div class="event-list" v-if="events.length"><div class="event-item" v-for="event in events" :key="event.id"><i :class="event.type" aria-hidden="true">{{ event.type === 'forget' ? '⌫' : event.type === 'preference' ? '◌' : event.type === 'error' ? '!' : '◇' }}</i><span><b>{{ event.title }}</b><small>{{ event.detail }}</small></span><time>{{ event.time }}</time></div></div><div class="empty-inline" v-else>还没有活动记录。发送消息或同步记忆后会显示在这里。</div></section>
                 </section>
                 <section class="panel-section" v-else-if="activeTab === 'preferences'">
-                  <header class="panel-section-head"><div><span class="section-kicker">偏好</span><h2 class="panel-title" data-panel-title="preferences" tabindex="-1">{{ live && failedPanel('profile') ? '偏好（未确认）' : '当前偏好' }}</h2></div><span class="section-meta">{{ live && profile ? activePreferences.length + ' 项' : live ? '待同步' : activePreferences.length + ' 项演示' }}</span></header>
+                  <header class="panel-section-head"><div><span class="section-kicker">偏好</span><h2 class="panel-title" data-panel-title="preferences" tabindex="-1">{{ live && failedPanel('profile') ? '偏好（未确认）' : '当前偏好' }}</h2></div><span class="section-meta">{{ sceneMeta.label }} · {{ live && profile ? activePreferences.length + ' 项' : live ? '待同步' : activePreferences.length + ' 项演示' }}</span></header>
                   <div class="stale-banner" v-if="live && (failedPanel('profile') || failedPanel('history'))"><div><b>偏好数据未全部更新</b><span>当前画像：{{ panelLabels[panelState.profile.status] }} · {{ panelLastSuccess('profile') }}；历史：{{ panelLabels[panelState.history.status] }}。未成功更新的数据已标记为未确认。</span></div><button class="text-button" type="button" :disabled="syncing" @click="loadDashboard({ keys: ['profile', 'history'] })">重试偏好</button></div>
                   <div class="empty-state" v-if="live && !profile"><b>暂未取得当前偏好</b><span>{{ failedPanel('profile') ? '读取失败，未展示旧画像。可重试继续。' : '正在等待画像同步。' }}</span><button class="text-button" type="button" v-if="failedPanel('profile')" :disabled="syncing" @click="loadDashboard({ keys: ['profile'] })">重试画像</button></div>
-                  <div class="empty-state" v-else-if="!activePreferences.length"><b>当前用户还没有生效偏好</b><span>在对话中说明你的习惯，或通过“接入”录入一条配置。</span></div>
+                  <div class="empty-state" v-else-if="!activePreferences.length"><b>当前场景暂无生效偏好</b><span>{{ sceneMeta.label }}场景没有匹配画像；切换到全局或其他场景查看。</span></div>
                   <article class="preference-card" data-testid="preference-card" v-for="item in activePreferences" :key="item.id || item.key"><header><code>{{ item.key }}</code><span class="version-chip">v{{ item.version }}</span></header><p>{{ item.value }}</p><footer><small>{{ item.scene }} · 置信度 {{ Math.round((item.confidence || 0) * 100) }}%</small><button class="text-button" type="button" @click="prepareForget(item, 'preference')">准备遗忘</button></footer></article>
-                  <div class="section-title history-title"><h3>版本历史</h3><span v-if="preferences">{{ preferences.length }} 条{{ live && failedPanel('history') ? ' · 未确认' : '' }}</span></div>
-                  <div class="empty-state" v-if="!preferences"><b>暂未取得偏好历史</b><span>{{ live ? '读取失败或当前没有历史版本。' : '连接 API 后可查看版本历史。' }}</span></div>
-                  <div class="history-list" v-else><article class="history-item" v-for="item in preferences" :key="(item.id || item.key) + '-' + item.version"><b>v{{ item.version }}</b><span><strong>{{ item.key }}</strong><small>{{ live && failedPanel('history') ? '状态未确认' : item.active ? '当前版本' : '已被替换' }} · {{ item.value }}</small></span></article></div>
+                  <div class="section-title history-title"><h3>版本历史</h3><span>{{ scopedHistory.length }} 条{{ live && failedPanel('history') ? ' · 未确认' : '' }}</span></div>
+                  <div class="empty-state" v-if="live && failedPanel('history') && !scopedHistory.length"><b>暂未取得偏好历史</b><span>读取失败，未展示旧版本。可重试继续。</span></div>
+                  <div class="empty-state" v-else-if="!scopedHistory.length"><b>当前场景暂无偏好历史</b><span>{{ sceneMeta.label }}场景还没有版本记录。</span></div>
+                  <div class="history-list" v-else><article class="history-item" v-for="item in scopedHistory" :key="(item.id || item.key) + '-' + item.version"><b>v{{ item.version }}</b><span><strong>{{ item.key }}</strong><small>{{ live && failedPanel('history') ? '状态未确认' : item.active ? '当前版本' : '已被替换' }} · {{ item.value }}</small></span></article></div>
                 </section>
                 <section class="panel-section" v-else-if="activeTab === 'memories'">
-                  <header class="panel-section-head"><div><span class="section-kicker">本轮召回</span><h2 class="panel-title" data-panel-title="memories" tabindex="-1">记忆</h2></div><span class="section-meta">{{ latency }} · {{ memories.length }} 条</span></header>
-                  <p class="panel-caption">这里只显示当前这轮对话实际召回的记忆，不是全部长期记忆。</p>
-                  <div class="empty-state" v-if="!memories.length"><b>还没有本轮召回</b><span>发送一条消息后，这里会显示真实召回结果。演示数据不会冒充实时召回。</span></div>
+                  <header class="panel-section-head"><div><span class="section-kicker">本轮召回</span><h2 class="panel-title" data-panel-title="memories" tabindex="-1">记忆</h2></div><span class="section-meta">{{ sceneMeta.label }} · {{ latency }} · {{ memories.length }} 条</span></header>
+                  <p class="panel-caption">这里只显示当前场景这轮对话实际召回的记忆，不是全部长期记忆。</p>
+                  <div class="empty-state" v-if="!memories.length"><b>当前场景还没有本轮召回</b><span>{{ sceneMeta.label }}场景下发送一条消息后，这里会显示真实召回结果。演示数据不会冒充实时召回。</span></div>
                   <article class="memory-card" data-testid="memory-card" v-for="item in memories" :key="item.id"><header><code>{{ item.type }}</code><span>{{ item.layer }}</span><small>{{ item.id }}</small></header><p>{{ item.content }}</p><footer><span>{{ item.scene || '通用场景' }} · {{ item.source || '未知来源' }}</span><button class="text-button" type="button" @click="prepareForget(item)">准备遗忘</button></footer></article>
                 </section>
                 <section class="panel-section" v-else-if="activeTab === 'forget'">

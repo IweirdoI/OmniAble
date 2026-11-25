@@ -587,3 +587,67 @@ def test_staging_purge_endpoint_uses_configured_defaults(tmp_path) -> None:
     assert body["audit_deleted"] == 1
     assert "raw_cutoff" in body
     assert "audit_cutoff" in body
+
+
+def test_preference_profile_global_only_excludes_scene_features() -> None:
+    """全局画像不应混入其它场景的偏好，场景画像仍可取到场景值。"""
+
+    result = orchestrator.extract_preferences_from_text(
+        "办公场景下用 Excel 处理数据",
+        user_id="scope_user",
+        scene_id="office",
+    )
+    assert result.stored
+
+    global_response = client.get(
+        "/preferences/scope_user/profile",
+        params={"global_only": "true"},
+    )
+    office_response = client.get(
+        "/preferences/scope_user/profile",
+        params={"scene_id": "office"},
+    )
+
+    assert global_response.status_code == 200
+    assert office_response.status_code == 200
+    assert global_response.json()["global_only"] is True
+    assert "tool_selection.data_processing_tool" not in global_response.json()["profile"]["kv"]
+    assert (
+        office_response.json()["profile"]["kv"]["tool_selection.data_processing_tool"]
+        == "excel"
+    )
+
+
+def test_preference_profile_isolates_two_users_and_two_scenes() -> None:
+    """同 key 下优先场景值，缺场景时回退到同一用户的全局值。"""
+    from src.knowledge.memory_service.memory_schema import MemoryEntry
+
+    key = "tool_selection.data_processing_tool"
+    values = {
+        "scope_user_a": {None: "python", "office": "excel", "coding": "duckdb"},
+        "scope_user_b": {None: "sqlite", "office": "libreoffice", "coding": "polars"},
+    }
+    for user_id, preferences in values.items():
+        for scene_id, value in preferences.items():
+            result = orchestrator.store_memory_entry(MemoryEntry(
+                content=f"数据处理工具：{value}",
+                memory_type="preference",
+                source="manual",
+                user_id=user_id,
+                scene_id=scene_id,
+                metadata={"preference_key": key, "preference_value": value,
+                          "scope": "scene" if scene_id else "global"},
+            ))
+            assert result.created
+
+    for user_id, preferences in values.items():
+        endpoint = f"/preferences/{user_id}/profile"
+        for params, expected in (
+            ({"global_only": True}, preferences[None]),
+            ({"scene_id": "office"}, preferences["office"]),
+            ({"scene_id": "coding"}, preferences["coding"]),
+            ({"scene_id": "unknown"}, preferences[None]),
+        ):
+            response = client.get(endpoint, params=params)
+            assert response.status_code == 200
+            assert response.json()["profile"]["kv"][key] == expected

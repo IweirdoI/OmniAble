@@ -9,3 +9,4 @@
 - 20261122-220944 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: merge origin/master into TASK-007 branch: union seal history, re-seal merged task table (claims kept, mainline tasks kept)
 - 20261123-204040 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: merge origin/master into TASK-018 branch: union seal history and re-seal merged task table
 - 20261124-020237 Linnea <2312809203@qq.com>: PR #50: verified full union of master tasks and TASK-038 claim; rebuild generated seals
+- 20261125-085340 Linnea <2312809203@qq.com>: Merge task records verified against both parents

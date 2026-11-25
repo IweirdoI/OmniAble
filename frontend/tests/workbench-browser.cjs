@@ -26,7 +26,12 @@ const waitForLive = async (page) => {
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
     const page = await context.newPage()
+    const profileRequests = []
     page.setDefaultTimeout(15000)
+    page.on('request', request => {
+      const url = new URL(request.url())
+      if (url.pathname.endsWith('/profile')) profileRequests.push(url)
+    })
     page.on('pageerror', error => errors.push(error.message))
     page.on('console', message => { if (message.type() === 'error') errors.push('console: ' + message.text()) })
     await page.goto(base, { waitUntil: 'networkidle' })
@@ -40,6 +45,53 @@ const waitForLive = async (page) => {
     }))
     assert(columns.rail >= 220 && columns.chat > 600 && columns.panel >= 360, 'three-region desktop layout')
     check('1440: rail, chat and memory panel share the workbench without page overflow')
+
+    // TASK-013: scene selection must reach chat/profile requests and isolate history.
+    await page.waitForFunction(() => document.querySelector('[data-testid=sync-profile]')?.className.includes('state-success'))
+    assert.equal(await page.getByTestId('scene-select').inputValue(), 'global')
+    assert.equal(await page.getByTestId('scene-select').locator('option').count(), 3)
+    assert(profileRequests.some(url => url.searchParams.get('global_only') === 'true'))
+
+    const codingProfile = page.waitForRequest(request => {
+      const url = new URL(request.url())
+      return url.pathname.endsWith('/profile') && url.searchParams.get('scene_id') === 'coding'
+    })
+    await page.getByTestId('scene-select').selectOption('coding')
+    await codingProfile
+    await page.waitForFunction(() => !document.querySelector('[data-testid=scene-select]').disabled)
+
+    let sceneChatPayload = null
+    await page.route('**/api/agent/chat/stream', async route => {
+      sceneChatPayload = route.request().postDataJSON()
+      const event = {
+        type: 'done', run_id: 'scene-browser', seq: 1,
+        memories: [], recall_ms: 1, latency_ms: 2,
+        workflow: { status: 'completed' },
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: `data: ${JSON.stringify(event)}\n\n`,
+      })
+    })
+    await page.getByTestId('chat-input').fill('场景切换验证')
+    await page.getByTestId('chat-send').click()
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-testid=run-status]')]
+      .some(element => /已完成/.test(element.textContent || '')))
+    assert.equal(sceneChatPayload?.scene_id, 'coding')
+    await page.waitForFunction(() => !document.querySelector('[data-testid=scene-select]').disabled)
+
+    const officeProfile = page.waitForRequest(request => {
+      const url = new URL(request.url())
+      return url.pathname.endsWith('/profile') && url.searchParams.get('scene_id') === 'office'
+    })
+    await page.getByTestId('scene-select').selectOption('office')
+    await officeProfile
+    await page.waitForFunction(() => document.querySelectorAll('.message-row.user').length === 0)
+    assert.equal(await page.getByTestId('scene-select').inputValue(), 'office')
+    assert.doesNotMatch(await page.locator('.chat-stream').innerText(), /场景切换验证/)
+    check('scene selection scopes chat/profile requests and clears previous chat history')
+    await page.unroute('**/api/agent/chat/stream')
 
     await page.locator('#dock-tab-memory').press('ArrowLeft')
     assert.equal(await page.locator('#dock-tab-workspace').getAttribute('aria-selected'), 'true')
@@ -264,7 +316,7 @@ const waitForLive = async (page) => {
     const retryPage = await context.newPage()
     const retryUid = 'ui_retry_' + Date.now()
     let failProfileFor = retryUid
-    await retryPage.route('**/api/preferences/*/profile', async route => {
+    await retryPage.route('**/api/preferences/*/profile*', async route => {
       if (failProfileFor && route.request().url().includes(failProfileFor)) {
         failProfileFor = null
         await route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"temporary"}' })
