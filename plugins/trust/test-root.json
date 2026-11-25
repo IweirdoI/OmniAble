@@ -1,0 +1,11 @@
+{
+  "schema": "mokoa.trust-root/v1",
+  "keys": [
+    {
+      "key_id": "mokoa-test-root-2026",
+      "algorithm": "ed25519",
+      "public_key": "NJxI+rVv+NH8geioljX9oCI04zHoCSx+ctHUBGqElxY=",
+      "publisher": "MOKOA Test Fixture"
+    }
+  ]
+}

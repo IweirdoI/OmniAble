@@ -39,6 +39,7 @@ logs/
 *.json # If logs or temporary data
 !.gitkeep
 !docs/evidence/**/*.json
+!plugins/**/*.json
 tmp/
 .pytest-tmp-*/
 .pnpm-store/
