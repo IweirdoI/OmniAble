@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# MOKOA Windows Desktop - Core dependencies
+# OmniAble core dependencies
 # 依赖统一锁定为当前验证通过的精确版本，避免 >= 下限拉取非预期/被投毒版本（#11）。
 # 升级前请在隔离环境验证并通过全部测试后再更新此处；CI 建议额外生成 requirements.lock。
 # 本文件是Windows 完整安装（含 BGE-M3）的锁定清单。

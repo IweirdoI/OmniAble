@@ -1,4 +1,4 @@
-# 前端演示指南
+# OmniAble 前端使用与验证
 
 
 
@@ -212,7 +212,7 @@ Embedding，不代表真实视觉模型、BGE-M3 的效果/性能验收。
 
 # 终端 1：后端
 
-cd MOKOA  # 或进入实际仓库根目录
+cd OmniAble  # 或进入实际仓库根目录
 
 uvicorn api.server:app --reload --port 8000
 

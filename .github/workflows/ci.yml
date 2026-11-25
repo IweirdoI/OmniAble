@@ -1,4 +1,4 @@
-# GitHub Actions CI for 麒忆智脑 (MOKOA) OS Agent Memory system
+# GitHub Actions CI for OmniAble
 # Runs Python tests, frontend unit/build checks and the isolated browser suite
 # on every push / PR to main or master.
 

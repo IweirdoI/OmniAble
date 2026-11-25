@@ -48,7 +48,7 @@ class ConfirmationDecision(BaseModel):
     token: str = Field(min_length=1, max_length=128)
 
 
-app = FastAPI(title="MOKOA Desktop Memory API", version="0.3.0")
+app = FastAPI(title="OmniAble API", version="0.3.0")
 
 from api.workspace import router as workspace_router
 from src.agent.workspace import WorkspaceError

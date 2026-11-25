@@ -104,7 +104,7 @@ SSE 保留旧事件，新增 run_started、stage、run_id、seq；终态唯一�
 
 ## 模型上下文预算
 
-[TASK-019](https://github.com/IweirdoI/mokoa-windows/issues/24) 在每次模型调用前统一检查最终消息和工具定义。`agent.workflow.context_window_tokens` 默认 32,768，固定预留 2,000 输出 token。输入以 UTF-8 序列化字节和协议余量保守估算。请将窗口配置为部署模型的实际限制。`memory_context_tokens` 和 `tool_result_tokens` 分别限制参考记忆和单条工具正文。
+[TASK-019](https://github.com/IweirdoI/OmniAble/issues/24) 在每次模型调用前统一检查最终消息和工具定义。`agent.workflow.context_window_tokens` 默认 32,768，固定预留 2,000 输出 token。输入以 UTF-8 序列化字节和协议余量保守估算。请将窗口配置为部署模型的实际限制。`memory_context_tokens` 和 `tool_result_tokens` 分别限制参考记忆和单条工具正文。
 
 优先保留当前输入、最新工具调用及结果和最近对话轮次。旧工具轮次按整组裁剪。存不下最新工具轮次时，保留已核实结果并以 `partial` 结束。当前输入本身装不下时，同步返回 422，流式返回 `error`，原因均为 `context_budget`。正常终态的 `context_warnings` 提示历史、参考记忆或工具输出有省略，前端在对应回答下显示。
 

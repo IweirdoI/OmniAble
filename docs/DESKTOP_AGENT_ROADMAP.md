@@ -35,6 +35,6 @@
 ## 设计参考
 
 - DeepSeek Harness 把能力注册与具体提供者拆开，并有独立的交互确认契约。这里采用可替换提供者的思路，权限判定留在本机宿主。[能力提供者](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/skills.md) · [确认接口源码](https://github.com/deepseek-ai/deepseek-harness/blob/d98f5d68519215da48f3002da2cb9c9d2068d81d/packages/interaction/user-approval/src/types.ts)
-- Claude Code 将常用能力打成带清单的插件，OpenClaw 将定时运行和运行时访问权限分开处理。MOKOA 的包需本地验签，定时触发时也要重查权限。[Claude Code 插件](https://code.claude.com/docs/en/plugins) · [OpenClaw 调度](https://docs.openclaw.ai/automation/cron-jobs)
+- Claude Code 将常用能力打成带清单的插件，OpenClaw 将定时运行和运行时访问权限分开处理。OmniAble 的包需本地验签，定时触发时也要重查权限。[Claude Code 插件](https://code.claude.com/docs/en/plugins) · [OpenClaw 调度](https://docs.openclaw.ai/automation/cron-jobs)
 - Power Automate 的桌面录制器把操作关联到界面元素。Windows UI Automation 给辅助技术和自动化提供可查询控件；这里优先保存控件语义，控件无法可靠定位就停下来请用户确认。[桌面流程录制](https://learn.microsoft.com/en-us/power-automate/desktop-flows/recording-flow) · [Windows UI Automation](https://learn.microsoft.com/en-us/dotnet/framework/ui-automation/ui-automation-overview)
 - MCP 提供工具发现与调用协议，可作为宿主的一种本地适配器。先用限权的只读工具检验兼容性。[MCP 架构](https://modelcontextprotocol.io/docs/learn/architecture)

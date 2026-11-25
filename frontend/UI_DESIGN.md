@@ -1,6 +1,6 @@
 # 聊天与记忆工作台界面方案
 
-关联：[TASK-011 设计](https://github.com/IweirdoI/mokoa-windows/issues/10)；实现：[TASK-012](https://github.com/IweirdoI/mokoa-windows/issues/11)。状态：已通过设计验收。
+关联：[TASK-011 设计](https://github.com/IweirdoI/OmniAble/issues/10)；实现：[TASK-012](https://github.com/IweirdoI/OmniAble/issues/11)。状态：已通过设计验收。
 
 > 2026-11-23 实现补充：界面品牌统一为 OmniAble，辅助面板增加“插件”页签和本地插件宿主（快捷指令、对话导出、会话概览）。远程安装、权限审批、签名校验和后端插件接口仍未接入，不计入 TASK-011 原验收范围。
 
