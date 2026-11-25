@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import io
 import json
 import os
 import re
@@ -24,7 +25,7 @@ import stat
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Sequence
 
 from cryptography.hazmat.primitives import serialization
@@ -128,12 +129,16 @@ def _safe_path(
         raise PluginPackageError("unsafe_path", f"路径包含不允许的字符: {value!r}", path=field)
     if re.match(r"^[A-Za-z]:", value):
         raise PluginPackageError("unsafe_path", f"不允许盘符路径: {value!r}", path=field)
-    path = Path(value)
+    path = PurePosixPath(value)
     if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
         raise PluginPackageError("unsafe_path", f"路径必须位于包内: {value!r}", path=field)
     normalized = path.as_posix()
     if normalized != value:
         raise PluginPackageError("unsafe_path", f"路径必须使用规范的 / 分隔: {value!r}", path=field)
+    for part in path.parts:
+        if (part.endswith((".", " ")) or PureWindowsPath(part).is_reserved()
+                or any(ord(char) < 32 or char in '<>:"|?*' for char in part)):
+            raise PluginPackageError("unsafe_path", "路径不能在 Windows 上安全使用", path=value)
     if allow_directory and (value == "payload" or value.startswith("payload/")):
         return value
     if value in CONTROL_FILES:
@@ -149,6 +154,15 @@ def _safe_path(
             path=field,
         )
     return value
+
+
+def _register_windows_path(paths: dict[str, tuple[str, bool]], path: str, *, directory: bool = False) -> None:
+    parts = path.split("/")
+    for index in range(1, len(parts) + 1):
+        prefix = "/".join(parts[:index])
+        entry = (prefix, directory or index < len(parts))
+        if paths.setdefault(prefix.casefold(), entry) != entry:
+            raise PluginPackageError("duplicate_path", "路径在 Windows 上与另一个文件或目录冲突", path=path)
 
 
 def _expect_object(value: Any, *, field: str, code: str = "invalid_manifest") -> dict[str, Any]:
@@ -316,20 +330,32 @@ def _collect_source_files(source: Path) -> dict[str, bytes]:
     if not source.is_dir():
         raise PluginPackageError("invalid_source", f"源目录不存在: {source}", path=str(source))
     files: dict[str, bytes] = {}
-    for path in sorted(source.rglob("*")):
-        if not path.is_file():
-            continue
-        relative = path.relative_to(source).as_posix()
-        if relative == MANIFEST_NAME:
-            continue
-        safe = _safe_path(relative, field=relative, allow_license=True)
-        if path.stat().st_size > MAX_FILE_BYTES:
-            raise PluginPackageError("file_too_large", f"文件超过 {MAX_FILE_BYTES} 字节", path=safe)
-        if safe in files:
-            raise PluginPackageError("duplicate_path", f"源目录重复文件: {safe}", path=safe)
-        files[safe] = path.read_bytes()
-        if len(files) > MAX_FILES:
-            raise PluginPackageError("too_many_files", f"文件数超过 {MAX_FILES}", path=safe)
+    windows_paths: dict[str, tuple[str, bool]] = {}
+    total = 0
+    for directory, folders, filenames in os.walk(source):
+        for name in folders + filenames:
+            path = Path(directory) / name
+            relative = path.relative_to(source).as_posix()
+            info = path.lstat()
+            if (stat.S_ISLNK(info.st_mode)
+                    or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                raise PluginPackageError("unsafe_path", "打包源不允许链接或重解析点", path=relative)
+            if stat.S_ISDIR(info.st_mode) or relative == MANIFEST_NAME:
+                continue
+            safe = _safe_path(relative, field=relative, allow_license=True)
+            if not stat.S_ISREG(info.st_mode):
+                raise PluginPackageError("unsafe_path", "打包源必须是普通文件", path=safe)
+            _register_windows_path(windows_paths, safe)
+            if len(files) >= MAX_FILES:
+                raise PluginPackageError("too_many_files", f"文件数超过 {MAX_FILES}", path=safe)
+            with path.open("rb") as handle:
+                data = handle.read(MAX_FILE_BYTES + 1)
+            if len(data) > MAX_FILE_BYTES:
+                raise PluginPackageError("file_too_large", f"文件超过 {MAX_FILE_BYTES} 字节", path=safe)
+            total += len(data)
+            if total > MAX_UNCOMPRESSED_BYTES:
+                raise PluginPackageError("package_too_large", "打包源文件的总大小超出上限", path=safe)
+            files[safe] = data
     if not files:
         raise PluginPackageError("missing_file", "源目录没有 payload 文件")
     return files
@@ -344,15 +370,18 @@ def pack_plugin(source: str | Path, private_key: str | Path, output: str | Path)
 
     source = Path(source)
     output = Path(output)
+    source_files = _collect_source_files(source)
     manifest_path = source / MANIFEST_NAME
     try:
-        manifest_raw = manifest_path.read_bytes()
+        with manifest_path.open("rb") as handle:
+            manifest_raw = handle.read(MAX_FILE_BYTES + 1)
     except OSError as exc:
         raise PluginPackageError("missing_manifest", f"缺少 {MANIFEST_NAME}", path=str(manifest_path)) from exc
+    if len(manifest_raw) > MAX_FILE_BYTES:
+        raise PluginPackageError("file_too_large", "清单文件大小超出上限", path=MANIFEST_NAME)
     manifest = _expect_object(_json_no_duplicates(manifest_raw, code="invalid_manifest", label=MANIFEST_NAME), field=MANIFEST_NAME)
     # The source manifest may leave files empty; pack replaces it with the
     # computed digest map before validation and signing.
-    source_files = _collect_source_files(source)
     manifest = dict(manifest)
     manifest["files"] = {name: sha256_bytes(data) for name, data in sorted(source_files.items())}
     _validate_manifest(manifest, source_files=set(source_files))
@@ -362,6 +391,10 @@ def pack_plugin(source: str | Path, private_key: str | Path, output: str | Path)
     signature = key.sign(signed_manifest)
     signature_doc = _signature_document(key_id, signed_manifest, signature)
     signature_raw = canonical_json(signature_doc)
+    if len(signed_manifest) > MAX_FILE_BYTES:
+        raise PluginPackageError("file_too_large", "签名清单大小超出上限", path=MANIFEST_NAME)
+    if len(signed_manifest) + len(signature_raw) + sum(map(len, source_files.values())) > MAX_UNCOMPRESSED_BYTES:
+        raise PluginPackageError("package_too_large", "清单、签名与文件的总大小超出上限", path=str(output))
 
     output.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_name = tempfile.mkstemp(prefix=output.name + ".", suffix=".tmp", dir=output.parent)
@@ -382,26 +415,34 @@ def pack_plugin(source: str | Path, private_key: str | Path, output: str | Path)
     return output
 
 
-def _read_zip(path: Path) -> tuple[bytes, bytes, dict[str, bytes]]:
-    if not path.is_file():
-        raise PluginPackageError("missing_package", f"包不存在: {path}", path=str(path))
-    if path.stat().st_size > MAX_PACKAGE_BYTES:
-        raise PluginPackageError("package_too_large", f"包超过 {MAX_PACKAGE_BYTES} 字节", path=str(path))
+def _read_zip(path: Path) -> tuple[bytes, bytes, dict[str, bytes], str]:
     try:
-        archive = zipfile.ZipFile(path)
+        if not path.is_file():
+            raise PluginPackageError("missing_package", f"包不存在: {path}", path=str(path))
+        with path.open("rb") as handle:
+            package_raw = handle.read(MAX_PACKAGE_BYTES + 1)
+        if len(package_raw) > MAX_PACKAGE_BYTES:
+            raise PluginPackageError("package_too_large", f"包超过 {MAX_PACKAGE_BYTES} 字节", path=str(path))
+        archive = zipfile.ZipFile(io.BytesIO(package_raw))
     except (OSError, zipfile.BadZipFile) as exc:
         raise PluginPackageError("invalid_zip", f"不是有效 ZIP: {exc}", path=str(path)) from exc
     with archive:
         infos = archive.infolist()
         names: set[str] = set()
+        windows_paths: dict[str, tuple[str, bool]] = {}
         data: dict[str, bytes] = {}
         total = 0
         for info in infos:
-            name = info.filename
-            if info.is_dir():
-                _safe_path(name.rstrip("/"), field=name, allow_directory=True)
+            name = info.orig_filename
+            mode = info.external_attr >> 16
+            if stat.S_ISLNK(mode):
+                raise PluginPackageError("unsafe_path", "包内不允许符号链接", path=name)
+            if name.endswith("/"):
+                directory = _safe_path(name[:-1], field=name, allow_directory=True)
+                _register_windows_path(windows_paths, directory, directory=True)
                 continue
             safe = _safe_path(name, field=name, allow_license=True, allow_control=True)
+            _register_windows_path(windows_paths, safe)
             if safe in names:
                 raise PluginPackageError("duplicate_path", f"ZIP 重复路径: {safe}", path=safe)
             names.add(safe)
@@ -412,17 +453,17 @@ def _read_zip(path: Path) -> tuple[bytes, bytes, dict[str, bytes]]:
             total += info.file_size
             if total > MAX_UNCOMPRESSED_BYTES:
                 raise PluginPackageError("package_too_large", f"解压后超过 {MAX_UNCOMPRESSED_BYTES} 字节", path=str(path))
-            mode = info.external_attr >> 16
-            if stat.S_ISLNK(mode):
-                raise PluginPackageError("unsafe_path", "包内不允许符号链接", path=safe)
-            data[safe] = archive.read(info)
+            try:
+                data[safe] = archive.read(info)
+            except (OSError, RuntimeError, NotImplementedError, zipfile.BadZipFile) as exc:
+                raise PluginPackageError("invalid_zip", "无法读取或校验 ZIP 条目", path=safe) from exc
         if MANIFEST_NAME not in data:
             raise PluginPackageError("missing_manifest", "包内缺少 manifest.json", path=MANIFEST_NAME)
         if SIGNATURE_NAME not in data:
             raise PluginPackageError("missing_signature", "包内缺少 signature.json", path=SIGNATURE_NAME)
         return data[MANIFEST_NAME], data[SIGNATURE_NAME], {
             name: value for name, value in data.items() if name not in CONTROL_FILES
-        }
+        }, sha256_bytes(package_raw)
 
 
 def _validate_signature(
@@ -468,7 +509,7 @@ def verify_plugin(
     """Verify one package without running any of its code."""
 
     package = Path(package)
-    manifest_raw, signature_raw, files = _read_zip(package)
+    manifest_raw, signature_raw, files, package_digest = _read_zip(package)
     manifest = _expect_object(
         _json_no_duplicates(manifest_raw, code="invalid_manifest", label=MANIFEST_NAME),
         field=MANIFEST_NAME,
@@ -499,7 +540,7 @@ def verify_plugin(
     verified = VerifiedPackage(
         path=package,
         manifest=manifest,
-        package_sha256=sha256_bytes(package.read_bytes()),
+        package_sha256=package_digest,
         key=key,
         signature=signature,
         files=tuple(sorted(manifest_files)),

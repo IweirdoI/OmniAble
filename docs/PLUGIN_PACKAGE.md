@@ -16,6 +16,8 @@ LICENSE                # 可选，manifest.license_file 指向它
 
 不允许绝对路径、`..`、盘符、反斜杠、符号链接、重复 ZIP 路径或未列入清单的额外文件。
 包大小、单文件大小、文件数和解压总大小都有上限。
+Windows 保留名称、路径尾随点或空格、文件与目录冲突及仅大小写不同的路径均拒绝。
+打包源中的链接和重解析点也会被拒绝。验签和整包摘要使用同一次读取的包字节。
 
 ## manifest 示例
 
@@ -148,14 +150,14 @@ CLI 以 JSON 输出 `code`、`message` 和可定位的 `path`，失败返回非�
 
 ```powershell
 # 验示例包（不联网、不执行 payload）
-& 'D:\ICT\.venv\Scripts\python.exe' scripts/plugin_package.py verify `
+./.venv/Scripts/python.exe scripts/plugin_package.py verify `
   plugins/samples/echo.mko `
   --trust plugins/trust/test-root.json `
   --revocations plugins/trust/revocations.json `
   --host-version 1.4.0
 
 # 验目录并检查重复 ID / 依赖
-& 'D:\ICT\.venv\Scripts\python.exe' scripts/plugin_package.py verify-catalog `
+./.venv/Scripts/python.exe scripts/plugin_package.py verify-catalog `
   plugins/samples --trust plugins/trust/test-root.json `
   --revocations plugins/trust/revocations.json --host-version 1.4.0
 ```
@@ -163,7 +165,7 @@ CLI 以 JSON 输出 `code`、`message` 和可定位的 `path`，失败返回非�
 打包需要发布者自己的 Ed25519 私钥；私钥不进入包，也不提交到仓库：
 
 ```powershell
-& 'D:\ICT\.venv\Scripts\python.exe' scripts/plugin_package.py pack `
+./.venv/Scripts/python.exe scripts/plugin_package.py pack `
   plugins/samples/echo --key C:\path\to\publisher-key.pem --out echo.mko
 ```
 

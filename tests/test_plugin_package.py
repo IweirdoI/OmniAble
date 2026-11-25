@@ -146,6 +146,40 @@ def _rewrite_zip(path: Path, replacements: dict[str, bytes]) -> None:
             archive.writestr(name, replacements.get(name, value))
 
 
+@pytest.mark.parametrize(("extra_name", "error"), [
+    ("payload/NUL.txt", "unsafe_path"),
+    ("payload/notes.", "unsafe_path"),
+    ("payload/MAIN.py", "duplicate_path"),
+    ("payload/main.py/notes.txt", "duplicate_path"),
+])
+def test_verifier_rejects_windows_path_conflicts(tmp_path, extra_name, error):
+    private, key = _keypair()
+    package = _raw_package(tmp_path / "paths.mko", _manifest(), {
+        "payload/main.py": b"VALUE = 1\n",
+        extra_name: b"sample text",
+    }, private)
+    with pytest.raises(PluginPackageError) as exc:
+        verify_plugin(package, _trust(key), "1.4.0")
+    assert exc.value.code == error
+
+
+def test_package_digest_uses_the_verified_byte_snapshot(tmp_path, monkeypatch):
+    private, key = _keypair()
+    package = pack_plugin(_source(tmp_path), _key_file(tmp_path, private), tmp_path / "snapshot.mko")
+    expected = sha256_bytes(package.read_bytes())
+    real_open = Path.open
+    reads = []
+
+    def open_counted(path, *args, **kwargs):
+        if path == package:
+            reads.append(path)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", open_counted)
+    assert verify_plugin(package, _trust(key), "1.4.0").package_sha256 == expected
+    assert reads == [package]
+
+
 def test_sample_package_verifies_offline_with_local_trust_root() -> None:
     trust = TrustStore.load(
         ROOT / "plugins" / "trust" / "test-root.json",

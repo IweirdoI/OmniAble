@@ -16,7 +16,7 @@ error contract.
 Verify the sample:
 
 ```powershell
-& 'D:\ICT\.venv\Scripts\python.exe' scripts/plugin_package.py verify `
+./.venv/Scripts/python.exe scripts/plugin_package.py verify `
   plugins/samples/echo.mko `
   --trust plugins/trust/test-root.json `
   --revocations plugins/trust/revocations.json `
