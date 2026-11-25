@@ -4,15 +4,17 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
+const { captureFailure, launchOptions } = require('./browser-artifacts.cjs');
 const fixtures = process.argv[2];
 if (!fixtures) throw new Error('Pass the FIXTURE_DIR printed by serve_api.py');
 const base = new URL(process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5186');
 base.searchParams.set('view', 'chat');
 
 (async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await chromium.launch(launchOptions());
+  let page = null;
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     page.setDefaultTimeout(15000);
     const errors = [], uploads = [], ingests = [], checks = [];
     page.on('pageerror', err => errors.push(err.message));
@@ -129,5 +131,8 @@ base.searchParams.set('view', 'chat');
     assert.deepEqual(errors, []);
     fs.writeFileSync(path.join(fixtures, 'browser-report.json'), JSON.stringify({ checks, errors }, null, 2));
     console.log('All browser checks passed.');
+  } catch (error) {
+    await captureFailure(page, 'ingestion', error);
+    throw error;
   } finally { await browser.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });
