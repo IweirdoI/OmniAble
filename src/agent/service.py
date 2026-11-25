@@ -15,6 +15,7 @@ import asyncio
 import queue
 import threading
 import time
+from dataclasses import replace
 from time import perf_counter
 from typing import Any, Literal, TypedDict
 from urllib.parse import urlparse
@@ -715,7 +716,6 @@ class MemoryAgent:
             tools_enabled=self.model.tools_enabled,
             exec_enabled=self.exec_enabled,
             web_enabled=self.web_enabled,
-            timeout_limit=ctx.remaining_seconds(),
             search_memory=_memory_search,
             memory_payload=_memory_payload,
         )
@@ -755,7 +755,8 @@ class MemoryAgent:
                         executed = True
                         if mutates:
                             ctx.mutations.add(fingerprint)
-                        ok, content, dispatch_error = dispatch_action(name, args, ctx_action)
+                        action_ctx = replace(ctx_action, timeout_limit=ctx.remaining_seconds())
+                        ok, content, dispatch_error = dispatch_action(name, args, action_ctx)
                         if dispatch_error == "timeout":
                             raise RunTimedOut()
                         if dispatch_error:

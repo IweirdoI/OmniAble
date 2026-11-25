@@ -62,6 +62,8 @@ class Action:
     mutates: bool = False          # 变更类动作：做重复指纹与工件核验
     artifact: bool = False         # 成功后核对沙箱内工件（文件类写操作）
     budget_key: str | None = None  # 需要请求级时钟的动作键（仅 exec_terminal）
+    arguments_version: int = 1
+    result_version: int = 1
 
     @property
     def function_schema(self) -> dict[str, Any]:
@@ -283,12 +285,17 @@ def _calculate(expression: str) -> tuple[bool, str]:
 
 
 def _search_files(pattern: str, path: str | None = None) -> tuple[bool, str]:
-    if len(pattern) > 200 or ".." in pattern:
-        return False, "搜索模式无效或过长（上限 200 字符）。"
     root = exec_root()
     base = _sandbox_resolve(path or ".", root)
     if base is None:
         return False, f"拒绝访问沙箱目录之外的路径：{path}"
+    if not os.path.isdir(base):
+        return False, f"目录不存在：{path or '.'}"
+    pattern = (pattern or "").strip()
+    if not pattern:
+        return False, "搜索模式为空。"
+    if len(pattern) > 200 or ".." in pathlib.PureWindowsPath(pattern).parts:
+        return False, "搜索模式无效或过长（上限 200 字符）。"
     try:
         matches = [os.path.relpath(str(p), root)
                    for p in pathlib.Path(base).glob(pattern)
@@ -443,13 +450,11 @@ def _web_fetch(url: str, timeout: float | None = None) -> tuple[bool, str]:
         return False, f"抓取失败：{exc}"
     if len(raw) > _WEB_FETCH_MAX_BYTES:
         raw = raw[:_WEB_FETCH_MAX_BYTES]
-    try:
-        text = raw.decode("utf-8", errors="replace")
-    except UnicodeDecodeError:
-        text = raw.decode("latin-1", errors="replace")
+    text = raw.decode("utf-8", errors="replace")
+    text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
     if len(text) > _WEB_FETCH_LIMIT:
-        text = text[:_WEB_FETCH_LIMIT] + "\n...（内容已截断）"
-    return True, f"[网页 {url}]\n{text}"
+        text = text[:_WEB_FETCH_LIMIT] + "\n...（网页内容已截断）"
+    return True, f"[抓取 {url} | {ctype}]\n{text}"
 
 
 # ---------------------------------------------------------------------------
@@ -482,7 +487,7 @@ def _v_read_file(args: dict) -> dict:
 
 
 def _v_list_directory(args: dict) -> dict:
-    if set(args) - {"path"}:
+    if set(args) - {"path"} or not isinstance(args.get("path"), (str, type(None))):
         raise ValueError("invalid tool")
     return {"path": args.get("path")}
 
@@ -502,6 +507,8 @@ def _v_calculate(args: dict) -> dict:
 def _v_search_files(args: dict) -> dict:
     if set(args) - {"pattern", "path"} or not isinstance(args.get("pattern"), str) or not args["pattern"].strip():
         raise ValueError("invalid tool")
+    if not isinstance(args.get("path"), (str, type(None))):
+        raise ValueError("invalid path")
     return {"pattern": args["pattern"], "path": args.get("path")}
 
 
@@ -510,6 +517,11 @@ def _v_search_content(args: dict) -> dict:
         raise ValueError("invalid tool")
     if not isinstance(args.get("pattern"), str) or not args["pattern"].strip():
         raise ValueError("invalid tool")
+    if (not isinstance(args.get("path"), (str, type(None)))
+            or not isinstance(args.get("glob", "*"), str)
+            or type(args.get("context", 0)) is not int
+            or not isinstance(args.get("case_sensitive", False), bool)):
+        raise ValueError("invalid search options")
     return {"pattern": args["pattern"], "path": args.get("path"),
             "glob": args.get("glob", "*"), "context": args.get("context", 0),
             "case_sensitive": bool(args.get("case_sensitive", False))}
@@ -771,10 +783,7 @@ def dispatch_action(name: str, args: dict, ctx: ActionContext) -> tuple[bool, st
             ok, content = action.execute(**kwargs)
         # 执行层失败兜底：与原 service._tools 的 error or "tool_failed" 口径一致
         return ok, content, ("tool_failed" if not ok else None)
-    except ValueError as exc:
-        _ = exc
-        return False, "工具参数无效，未完成操作。", "invalid_arguments"
-    except KeyError:
+    except (ValueError, KeyError, TypeError):
         return False, "工具参数无效，未完成操作。", "invalid_arguments"
     except OSError:
         return False, "工具执行失败，请检查输入及服务状态。", "tool_error"

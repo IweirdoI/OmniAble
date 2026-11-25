@@ -26,6 +26,9 @@ $env:AGENT_ENABLE_TOOLS = '1'
 鉴权；`user_id` 不提供文件隔离。远程部署应配置鉴权并限制服务访问者，
 不要把任意用户输入当作工作区根目录。这不是操作系统沙箱，不能隔离同一主机上的恶意进程。
 
+动作目录的 `POST /workspace/actions/{name}` 必须配置 `API_AUTH_TOKEN` 并发送
+`Authorization: Bearer <token>`。动作源于服务端选定的工作区，只开放只读工具。
+
 ## 界面与操作
 
 - 文件：逐级目录浏览、面包屑返回、当前目录筛选与分页；UTF-8 文本预览、新建、编辑、保存和删除。

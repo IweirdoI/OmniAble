@@ -2,9 +2,9 @@
 import os
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from src.agent.workspace import WorkspaceError, get_workspace, workspace_enabled
 
 router = APIRouter(prefix='/workspace', tags=['workspace'])
@@ -93,16 +93,24 @@ def accept(req: FileVersion):
 # ---------------------------------------------------------------------------
 
 class ActionCall(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+def require_action_host(request: Request):
+    if not getattr(request.state, 'api_authenticated', False):
+        raise HTTPException(status_code=401, detail='工作区动作需要已验证的宿主 API 令牌。')
 
 
 @router.get('/actions')
 def list_actions():
     return {'enabled': agent_tools_enabled(),
-            'actions': [{'name': a.name, 'mutates': a.mutates} for a in read_only_actions()]}
+            'actions': [{'name': a.name, 'mutates': a.mutates,
+                         'arguments_version': a.arguments_version,
+                         'result_version': a.result_version} for a in read_only_actions()]}
 
 
-@router.post('/actions/{name}', dependencies=[Depends(enabled)])
+@router.post('/actions/{name}', dependencies=[Depends(require_action_host), Depends(enabled)])
 def call_action(name: str, call: ActionCall):
     """与模型同一 `dispatch_action`：同一只读动作经任一入口返回等价结果。"""
     from src.agent.actions import ActionContext, actions_available, dispatch_action, get_action

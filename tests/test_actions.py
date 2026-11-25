@@ -162,13 +162,22 @@ def test_search_memory_dispatch_returns_triple() -> None:
 def test_workspace_actions_api_equivalence_and_rejections(tmp_path, monkeypatch):
     """同一只读动作经 API 与 dispatch 等价；缺宿主凭据/跨工作区在执行前拒绝。"""
     from fastapi.testclient import TestClient
-    from api.server import app
+    from api import server
 
     monkeypatch.setenv("AGENT_EXEC_CWD", str(tmp_path))
     monkeypatch.setenv("AGENT_ENABLE_WORKSPACE", "1")
     (tmp_path / "note.txt").write_text("动作目录正文", encoding="utf-8")
 
-    with TestClient(app) as client:
+    with TestClient(server.app) as client:
+        monkeypatch.setattr(server, "_API_AUTH_TOKEN", "")
+        assert client.post("/workspace/actions/read_file", json={
+            "arguments": {"path": "note.txt"},
+        }).status_code == 401
+        monkeypatch.setattr(server, "_API_AUTH_TOKEN", "test-host-token")
+        assert client.post("/workspace/actions/read_file", json={
+            "arguments": {"path": "note.txt"},
+        }).status_code == 401
+        client.headers["Authorization"] = "Bearer test-host-token"
         # 工具主开关关闭：与模型一致，动作 API 整体拒绝
         monkeypatch.setenv("AGENT_ENABLE_TOOLS", "0")
         listing = client.get("/workspace/actions").json()
@@ -191,7 +200,7 @@ def test_workspace_actions_api_equivalence_and_rejections(tmp_path, monkeypatch)
         assert resp.status_code == 200 and direct_ok is True
         assert resp.json()["result"] == direct_text
 
-        # 拒绝场景 1：缺少宿主凭据（宿主专属动作，拒绝理由不随开关波动）→ 403
+        # 即使持有宿主凭据，也只能直调只读工具。
         assert client.post("/workspace/actions/write_file",
                            json={"arguments": {"path": "x.txt", "content": "y"}}).status_code == 403
         assert client.post("/workspace/actions/exec_terminal",
@@ -199,6 +208,17 @@ def test_workspace_actions_api_equivalence_and_rejections(tmp_path, monkeypatch)
         # search_memory 需要请求级记忆上下文 → 403
         assert client.post("/workspace/actions/search_memory",
                            json={"arguments": {"query": "x"}}).status_code == 403
+
+        assert client.post("/workspace/actions/read_file", json={
+            "user_id": "someone", "arguments": {"path": "note.txt"},
+        }).status_code == 422
+
+        for options in ({"context": {}}, {"glob": 5}, {"case_sensitive": "false"}):
+            resp = client.post("/workspace/actions/search_content", json={
+                "arguments": {"pattern": "动作目录", **options},
+            })
+            assert resp.status_code == 400
+            assert resp.json()["error_code"] == "invalid_arguments"
 
         # 拒绝场景 2：跨工作区（沙箱外路径）在执行前拒绝 → 400 + error_code
         resp = client.post("/workspace/actions/read_file",
