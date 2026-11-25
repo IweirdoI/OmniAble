@@ -13,6 +13,7 @@ import tempfile
 import threading
 from functools import lru_cache
 from contextlib import contextmanager
+from typing import Callable
 
 MAX_BYTES = 64 * 1024
 MAX_CHANGES = 200
@@ -34,6 +35,11 @@ def workspace_enabled() -> bool:
 
 def revision(data: bytes | None) -> str | None:
     return hashlib.sha256(data).hexdigest() if data is not None else None
+
+
+class WorkspaceRevisionConflict(WorkspaceError):
+    def __init__(self):
+        super().__init__('文件已被修改，请重新读取后比较；未覆盖磁盘内容。', 409)
 
 
 class Workspace:
@@ -174,12 +180,13 @@ class Workspace:
             if os.path.exists(tmp):
                 os.unlink(tmp)
 
-    def _mutate(self, path: str, data: bytes | None, expected: str | None) -> dict:
+    def _mutate(self, path: str, data: bytes | None, expected: str | None,
+                before_write: Callable[[], None] | None = None) -> dict:
         with self.lock, self._writer():
             target = self.resolve(path)
             before = self._bytes(target)
             if revision(before) != expected:
-                raise WorkspaceError('文件已被修改，请重新读取后比较；未覆盖磁盘内容。', 409)
+                raise WorkspaceRevisionConflict()
             if data is None and before is None:
                 raise WorkspaceError('文件不存在。', 404)
             if before == data:
@@ -195,6 +202,8 @@ class Workspace:
                 # Persist recovery bytes BEFORE touching the user's file.
                 trash = before if data is None else None
                 trash_mode = target.stat().st_mode if data is None else None
+                if before_write is not None:
+                    before_write()
                 conn.execute('INSERT OR REPLACE INTO changes (path, original, latest, mode, trash, trash_mode) VALUES (?, ?, ?, ?, ?, ?)',
                              (rel, original, revision(data), mode, trash, trash_mode))
                 conn.commit()
@@ -203,18 +212,20 @@ class Workspace:
                 conn.close()
             return {'path': rel, 'revision': revision(data), 'changed': True, 'deleted': data is None}
 
-    def write(self, path: str, content: str, expected: str | None) -> dict:
+    def write(self, path: str, content: str, expected: str | None, *,
+              before_write: Callable[[], None] | None = None) -> dict:
         if not isinstance(content, str):
             raise WorkspaceError('content 必须是字符串。')
         data = content.encode('utf-8')
         if len(data) > MAX_BYTES or '\0' in content:
             raise WorkspaceError('仅支持不超过 64 KiB 的 UTF-8 文本。', 413)
-        return self._mutate(path, data, expected)
+        return self._mutate(path, data, expected, before_write)
 
-    def delete(self, path: str, expected: str) -> dict:
+    def delete(self, path: str, expected: str, *,
+               before_write: Callable[[], None] | None = None) -> dict:
         if not expected:
             raise WorkspaceError('删除前必须读取文件版本。')
-        return self._mutate(path, None, expected)
+        return self._mutate(path, None, expected, before_write)
 
     def changes(self) -> list[dict]:
         with self.lock:

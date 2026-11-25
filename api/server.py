@@ -41,6 +41,13 @@ class SessionCreateRequest(BaseModel):
     title: str | None = Field(default=None, max_length=200)
 
 
+class ConfirmationDecision(BaseModel):
+    # 一次性确认决定（TASK-020 / Issue #25）：approve / deny；
+    # token 为 SSE confirmation_request 事件下发的可信宿主凭据
+    decision: str = Field(pattern="^(approve|deny)$")
+    token: str = Field(min_length=1, max_length=128)
+
+
 app = FastAPI(title="MOKOA Desktop Memory API", version="0.3.0")
 
 from api.workspace import router as workspace_router
@@ -204,6 +211,23 @@ async def agent_chat_stream(req: ChatRequest):
 def create_agent_session(req: SessionCreateRequest) -> dict[str, Any]:
     session = session_store.create_session(req.user_id, title=req.title)
     return {"user_id": req.user_id, "session": session}
+
+
+@app.post("/agent/confirmations/{confirm_id}")
+def decide_confirmation(confirm_id: str, req: ConfirmationDecision) -> dict[str, Any]:
+    """一次性确认决定（TASK-020）：携带 SSE 下发的宿主凭据（token）。
+
+    首次生效并唤醒等待的执行轮次；重复提交幂等返回首个决定；
+    未知/已失效 id → 404；token 不匹配（第三方拿到 confirm_id 也无法代投）→ 403。
+    """
+    from src.agent import confirmations
+
+    result, error = confirmations.registry().decide(confirm_id, req.decision, req.token)
+    if error == "unknown":
+        raise HTTPException(status_code=404, detail="确认请求不存在或已失效。")
+    if error == confirmations.BAD_TOKEN:
+        raise HTTPException(status_code=403, detail="宿主凭据无效，决定未接受。")
+    return result
 
 
 @app.get("/agent/sessions/{user_id}")

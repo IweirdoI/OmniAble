@@ -31,7 +31,8 @@ from time import perf_counter
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from src.agent.workspace import WorkspaceError, get_workspace
+from src.agent.confirmations import CONFIRMABLE_ACTIONS, REVISION_CHANGED, ConfirmationRequest
+from src.agent.workspace import WorkspaceError, WorkspaceRevisionConflict, get_workspace
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +50,8 @@ class ActionContext:
     timeout_limit: float | None = None   # 请求剩余时间（秒）；None 表示不限
     search_memory: Callable[[str], list[dict[str, Any]]] | None = None
     memory_payload: Callable[[list[dict[str, Any]]], tuple[bool, str]] | None = None
+    confirm_file_change: Callable[[str, dict], ConfirmationRequest | tuple[bool, str, str] | None] | None = None
+    before_file_write: Callable[[], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -379,23 +382,31 @@ def _search_content(pattern: str, path: str | None = None, glob: str = "*",
     return True, f"[搜索内容 {pattern} | glob={glob} | 扫描 {scanned} 个文件]\n{text}"
 
 
-def _write_file(path: str, content: str, overwrite: bool = False) -> tuple[bool, str]:
+def _write_file(path: str, content: str, overwrite: bool = False, *,
+                confirmation: ConfirmationRequest | None = None,
+                before_write: Callable[[], None] | None = None) -> tuple[bool, str]:
     try:
         workspace = get_workspace()
-        target = workspace.resolve(path)
         expected = None
-        if target.exists():
+        if confirmation is not None:
+            if confirmation.target_exists and not overwrite:
+                return False, '文件已存在，如需覆盖请设置 overwrite=true，或修改写入路径。'
+            expected = confirmation.expected_revision
+        elif workspace.resolve(path).exists():
             if not overwrite:
                 return False, '文件已存在，如需覆盖请设置 overwrite=true，或修改写入路径。'
             expected = workspace.read(path)['revision']
-        workspace.write(path, content, expected)
+        workspace.write(path, content, expected, before_write=before_write)
         return True, f'已写入 {path}（{len(content)} 字符）。'
     except (WorkspaceError, OSError) as exc:
+        if confirmation is not None and isinstance(exc, WorkspaceRevisionConflict):
+            raise
         return False, str(exc) if isinstance(exc, WorkspaceError) else '写入失败。'
 
 
-def _edit_file(path: str, old_string: str, new_string: str,
-               replace_all: bool = False) -> tuple[bool, str]:
+def _edit_file(path: str, old_string: str, new_string: str, replace_all: bool = False, *,
+               confirmation: ConfirmationRequest | None = None,
+               before_write: Callable[[], None] | None = None) -> tuple[bool, str]:
     if not isinstance(old_string, str) or not old_string:
         return False, 'old_string 不能为空。'
     if not isinstance(new_string, str):
@@ -403,6 +414,8 @@ def _edit_file(path: str, old_string: str, new_string: str,
     try:
         workspace = get_workspace()
         item = workspace.read(path)
+        if confirmation is not None and item['revision'] != confirmation.expected_revision:
+            raise WorkspaceRevisionConflict()
         data = item['content']
         count = data.count(old_string)
         if not count:
@@ -410,19 +423,27 @@ def _edit_file(path: str, old_string: str, new_string: str,
         if count > 1 and not replace_all:
             return False, f'old_string 出现 {count} 次，存在歧义；请提供更具体的字符串，或设置 replace_all=true。'
         content = data.replace(old_string, new_string) if replace_all else data.replace(old_string, new_string, 1)
-        workspace.write(path, content, item['revision'])
+        expected = confirmation.expected_revision if confirmation is not None else item['revision']
+        workspace.write(path, content, expected, before_write=before_write)
         return True, f'已更新 {path}（替换 {count if replace_all else 1} 处）。'
     except (WorkspaceError, OSError) as exc:
+        if confirmation is not None and isinstance(exc, WorkspaceRevisionConflict):
+            raise
+        if confirmation is not None and isinstance(exc, WorkspaceError) and exc.status == 404:
+            raise WorkspaceRevisionConflict() from exc
         return False, str(exc) if isinstance(exc, WorkspaceError) else '更新失败。'
 
 
-def _delete_file(path: str) -> tuple[bool, str]:
+def _delete_file(path: str, *, confirmation: ConfirmationRequest | None = None,
+                 before_write: Callable[[], None] | None = None) -> tuple[bool, str]:
     try:
         workspace = get_workspace()
-        item = workspace.read(path)
-        workspace.delete(path, item['revision'])
+        expected = confirmation.expected_revision if confirmation is not None else workspace.read(path)['revision']
+        item = workspace.delete(path, expected, before_write=before_write)
         return True, f'已删除文件 {item["path"]}；可从侧栏变更记录恢复。'
     except (WorkspaceError, OSError) as exc:
+        if confirmation is not None and isinstance(exc, WorkspaceRevisionConflict):
+            raise
         return False, str(exc) if isinstance(exc, WorkspaceError) else '删除失败。'
 
 
@@ -761,6 +782,13 @@ def dispatch_action(name: str, args: dict, ctx: ActionContext) -> tuple[bool, st
         return False, "不支持的工具：未获允许或当前不可用。", "tool_unavailable"
     try:
         kwargs = action.validate(args)
+        if name in CONFIRMABLE_ACTIONS and ctx.confirm_file_change is not None:
+            confirmation = ctx.confirm_file_change(name, kwargs)
+            if isinstance(confirmation, tuple):
+                return confirmation
+            if confirmation is not None:
+                kwargs.update(path=confirmation.path, confirmation=confirmation,
+                              before_write=ctx.before_file_write)
         if action.name == "search_memory":
             # 契约：与其他动作一致返回三元组 (ok, content, error_code)。
             if ctx.search_memory is None or ctx.memory_payload is None:
@@ -783,6 +811,8 @@ def dispatch_action(name: str, args: dict, ctx: ActionContext) -> tuple[bool, st
             ok, content = action.execute(**kwargs)
         # 执行层失败兜底：与原 service._tools 的 error or "tool_failed" 口径一致
         return ok, content, ("tool_failed" if not ok else None)
+    except WorkspaceRevisionConflict as exc:
+        return False, str(exc), REVISION_CHANGED
     except (ValueError, KeyError, TypeError):
         return False, "工具参数无效，未完成操作。", "invalid_arguments"
     except OSError:

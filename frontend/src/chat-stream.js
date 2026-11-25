@@ -85,6 +85,13 @@ export async function streamChat(payload, onEvent, { headers = {}, signal, timeo
   }
 }
 
+export function expireConfirmations(message, status = 'expired') {
+  for (const card of message.confirmations || []) {
+    if (['pending', 'sending', 'approved'].includes(card.status)) card.status = status
+    card.token = ''
+  }
+}
+
 export function applyChatEvent(message, event) {
   if (event.type === 'run_started') message.runId = event.run_id
   else if (event.type === 'token') message.content += event.text || ''
@@ -97,6 +104,26 @@ export function applyChatEvent(message, event) {
   } else if (event.type === 'tool_result') {
     const step = message.steps.find(s => event.id ? s.id === event.id : s.name === event.name && s.status === 'running')
     if (step) { step.status = event.ok ? 'done' : 'failed'; step.result = event.content || '' }
+    const card = (message.confirmations || []).find(item => item.toolCallId === event.id)
+    if (card) {
+      card.status = event.ok ? 'applied' : event.error_code?.startsWith('confirmation_') ? event.error_code : 'not_applied'
+      card.token = ''
+    }
+  } else if (event.type === 'confirmation_request') {
+    // TASK-020：受控文件变更等待一次性决定。确认卡渲染在消息中，
+    // decision_token 为可信宿主凭据（决定端点必须回传）。
+    message.confirmations ||= []
+    message.confirmations.push({
+      id: event.confirm_id,
+      runId: event.run_id,
+      toolCallId: event.tool_call_id,
+      action: event.action,
+      path: event.path,
+      targetExists: !!event.target_exists,
+      summary: event.summary || '',
+      token: event.decision_token || '',
+      status: 'pending',
+    })
   } else if (event.type === 'done' || event.type === 'error') {
     message.status = event.workflow?.status || (event.type === 'error' ? 'failed' : 'completed')
     message.workflow = event.workflow
@@ -107,5 +134,8 @@ export function applyChatEvent(message, event) {
     } else message.failure = event.message || '智能体执行失败'
     for (const step of message.steps) if (step.status === 'running') step.status = 'interrupted'
     for (const phase of message.phases || []) if (phase.phase !== 'end') phase.phase = 'interrupted'
+    // 运行结束仍未决的确认卡不再可操作
+    const status = { timed_out: 'confirmation_timeout', cancelled: 'confirmation_disconnected' }
+    expireConfirmations(message, status[message.status])
   }
 }

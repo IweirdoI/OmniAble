@@ -29,6 +29,10 @@ $env:AGENT_ENABLE_TOOLS = '1'
 动作目录的 `POST /workspace/actions/{name}` 必须配置 `API_AUTH_TOKEN` 并发送
 `Authorization: Bearer <token>`。动作源于服务端选定的工作区，只开放只读工具。
 
+设置 `AGENT_REQUIRE_FILE_CONFIRM=1` 后，Agent 发起的文件写入、编辑和删除会在流式对话中请求确认。
+在确认卡用 Tab 切换操作、Enter 或空格提交，焦点在卡片上时可用 Esc 拒绝。
+批准只适用于卡片显示的目标及其当时版本。同步聊天没有确认通道，启用此设置时会拒绝文件变更。
+
 ## 界面与操作
 
 - 文件：逐级目录浏览、面包屑返回、当前目录筛选与分页；UTF-8 文本预览、新建、编辑、保存和删除。

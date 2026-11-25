@@ -37,3 +37,17 @@ button, a, input, textarea, select, summary { touch-action: manipulation; }
   .composer-options { justify-content: flex-start; }
   .chat-composer textarea { max-height: 34dvh; }
 }
+
+/* TASK-020：受控文件变更的一次性确认卡（键盘与读屏可用：原生 button + Esc） */
+.confirmation-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.confirmation-card { border: 1px solid var(--warn-border, #d9a441); border-radius: 10px; padding: 10px 12px; background: var(--warn-surface, #fff8e6); }
+.confirmation-title { margin: 0 0 4px; font-weight: 600; }
+.confirmation-path { margin-left: 6px; font-size: 0.92em; }
+.confirmation-new { color: var(--muted, #6b7280); font-size: 0.9em; }
+.confirmation-summary { margin: 0 0 8px; color: var(--muted, #4b5563); font-size: 0.92em; }
+.confirmation-actions { display: flex; gap: 8px; }
+.confirmation-approve, .confirmation-deny { border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+.confirmation-approve { background: var(--accent, #2563eb); color: #fff; border: 1px solid transparent; }
+.confirmation-deny { background: transparent; border: 1px solid var(--border, #9ca3af); }
+.confirmation-approve:focus-visible, .confirmation-deny:focus-visible { outline: 3px solid var(--focus, #f59e0b); outline-offset: 2px; }
+.confirmation-status { margin: 0; font-size: 0.9em; color: var(--muted, #4b5563); }

@@ -21,6 +21,7 @@ from typing import Any, Literal, TypedDict
 from urllib.parse import urlparse
 
 from src.agent.workspace import Workspace, WorkspaceError, get_workspace
+from src.agent import confirmations as _confirmations
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field, ConfigDict
@@ -418,6 +419,114 @@ from src.agent.actions import (  # noqa: E402
 )
 
 
+# ---------------------------------------------------------------------------
+# 受控文件变更的一次性用户确认（TASK-020 / Issue #25）
+# ---------------------------------------------------------------------------
+# 只对 write_file / edit_file / delete_file 挂闸门（只读计算与检索不经确认）。
+# 一次决定绑定 run / tool call / 规范相对路径 / 目标存在状态与版本；批准后
+# 携批准版本执行写入（CAS），关闭 check-then-write 窗口。
+
+def _canonical_target(path: str) -> tuple[str, bool, str | None]:
+    """规范化目标路径并读取存在状态/版本；失败抛 WorkspaceError。"""
+    workspace = get_workspace()
+    target = workspace.resolve(path)
+    relative = workspace.relative(target)
+    if not target.exists():
+        return relative, False, None
+    return relative, True, workspace.read(relative)['revision']
+
+
+def _build_confirmation_request(name: str, args: dict, ctx, call_id: str):
+    """构造绑定 run/tool call/路径/存在状态/版本的确认请求；无法绑定返回 None。"""
+    if name not in _confirmations.CONFIRMABLE_ACTIONS:
+        return None
+    path = args.get("path")
+    if not isinstance(path, str) or not path.strip():
+        return None
+    try:
+        relative, target_exists, expected_revision = _canonical_target(path)
+    except (WorkspaceError, OSError):
+        return None
+    if not target_exists and name != "write_file":
+        return None
+    if name == "write_file":
+        detail = f"写入 {len(args.get('content', ''))} 字符"
+    elif name == "edit_file":
+        detail = "文本替换"
+    else:
+        detail = "删除文件"
+    return _confirmations.ConfirmationRequest(
+        confirm_id=_confirmations.new_confirm_id(),
+        run_id=ctx.run_id,
+        tool_call_id=call_id,
+        action=name,
+        path=relative,
+        target_exists=target_exists,
+        expected_revision=expected_revision,
+        summary=detail,
+        decision_token=_confirmations.new_decision_token(),
+    )
+
+
+def _confirm_mutation(name: str, args: dict, ctx, call_id: str, *,
+                      emit, streaming: bool, request=None):
+    """受控文件变更的确认闸门。
+
+    Returns:
+        None                         —— 闸门关闭或动作无需确认（放行到分发）
+        (ok, content, error_code)    —— 已拒绝/超时/断线/决定作废（不执行）
+        ConfirmationRequest          —— 已批准，调用方须携批准版本执行写入
+    """
+    if name not in _confirmations.CONFIRMABLE_ACTIONS or not _confirmations.required():
+        return None
+    if request is None:
+        request = _build_confirmation_request(name, args, ctx, call_id)
+    if request is None:
+        return False, "无法确认此变更（缺少路径或版本信息），未执行。", \
+            _confirmations.REVISION_CHANGED
+    # 同步入口没有交互通道：fail-closed 拒绝，不静默放行
+    if not streaming:
+        return False, "变更类动作需要用户确认；同步入口不支持确认交互，未执行。", \
+            _confirmations.DENIED
+    _confirmations.registry().register(request)
+    emit({"type": "confirmation_request", **{
+        "confirm_id": request.confirm_id,
+        "run_id": request.run_id,
+        "tool_call_id": request.tool_call_id,
+        "action": request.action,
+        "path": request.path,
+        "target_exists": request.target_exists,
+        "expected_revision": request.expected_revision,
+        "summary": request.summary,
+        # 可信宿主凭据：仅持有本 SSE 连接的前端可见
+        "decision_token": request.decision_token,
+    }})
+    decision, decided = _confirmations.registry().wait(
+        request.confirm_id,
+        min(_confirmations.MAX_WAIT_SECONDS, max(0.0, ctx.remaining_seconds())),
+        cancelled=lambda: ctx.cancelled)
+    if decision == "approve":
+        # 批准后再次校验目标状态与版本：任一变化 → 本次决定作废
+        try:
+            _, exists, revision = _canonical_target(request.path)
+        except (WorkspaceError, OSError):
+            return False, f'确认期间文件 {request.path} 已不可读，本次决定作废；未执行。', \
+                _confirmations.REVISION_CHANGED
+        if exists != request.target_exists or revision != request.expected_revision:
+            return False, f'确认期间文件 {request.path} 已变化，本次决定作废；未执行。', \
+                _confirmations.REVISION_CHANGED
+        return request  # 已批准：调用方携批准版本执行写入
+    if decision == "deny":
+        return False, "用户拒绝此变更；未执行。", _confirmations.DENIED
+    if ctx.cancelled:
+        return False, "请求已取消或断开，变更未执行。", _confirmations.DISCONNECTED
+    if decided:
+        return False, "确认请求已失效（运行结束或连接断开），变更未执行。", \
+            _confirmations.DISCONNECTED
+    return False, f"确认等待超时（{int(_confirmations.MAX_WAIT_SECONDS)} 秒上限），变更未执行。", \
+        _confirmations.TIMEOUT
+
+
 SYSTEM = """你是麒忆智脑（MOKOA）的记忆助理，不是通用聊天机器人，也不是 ChatGPT 产品发布说明。
 本系统已经实现短 / 中 / 长期记忆，并由本机编排器管理：
 - 短期：刚接收的对话或文档，容量有限；访问热度 heat 达到阈值（默认 5）后，在 consolidate 时晋升中期。
@@ -755,7 +864,13 @@ class MemoryAgent:
                         executed = True
                         if mutates:
                             ctx.mutations.add(fingerprint)
-                        action_ctx = replace(ctx_action, timeout_limit=ctx.remaining_seconds())
+                        action_ctx = replace(
+                            ctx_action, timeout_limit=ctx.remaining_seconds(),
+                            confirm_file_change=lambda action, validated: _confirm_mutation(
+                                action, validated, ctx, call_id,
+                                emit=self._emit, streaming=self.streaming),
+                            before_file_write=lambda: ctx.check("confirmed_write"),
+                        )
                         ok, content, dispatch_error = dispatch_action(name, args, action_ctx)
                         if dispatch_error == "timeout":
                             raise RunTimedOut()
@@ -914,6 +1029,9 @@ class MemoryAgent:
         except ModelUnavailable:
             self._ctx.check("model_error")
             raise
+        finally:
+            # run 终态：未决确认全部失效，晚到决定无法驱动已结束的运行
+            _confirmations.registry().drop_run(self._ctx.run_id)
 
     def _error_terminal(self, ctx, message, reason="model_or_runtime_error"):
         return {"type": "error", "message": redact_sensitive_text(message),
@@ -993,6 +1111,8 @@ class MemoryAgent:
             # Cooperative cancellation, without blocking the event loop or releasing
             # the worker's slot before an uninterruptible call actually exits.
             ctx.cancel("client_disconnected")
+            # run 终态：未决确认全部失效，晚到决定无法驱动已结束的运行
+            _confirmations.registry().drop_run(ctx.run_id)
 
 
 # ---------------------------------------------------------------------------

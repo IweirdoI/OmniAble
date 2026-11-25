@@ -7,7 +7,7 @@ import { fileLink } from './workspace.js'
 import { authHeaders, requestApi } from './ingestion.js'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { streamChat, applyChatEvent } from './chat-stream.js'
+import { streamChat, applyChatEvent, expireConfirmations } from './chat-stream.js'
 import './workbench.css'
 import './plugins.css'
 import { createMemorySync, memoryPanels } from './memory-sync.js'
@@ -255,6 +255,36 @@ createApp({
         if (/^https?:\/\//i.test(href)) { event.preventDefault(); openWorkspace('web', href) }
         else { const path = fileLink(href); if (path) { event.preventDefault(); openWorkspace('file', path) } }
       } catch { event.preventDefault(); tell('链接格式无效') }
+    }
+
+    // TASK-020：确认卡的一次性决定（approve/deny）。卡片用原生 button，
+    // Tab 可达、Enter/Space 激活、Esc 拒绝（键盘与读屏均可用）。
+    const confirmationLabels = { write_file: '写入文件', edit_file: '修改文件', delete_file: '删除文件' }
+    const confirmationStatusLabels = {
+      pending: '等待确认', sending: '正在提交', approved: '已批准', denied: '已拒绝',
+      failed: '提交失败', expired: '已失效',
+      applied: '已执行', not_applied: '变更未执行',
+      confirmation_denied: '已拒绝', confirmation_timeout: '等待超时',
+      confirmation_disconnected: '连接已断开', confirmation_revision_changed: '文件已变化，需重新确认',
+    }
+    const decideConfirmation = async (card, decision) => {
+      if (!card || card.status !== 'pending') return
+      card.status = 'sending'
+      try {
+        const result = await requestApi(`/agent/confirmations/${encodeURIComponent(card.id)}`, {
+          method: 'POST',
+          body: JSON.stringify({ decision, token: card.token }),
+        })
+        if (card.status !== 'sending') return
+        card.status = result.decision === 'approve' ? 'approved' : 'denied'
+        card.token = ''
+        tell(result.decision === 'approve' ? '已批准本次文件变更' : '已拒绝本次文件变更')
+      } catch (error) {
+        if (card.status !== 'sending') return
+        card.status = 'failed'
+        card.token = ''
+        tell(error.message || '确认决定提交失败')
+      }
     }
 
     const draft = ref('')
@@ -527,7 +557,7 @@ createApp({
         return
       }
 
-      const assistantMsg = reactive({ id: Date.now() + 1, role: 'assistant', content: '', steps: [], phases: [], status: 'running', time: now() })
+      const assistantMsg = reactive({ id: Date.now() + 1, role: 'assistant', content: '', steps: [], phases: [], confirmations: [], status: 'running', time: now() })
       const requestSession = sessionKey.value
       activeController = new AbortController()
       let pushed = false
@@ -577,6 +607,7 @@ createApp({
       } catch (error) {
         ensureMsg()
         assistantMsg.status = error.name === 'AbortError' ? 'cancel_requested' : error.name === 'TimeoutError' ? 'timed_out' : 'failed'
+        expireConfirmations(assistantMsg, error.name === 'TimeoutError' ? 'confirmation_timeout' : 'confirmation_disconnected')
         assistantMsg.failure = error.message
         for (const step of assistantMsg.steps) if (step.status === 'running') step.status = 'interrupted'
         for (const phase of assistantMsg.phases) if (phase.phase !== 'end') phase.phase = 'interrupted'
@@ -795,6 +826,7 @@ createApp({
       menuOpen, menuButton, openMenu, closeMenu, returnToChat, trapMenuFocus,
       dock, selectDock, openDock, sidebarOpen, sidebarWide, toggleSidebar, closePanel, onDockKeydown,
       workspaceTarget, workspaceRefresh, openWorkspace, openChatLink,
+      decideConfirmation, confirmationLabels, confirmationStatusLabels,
       stopMessage, runLabels, stageLabels, useMemory, saveMemory, newChat,
       user, userDraft, live, syncing, sending, ingesting, sessionKey,
       onIngestionBusy, onIngestionCompleted, modelSlow, activeTab, onTabKeydown,
@@ -924,6 +956,24 @@ createApp({
                 <p class="run-status" v-if="message.memoryWrite">本轮记忆：{{ ({ accepted: '已接收，按记忆策略处理', rejected: '未通过保存策略', disabled: '未启用保存', skipped: '已跳过保存', failed: '保存失败', unknown: '结果待同步确认' })[message.memoryWrite] || message.memoryWrite }}</p>
                 <ol class="workflow-phases" v-if="message.phases && message.phases.length"><li v-for="phase in message.phases" :key="phase.name">{{ stageLabels[phase.name] || phase.name }} · {{ phase.phase === 'end' ? '完成' : phase.phase === 'interrupted' ? '已中断' : '处理中' }}</li></ol>
                 <ul class="artifact-list" v-if="message.workflow?.artifacts?.length"><li v-for="artifact in message.workflow.artifacts" :key="artifact.path"><button class="artifact-link" @click="openWorkspace(artifact.deleted ? 'changes' : 'file', artifact.path)">{{ artifact.deleted ? '已删除 · 查看变更' : '打开文件' }}：{{ artifact.path }}</button></li></ul>
+                <div class="confirmation-list" v-if="message.confirmations && message.confirmations.length">
+                  <section
+                    class="confirmation-card"
+                    v-for="card in message.confirmations"
+                    :key="card.id"
+                    role="alert"
+                    :aria-label="'需要确认的' + (confirmationLabels[card.action] || '文件变更')"
+                    @keydown.esc.prevent="decideConfirmation(card, 'deny')"
+                  >
+                    <p class="confirmation-title">需要确认：{{ confirmationLabels[card.action] || card.action }}<code class="confirmation-path">{{ card.path }}</code><span v-if="!card.targetExists" class="confirmation-new">（新文件）</span></p>
+                    <p class="confirmation-summary">{{ card.summary }}</p>
+                    <div class="confirmation-actions" v-if="card.status === 'pending'">
+                      <button type="button" class="confirmation-approve" @click="decideConfirmation(card, 'approve')">批准并执行</button>
+                      <button type="button" class="confirmation-deny" @click="decideConfirmation(card, 'deny')">拒绝（Esc）</button>
+                    </div>
+                    <p class="confirmation-status" v-else>{{ confirmationStatusLabels[card.status] || card.status }}</p>
+                  </section>
+                </div>
                 <div class="tool-steps" v-if="message.steps && message.steps.length">
                   <div class="tool-step" v-for="step in message.steps" :key="step.id || step.name">
                     <span class="tool-dot" :class="step.status"></span>
