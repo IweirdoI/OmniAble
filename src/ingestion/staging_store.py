@@ -364,6 +364,16 @@ class StagingStore:
                     source_event_id = str(candidate).strip()
                     break
 
+        # normalize 之前在 clean 阶段就可能被拒绝，此时 result.record 为空。
+        # 拒绝事件仍需写入审计，但不能对不存在的正文调用脱敏函数。
+        sanitized_content = None
+        if record is not None:
+            sanitized_content = (
+                self._semantic_redact(record.content)
+                if self._semantic_redact is not None
+                else redact_sensitive_text(record.content)
+            )
+
         event_values = (
             event_id,
             resolved_user_id,
@@ -372,13 +382,7 @@ class StagingStore:
             result.stage.value,
             int(result.accepted),
             reject_code,
-            (
-                self._semantic_redact(record.content)
-                if self._semantic_redact is not None
-                else redact_sensitive_text(record.content)
-                if record is not None
-                else None
-            ),
+            sanitized_content,
             record.confidence if record is not None else None,
             result.quality_score,
             quality_threshold,

@@ -33,7 +33,7 @@ const base = process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5186';
     ]);
     await page.getByTestId('ingest-submit').click();
     await page.waitForFunction(() => document.querySelectorAll('[data-testid=ingest-result][data-state=accepted]').length === 2 && document.querySelectorAll('[data-testid=ingest-result][data-state=rejected]').length === 1);
-    await page.waitForFunction(() => !document.querySelector('[data-testid=user-input]').disabled);
+    await page.waitForFunction(() => !document.querySelector('.ingest-form fieldset').disabled);
     assert.equal(uploads.length, 3);
     assert.equal(ingests.length, 0, 'files must not be resubmitted as JSON');
     assert(uploads.every(req => req.headers()['content-type'].startsWith('multipart/form-data; boundary=')));
@@ -44,14 +44,14 @@ const base = process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5186';
     await blank.getByRole('button', { name: '修改后加入待上传队列' }).click();
     await page.getByTestId('ingest-submit').click();
     await page.waitForFunction(() => document.querySelectorAll('[data-testid=ingest-result][data-state=accepted]').length === 3);
-    await page.waitForFunction(() => !document.querySelector('[data-testid=user-input]').disabled);
+    await page.waitForFunction(() => !document.querySelector('.ingest-form fieldset').disabled);
     assert.match(await page.getByTestId('ingest-result').first().innerText(), /使用用户说明/);
     check('blank image with caption succeeds and reports fallback honestly');
 
     await page.getByTestId('ingest-files').setInputFiles(path.join(fixtures, 'guide.docx'));
     await page.getByTestId('ingest-submit').click();
     await page.waitForFunction(() => document.querySelector('[data-testid=ingest-result]').textContent.includes('duplicate'));
-    await page.waitForFunction(() => !document.querySelector('[data-testid=user-input]').disabled);
+    await page.waitForFunction(() => !document.querySelector('.ingest-form fieldset').disabled);
     check('duplicate upload shown as business rejection');
 
     for (const source of ['tool_result', 'user_behavior', 'manual_config', 'conversation']) {
@@ -62,7 +62,7 @@ const base = process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5186';
       const response = await responsePromise;
       assert.equal((await response.json()).accepted, true, source);
       assert.equal(response.request().postDataJSON().source, source);
-      await page.waitForFunction(() => !document.querySelector('[data-testid=user-input]').disabled);
+      await page.waitForFunction(() => !document.querySelector('.ingest-form fieldset').disabled);
     }
     assert.equal(ingests.length, 4);
     assert(ingests.every(req => req.postDataJSON().user_id === uid));
@@ -71,7 +71,10 @@ const base = process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5186';
 
     await page.getByTestId('chat-input').fill('麒麟系统安装依赖失败时如何切换镜像');
     await page.getByTestId('chat-send').click();
-    await page.waitForFunction(() => !document.querySelector('[data-testid=user-input]').disabled);
+    // TASK-012 之后用户输入不再在发送期间禁用；等待本轮 assistant 终态，
+    // 确保 recall 面板拿到 done 事件里的真实召回结果，而不是抢在流结束前读取。
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-testid=run-status]')]
+      .some(element => /已完成|部分完成|执行失败|已停止|执行超时|需要补充说明/.test(element.textContent || '')));
     await page.getByTestId('tab-memories').click();
     assert.match(await page.locator('.memory-content').innerText(), /guide.docx|guide.pdf|清华镜像/);
     check('uploaded knowledge is available to next-turn recall');
@@ -109,13 +112,13 @@ const base = process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5186';
     await page.getByTestId('ingest-submit').click();
     await page.waitForFunction(() => document.querySelector('[data-testid=ingest-result]').textContent.includes('长期记忆同步失败'));
     assert.equal(await page.getByTestId('ingest-result').first().getAttribute('data-state'), 'accepted');
-    await page.waitForFunction(() => !document.querySelector('[data-testid=user-input]').disabled);
+    await page.waitForFunction(() => !document.querySelector('.ingest-form fieldset').disabled);
     check('promotion failure preserves successful ingestion');
     await page.route('**/api/ingest/file', route => route.abort('failed'));
     await page.getByTestId('ingest-files').setInputFiles(path.join(fixtures, 'guide.pdf'));
     await page.getByTestId('ingest-submit').click();
     await page.waitForFunction(() => document.querySelector('[data-testid=ingest-result]').dataset.state === 'error');
-    await page.waitForFunction(() => !document.querySelector('[data-testid=user-input]').disabled);
+    await page.waitForFunction(() => !document.querySelector('.ingest-form fieldset').disabled);
     check('network failure releases controls and reports unconfirmed result');
 
     await page.getByTestId('connection-button').click();
