@@ -63,7 +63,8 @@ RETENTION_POLICY: tuple[RetentionPolicy, ...] = (
     ),
     RetentionPolicy(
         kind="preference_profile", label="偏好画像",
-        owner_scope=OwnerScope.PER_USER, location="data/preferences/<user_id>.json",
+        owner_scope=OwnerScope.PER_USER,
+        location="向量后端投影；版本索引 data/preferences/<user_id>.json",
         retention="until_forget", forget_propagation=True, long_term_ingestible=True,
     ),
     RetentionPolicy(

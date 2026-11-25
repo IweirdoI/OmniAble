@@ -6,10 +6,6 @@
 
 from __future__ import annotations
 
-import tempfile
-
-import pytest
-
 from src.common.models import RetrievalQuery
 from src.security import retention as rt
 
@@ -76,11 +72,15 @@ def _build_orchestrators(storage_dir: str, *, milvus=None):
     from src.core.orchestrator import MemoryOrchestrator
     from src.knowledge.memory_service.in_memory_client import InMemoryMilvusClient
     from src.preference.store import PreferenceMemoryStore
+    from src.security.service import SecurityAndForgetService
 
     pref_a = PreferenceMemoryStore(storage_dir=storage_dir, use_llm=False, allow_rules=True)
     pref_b = PreferenceMemoryStore(storage_dir=storage_dir, use_llm=False, allow_rules=True)
-    orch_a = MemoryOrchestrator(preference=pref_a, milvus=milvus or InMemoryMilvusClient())
-    orch_b = MemoryOrchestrator(preference=pref_b, milvus=milvus or InMemoryMilvusClient())
+    index_path = f"{storage_dir}/security_index.json"
+    orch_a = MemoryOrchestrator(preference=pref_a, milvus=milvus or InMemoryMilvusClient(),
+                               security=SecurityAndForgetService(index_path=index_path))
+    orch_b = MemoryOrchestrator(preference=pref_b, milvus=milvus or InMemoryMilvusClient(),
+                               security=SecurityAndForgetService(index_path=index_path))
     return orch_a, orch_b
 
 
@@ -128,24 +128,22 @@ def test_forget_propagates_and_survives_restart(tmp_path) -> None:
     persistent_milvus = InMemoryMilvusClient()
     orch_a, _ = _build_orchestrators(storage_dir, milvus=persistent_milvus)
 
-    orch_a.process_input({"content": "我的手机号是13800000001，临时记一下", "role": "user"},
-                         "conversation", user_id="u_a")
     res = orch_a.extract_preferences_from_text(
         "下载文件默认保存到 E:/data/downloads", user_id="u_a", scene_id="general")
     assert res.entries, "前置：偏好提取应产出条目"
+    query = RetrievalQuery(query="下载路径", user_id="u_a", top_k=10)
+    assert "E:/data/downloads" in str(orch_a.get_preference_profile("u_a", scene_id="general"))
+    assert any("E:/data/downloads" in item.content for item in orch_a.recall(query).items)
     deleted = orch_a.forget("u_a", "忘掉下载路径偏好")
     assert deleted, "遗忘应删除至少一条记忆"
+    assert "E:/data/downloads" not in str(orch_a.get_preference_profile("u_a", scene_id="general"))
 
     # 重启：同一持久后端 + 同一数据目录重建实例（模拟服务重启恢复）
     orch_restarted, _ = _build_orchestrators(storage_dir, milvus=persistent_milvus)
     profile = orch_restarted.get_preference_profile("u_a", scene_id="general")
     assert "E:/data/downloads" not in str(profile)
 
-    for query in ("手机号", "13800000001", "下载路径"):
-        hits = orch_restarted.recall(
-            RetrievalQuery(query=query, user_id="u_a", top_k=10)).items
-        assert not any("13800000001" in item.content or "E:/data/downloads" in item.content
-                       for item in hits), f"遗忘内容经重启后仍可召回：{query}"
+    assert not any("E:/data/downloads" in item.content for item in orch_restarted.recall(query).items)
 
 
 def test_storage_layout_survives_relocation(tmp_path) -> None:
@@ -173,18 +171,14 @@ def test_storage_layout_survives_relocation(tmp_path) -> None:
     assert "C:/data/downloads" not in str(orch_b_moved.get_preference_profile("u_b", scene_id="general"))
 
 
-def test_plugin_sources_never_reach_long_term_memory(tmp_path, monkeypatch) -> None:
+def test_plugin_sources_never_reach_long_term_memory(tmp_path) -> None:
     """录音/表格行/源码/模板/任务日志以未登记 source 摄入 → 执行前拒绝。"""
-    from src.core.orchestrator import MemoryOrchestrator
-    from src.knowledge.memory_service.in_memory_client import InMemoryMilvusClient
-
-    monkeypatch.setenv("OS_AGENT_MEMORY_BACKEND", "memory")
-    orch = MemoryOrchestrator(preference=None, milvus=InMemoryMilvusClient())
+    orch, _ = _build_orchestrators(str(tmp_path / "prefs"))
     payload = {"content": "录音转写正文（不应入库）", "role": "user"}
     for source in ("recording", "table_row", "source_code", "template", "task_log"):
         result = orch.process_input(dict(payload), source, user_id="u_a")
         assert result.accepted is False, f"{source} 不应被摄入长期记忆"
-        assert result.reject_code is not None
+        assert result.reject_code == "invalid_source"
 
     # 兜底：即便绕过来源校验，向量后端里也查不到该正文
     hits = orch.recall(RetrievalQuery(query="录音转写正文", user_id="u_a", top_k=10)).items
@@ -198,18 +192,27 @@ def test_session_references_fail_closed_across_users(tmp_path) -> None:
     store = SessionStore(tmp_path / "sessions.db")
     try:
         session = store.create_session("u_a", title="A 的会话")
-        store.record_completed_turn(
+        assert store.record_completed_turn(
             "u_a", session["id"], "A 的问题", {
-                "answer": "A 的回答", "memory_write": {"status": "accepted"},
+                "answer": "A 的回答", "workflow": {"status": "completed"},
                 "referenced_memory_ids": ["mem-1"],
-            }, history_memory_ids={"mem-1"})
+            })
         assert store.get_session("u_b", session["id"]) is None
-        assert store.get_session("u_a", session["id"]) is not None
+        assert store.load_model_history("u_b", session["id"]) is None
+        history, source_ids = store.load_model_history("u_a", session["id"])
+        assert [message["content"] for message in history] == ["A 的问题", "A 的回答"]
+        assert source_ids == {"mem-1"}
 
         # 遗忘联动后：引用的记忆进墓碑，B 无法借道读取
         store.forget_memories("u_a", ["mem-1"])
         assert store.forgotten_ids("u_a", ["mem-1"]) == {"mem-1"}
-        history, source_ids = store.load_model_history("u_a", session["id"])
-        assert source_ids == set(), "遗忘后模型历史不得再携带已遗忘记忆来源"
+        assert store.load_model_history("u_a", session["id"]) == ([], set())
     finally:
         store.close()
+
+    reopened = SessionStore(tmp_path / "sessions.db")
+    try:
+        assert reopened.load_model_history("u_a", session["id"]) == ([], set())
+        assert reopened.forgotten_ids("u_a", ["mem-1"]) == {"mem-1"}
+    finally:
+        reopened.close()

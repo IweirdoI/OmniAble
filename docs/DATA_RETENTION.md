@@ -12,7 +12,7 @@
 | 类别 (kind) | 归属 | 保存位置 | 期限 | 遗忘传播 | 进长期记忆 |
 |---|---|---|---|---|---|
 | `long_term_memory` 长期记忆（偏好/知识） | 按用户 | 向量后端（memory / milvus） | 直至遗忘 | ✅ | ✅ |
-| `preference_profile` 偏好画像 | 按用户 | `data/preferences/<user_id>.json` | 直至遗忘 | ✅ | ✅ |
+| `preference_profile` 偏好画像 | 按用户 | 向量后端投影；版本索引 `data/preferences/<user_id>.json` | 直至遗忘 | ✅ | ✅ |
 | `sensitive_index` 脱敏索引（加密原文） | 按用户 | `security_index.json` | 直至遗忘 | ✅ | ❌ |
 | `agent_session` Agent 会话与消息 | 按用户 | `data/agent_sessions.db` | 持久（用户可删） | ✅ | ❌ |
 | `ingestion_staging` 摄取暂存审计 | 按用户 | `data/ingestion_staging.db` | 持久（遗忘时清洗） | ✅ | ❌ |
@@ -26,8 +26,9 @@
 **流程/插件数据（录音、模板、表格行、任务日志、代码索引）一律默认不摄入长期记忆**
 （`PLUGIN_DATA_KINDS`）。现有摄入管线 `DataSource` 仅接受 conversation / document /
 tool_result / user_behavior / manual_config 五类来源；未登记来源（recording 等）在
-执行前即被 `invalid_source` 拒绝，不落任何存储。未来插件任务若需新来源，必须先在
-`retention.py` 与 `DataSource` 枚举同步评审，再写回归。
+内容处理前即被 `invalid_source` 拒绝。该校验针对来源标识。现有显式知识写入支持
+`repo_scan`、`agent_log` 等 `MemorySource`。未来插件接入时应在调用摄取接口前应用
+保留契约，新增来源需同步评审 `retention.py` 与 `DataSource` 枚举并补回归。
 
 ## 二、遗忘传播矩阵
 
