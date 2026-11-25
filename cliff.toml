@@ -1,4 +1,4 @@
-# git-cliff configuration for MOKOA project
+# git-cliff configuration for OmniAble
 # Generates CHANGELOG.md following Keep a Changelog format
 
 [changelog]
@@ -6,7 +6,7 @@
 header = """
 # 更新日志
 
-该文件记录了 MOKOA 项目的所有值得注意的变更。
+该文件记录了 OmniAble 项目的主要变更。
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 本项目遵循 [语义化版本 2.0.0](https://semver.org/spec/v2.0.0.html)。
