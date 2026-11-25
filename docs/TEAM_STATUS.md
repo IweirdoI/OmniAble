@@ -44,7 +44,7 @@
 | TASK-036 | [P2] 将录制和回放扩展到获准的 Windows 应用 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/44 | 20261122-204519 |
 | TASK-037 | [P2] 验证本地 MCP 工具能否复用插件权限 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/45 | 20261122-204521 |
 | TASK-038 | [P1] 优化 Windows recall 词面补召与 CPU 编码并发 | 已完成 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/47 | 20261124-024042 |
-| TASK-039 | [P2] 修复空白图片无说明时接入接口返回 500 | 待审查 | 123456s-ai | https://github.com/IweirdoI/mokoa-windows/issues/49 | 20261124-223929 |
+| TASK-039 | [P2] 修复空白图片无说明时接入接口返回 500 | 已完成 | 123456s-ai | https://github.com/IweirdoI/mokoa-windows/issues/49 | 20261125-085204 |
 | TASK-040 | [P1] 制定 AgentArts 参赛适配方案并登记设计文档 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/51 | 20261124-001937 |
 
 <!-- clerk:end tasks -->
