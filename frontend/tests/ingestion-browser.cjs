@@ -6,7 +6,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 const fixtures = process.argv[2];
 if (!fixtures) throw new Error('Pass the FIXTURE_DIR printed by serve_api.py');
-const base = process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5186';
+const base = new URL(process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5186');
+base.searchParams.set('view', 'chat');
 
 (async () => {
   const browser = await chromium.launch({ channel: 'msedge', headless: true });
@@ -20,7 +21,7 @@ const base = process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5186';
       if (req.url().endsWith('/api/ingest')) ingests.push(req);
     });
     const check = name => { checks.push(name); console.log('PASS', name); };
-    await page.goto(base);
+    await page.goto(base.href);
     await page.getByRole('button', { name: '实时 API 已连接', exact: true }).waitFor();
     const uid = 'ingestion_ui_' + Date.now();
     await page.getByTestId('user-input').fill('  ' + uid + '  ');

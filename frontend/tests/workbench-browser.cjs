@@ -8,7 +8,8 @@
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const assert = require('node:assert/strict')
 
-const base = process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5174'
+const base = new URL(process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5174')
+base.searchParams.set('view', 'chat')
 const check = (name) => console.log('PASS', name)
 const noOverflow = async (page, label) => {
   const size = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, width: innerWidth }))
@@ -34,7 +35,7 @@ const waitForLive = async (page) => {
     })
     page.on('pageerror', error => errors.push(error.message))
     page.on('console', message => { if (message.type() === 'error') errors.push('console: ' + message.text()) })
-    await page.goto(base, { waitUntil: 'networkidle' })
+    await page.goto(base.href, { waitUntil: 'networkidle' })
     await waitForLive(page)
     await noOverflow(page, '1440')
 
@@ -325,7 +326,7 @@ const waitForLive = async (page) => {
       }
     })
     await retryPage.setViewportSize({ width: 1440, height: 900 })
-    await retryPage.goto(base, { waitUntil: 'networkidle' })
+    await retryPage.goto(base.href, { waitUntil: 'networkidle' })
     await waitForLive(retryPage)
     await retryPage.getByTestId('user-input').fill(retryUid)
     await retryPage.getByTestId('user-switch').click()

@@ -12,7 +12,7 @@ fs.mkdirSync(out, { recursive: true });
   page.on('response', async r => {
     if (r.url().includes('/api/')) requests.push({url:r.url(),status:r.status()});
   });
-  await page.goto('http://127.0.0.1:5178');
+  await page.goto('http://127.0.0.1:5178/?view=chat');
   await page.getByRole('button',{name:'实时 API 已连接'}).waitFor({timeout:30000});
   const user = 'browser_'+Date.now();
   await page.getByRole('textbox',{name:'用户 ID',exact:true}).fill(user);
