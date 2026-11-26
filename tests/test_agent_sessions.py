@@ -174,7 +174,7 @@ class _FakeAgent:
     def __init__(self, *args, **kwargs):
         pass
 
-    def chat(self, request):
+    def chat(self, request, on_ctx_ready=None):
         type(self).captured_history = [
             m.model_dump() for m in request.history
         ]
@@ -373,7 +373,7 @@ def test_api_recalled_memory_ids_drive_suppression(monkeypatch) -> None:
     from api import server
 
     class _RecallAgent(_FakeAgent):
-        def chat(self, request):
+        def chat(self, request, on_ctx_ready=None):
             return {
                 "answer": "按你的 D 盘偏好，建议先改配置。",
                 "memory_write": {"status": "skipped"},
@@ -406,7 +406,7 @@ def test_api_forget_turn_is_not_recorded(monkeypatch) -> None:
     from api import server
 
     class _ForgetAgent(_FakeAgent):
-        def chat(self, request):
+        def chat(self, request, on_ctx_ready=None):
             return {
                 "answer": "已处理遗忘指令，删除 1 条记忆。",
                 "memory_write": {"status": "skipped"},
@@ -501,7 +501,7 @@ def test_forget_without_session_id_suppresses_saved_sessions(monkeypatch) -> Non
     )
 
     class _ForgetAgent(_FakeAgent):
-        def chat(self, request):
+        def chat(self, request, on_ctx_ready=None):
             assert request.session_id is None
             return {
                 "answer": "已处理遗忘指令。",
@@ -683,12 +683,12 @@ def test_api_non_completed_turns_not_recorded(monkeypatch) -> None:
     from api import server
 
     class _PartialAgent(_FakeAgent):
-        def chat(self, request):
+        def chat(self, request, on_ctx_ready=None):
             return {"answer": "部分完成", "memory_write": {"status": "skipped"},
                     "workflow": {"status": "partial", "route": "agent"}}
 
     class _ErrorAgent(_FakeAgent):
-        def chat(self, request):
+        def chat(self, request, on_ctx_ready=None):
             return {"answer": "", "memory_write": {"status": "failed"},
                     "workflow": {"status": "failed", "reason": "model_error"}}
 

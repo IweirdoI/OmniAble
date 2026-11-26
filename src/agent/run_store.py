@@ -98,9 +98,15 @@ class RunStore:
                   session_id: str | None = None,
                   idempotency_key: str | None = None, now: str | None = None,
                   ) -> dict[str, Any]:
-        """注册一次运行；同一 idempotency_key 已有活跃运行 → 返回它（不新建）。
+        """注册一次运行；**同一 (用户, 操作键) 永远返回首次运行**（标准幂等）。
 
-        返回 (record, duplicate)。重启后同样生效（唯一索引持久）。
+        语义（TASK-022 复核项：并发及重启后稳定去重）：
+        - 首次调用：创建并返回 (record, duplicate=False)
+        - 同键再次调用（无论首次处于活跃还是已终态）：返回首次记录
+          (duplicate=True)——调用方据此复用首次结果，绝不开启第二条运行
+        - 并发：唯一索引 (user_id, idempotency_key) + 忽略后按键回查，
+          任何时序下最多一条
+        - 重启：唯一索引持久，跨进程同样生效
         """
         ts = now or _now()
         with self._lock, self._conn:
@@ -109,11 +115,7 @@ class RunStore:
                     "SELECT * FROM runs WHERE user_id = :u AND idempotency_key = :k",
                     {"u": user_id, "k": idempotency_key}).fetchone()
                 if row is not None:
-                    if row["status"] in _ACTIVE:
-                        return dict(row), True
-                    # 终态后同键重试：视为新的调用，不改写历史行——
-                    # 唯一索引保留原键行，新行用带后缀的键值
-                    idempotency_key = f"{idempotency_key}#retry:{ts}"
+                    return dict(row), True  # 同键 = 同一逻辑操作：永远返回首次
             self._conn.execute(
                 "INSERT OR IGNORE INTO runs(id, user_id, owner_pid, session_id,"
                 " idempotency_key, route, status, created_at, updated_at)"
@@ -121,7 +123,7 @@ class RunStore:
                 {"id": run_id, "u": user_id, "pid": os.getpid(), "s": session_id,
                  "k": idempotency_key, "r": route, "ts": ts})
             # 并发同键竞态兜底：IGNORE 可能因唯一索引(用户,键)跳过——
-            # 无论按 id 还是按键查，只要本用户存在同键活跃行就返回它
+            # 按键回查并返回既有记录（绝不开启第二条）
             row = self._conn.execute(
                 "SELECT * FROM runs WHERE id = :id AND user_id = :u",
                 {"id": run_id, "u": user_id}).fetchone()
@@ -130,7 +132,7 @@ class RunStore:
                     "SELECT * FROM runs WHERE user_id = :u AND idempotency_key = :k"
                     " ORDER BY created_at LIMIT 1",
                     {"u": user_id, "k": idempotency_key}).fetchone()
-                if row is not None and row["status"] in _ACTIVE:
+                if row is not None:
                     return dict(row), True
             if row is None:
                 raise RuntimeError(f"运行注册失败：{run_id}")

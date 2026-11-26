@@ -1035,10 +1035,18 @@ class MemoryAgent:
         result["workflow"] = self._workflow(status)
         return result
 
-    def chat(self, request: ChatRequest):
+    def chat(self, request: ChatRequest, on_ctx_ready=None):
+        """同步执行一次请求。
+
+        on_ctx_ready：RunContext 创建后立即回调（供服务层注册活跃运行，
+        使取消入口能触达执行器——TASK-022 复核项：同步入口的 ctx 在
+        本方法内才创建，调用方无法在 chat() 之前注册）。
+        """
         self._started = perf_counter()
         self._ctx = RunContext(route=route_request(request.message), budget=self.budget)
         self._channel = None
+        if on_ctx_ready is not None:
+            on_ctx_ready(self._ctx)
         try:
             return self._execute(request)
         except ModelUnavailable:

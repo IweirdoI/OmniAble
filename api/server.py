@@ -130,10 +130,12 @@ def agent_chat(req: ChatRequest, request: Request) -> dict[str, Any]:
             "run_record_id": actual_run_id, "duplicate": True})
     run_store.mark_running(req.user_id, actual_run_id)
     from src.agent.run_store import active_runs
-    if getattr(agent, "_ctx", None) is not None:
-        active_runs().register(actual_run_id, agent._ctx)
     try:
-        result = agent.chat(req)
+        # ctx 在 chat() 内部创建：经 on_ctx_ready 回调在创建后立即注册，
+        # 取消入口才能触达同步执行器（TASK-022 复核项：原实现注册时
+        # agent._ctx 仍为 None，从未注册）
+        result = agent.chat(
+            req, on_ctx_ready=lambda ctx: active_runs().register(actual_run_id, ctx))
         workflow = result.get("workflow") or {}
         result["run_record_id"] = actual_run_id
         run_store.finish_run(

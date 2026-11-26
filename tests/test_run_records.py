@@ -54,10 +54,11 @@ def test_begin_run_idempotent_within_and_across_restart(store) -> None:
     try:
         record2, dup2 = reopened.begin_run("u_a", "run-2", idempotency_key="req-1")
         assert dup2 is True and record2["id"] == "run-1"
-        # 终态后同键允许新运行
+        # 终态后同键重试：标准幂等——仍返回首次记录（不开启新运行）
         reopened.finish_run("u_a", "run-1", "completed", latency_ms=12.0)
         record3, dup3 = reopened.begin_run("u_a", "run-3", idempotency_key="req-1")
-        assert dup3 is False and record3["id"] == "run-3"
+        assert dup3 is True and record3["id"] == "run-1"
+        assert record3["status"] == "completed"
     finally:
         reopened.close()
 
@@ -193,7 +194,7 @@ class _StubAgent:
                 "workflow": {"run_id": "stub", "route": "chat", "status": "completed",
                              "steps": [], "artifacts": []}}
 
-    def chat(self, req):
+    def chat(self, req, on_ctx_ready=None):
         result = self._result(req)
         result.pop("type", None)
         return result
@@ -323,11 +324,12 @@ def test_api_sync_idempotency_key_header(tmp_path, monkeypatch) -> None:
                    "save_memory": False}
         headers = {"Idempotency-Key": "req-key-1"}
         first = client.post("/agent/chat", json=payload, headers=headers)
-        # 首次请求同步完成即终态 → 重试同键视为新调用（幂等保护的是活跃窗口）
+        # 标准幂等：同键重试（无论首次是否终态）返回首次运行标识
         retry = client.post("/agent/chat", json=payload, headers=headers)
-        assert first.status_code == retry.status_code == 200
-        ids = {first.json()["run_record_id"], retry.json()["run_record_id"]}
-        assert len(ids) == 2, "终态后同键重试应创建新运行（不改写历史）"
+        assert first.status_code == 200
+        assert retry.status_code == 409  # 活跃窗口 409；终态后同样复用首次
+        assert retry.json()["run_record_id"] == first.json()["run_record_id"]
+        assert retry.json()["duplicate"] is True
     fresh.close()
 
 
@@ -422,3 +424,116 @@ def test_recovery_returns_confirmed_steps_for_skip(store) -> None:
     candidates = store.passivate_incomplete("u_a")
     assert len(candidates) == 1
     assert candidates[0]["confirmed_steps"] == ["row-1", "row-2"]
+
+
+def test_same_key_after_terminal_concurrent_never_opens_two(store) -> None:
+    """复测场景：首轮结束后，同键并发重试绝不开启两条活跃运行。"""
+    import threading as _threading
+    # 首轮：创建并终态
+    record, _ = store.begin_run("u_a", "first-1", idempotency_key="op-key")
+    store.mark_running("u_a", "first-1")
+    store.finish_run("u_a", "first-1", "completed")
+
+    results = []
+
+    def worker(i):
+        r, dup = store.begin_run("u_a", f"retry-{i}", idempotency_key="op-key")
+        results.append((r["id"], dup))
+
+    threads = [_threading.Thread(target=worker, args=(i,)) for i in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    ids = {rid for rid, _ in results}
+    assert ids == {"first-1"}, f"终态后同键并发必须全部复用首次：{ids}"
+    assert all(dup for _, dup in results)
+    active = [r for r in store.list_runs("u_a")["runs"]
+              if r["status"] in ("pending", "running")]
+    assert active == [], "不得出现新的活跃运行"
+
+
+def test_sync_entry_registers_ctx_and_cancel_reaches_executor(tmp_path, monkeypatch) -> None:
+    """真实同步入口：ctx 经 on_ctx_ready 注册，取消端点触达执行器。"""
+    import api.server as server
+    from src.agent.run_store import active_runs
+    from src.agent.runtime import RunAborted
+
+    fresh = RunStore(tmp_path / "sync_cancel.db")
+    server.run_store._conn.close()
+    server.run_store = fresh
+
+    captured = {}
+
+    class _CancelAwareAgent:
+        """替身：chat() 内创建 ctx 并回调注册；执行中检查取消（模拟步骤边界）。"""
+
+        def __init__(self):
+            self._ctx = None
+
+        def _workflow(self, status, reason=None):
+            return {"run_id": "s", "route": "chat", "status": status,
+                    "stop_reason": reason, "steps": [], "artifacts": []}
+
+        def chat(self, req, on_ctx_ready=None):
+            from src.agent.runtime import RunContext
+            self._ctx = RunContext(route="chat")
+            if on_ctx_ready is not None:
+                on_ctx_ready(self._ctx)
+            captured["ctx"] = self._ctx
+            # 模拟执行器：下一步骤启动边界检查
+            self._ctx.check("before_tool")
+            return {"answer": "ok", "memories": [], "recall_ms": 0.0, "warnings": [],
+                    "context_warnings": [], "memory_write": {"status": "disabled"},
+                    "reset_history": False, "latency_ms": 1.0,
+                    "workflow": {"run_id": "s", "route": "chat", "status": "completed",
+                                 "steps": [], "artifacts": []}}
+
+    monkeypatch.setattr(server, "MemoryAgent", lambda memory, stream=False: _CancelAwareAgent())
+    with TestClient(server.app) as client:
+        # 先发起同步请求（后台线程），等 ctx 注册后取消
+        import threading as _threading
+        result_holder = {}
+
+        def run_chat():
+            try:
+                result_holder["resp"] = client.post("/agent/chat", json={
+                    "user_id": "ru_sync", "message": "计算 1+1",
+                    "use_memory": False, "save_memory": False})
+            except Exception as exc:  # noqa: BLE001
+                result_holder["error"] = exc
+
+        # 用一个可控替身：注册后阻塞在 check 前，由测试线程取消
+        class _BlockingAgent(_CancelAwareAgent):
+            def chat(self, req, on_ctx_ready=None):
+                from src.agent.runtime import RunContext
+                self._ctx = RunContext(route="chat")
+                if on_ctx_ready is not None:
+                    on_ctx_ready(self._ctx)
+                captured["ctx"] = self._ctx
+                captured["ready"].set()
+                captured["release"].wait(5)
+                self._ctx.check("before_tool")  # 取消后此处抛 RunAborted
+                return _CancelAwareAgent.chat(self, req, None)
+
+        captured["ready"] = _threading.Event()
+        captured["release"] = _threading.Event()
+        monkeypatch.setattr(server, "MemoryAgent", lambda memory, stream=False: _BlockingAgent())
+
+        thread = _threading.Thread(target=run_chat)
+        thread.start()
+        assert captured["ready"].wait(5), "ctx 未注册"
+        # 找到活跃 run_id 并取消（模拟 POST /agent/runs/{u}/{r}/cancel）
+        with active_runs()._lock:
+            run_id = next(iter(active_runs()._contexts))
+        resp = client.post(f"/agent/runs/ru_sync/{run_id}/cancel")
+        assert resp.json()["cancelled"] is True
+        captured["release"].set()
+        thread.join(timeout=10)
+        # 同步入口捕获 RunAborted → 409 结构化取消结果（不 500）
+        assert "resp" in result_holder, f"请求线程异常：{result_holder.get('error')!r}"
+        assert result_holder["resp"].status_code == 409
+        assert result_holder["resp"].json()["cancelled"] is True
+        assert fresh.get_run("ru_sync", run_id)["status"] == "cancelled"
+    fresh.close()
