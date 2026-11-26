@@ -4,6 +4,7 @@ import {
   loadLibrary, moveFile, noteStatus, projectFileAccept, projectStorageKey, readProjectFile, saveLibrary, saveNote,
 } from './project-library.js'
 import MemoryLifecycle from './MemoryLifecycle.js'
+import { createOrderPractice, orderPracticeId } from './order-practice.js'
 import './project-library.css'
 
 export default {
@@ -80,6 +81,16 @@ export default {
       const item = addProject(projects.value, form.value.name)
       commit([...projects.value, item], '项目已创建。')
       selectProject(item.id)
+    })
+    const openOrderPractice = () => run(async () => {
+      const existing = projects.value.find(item => item.id === orderPracticeId)
+      const item = existing || createOrderPractice(projects.value)
+      if (!existing) commit([...projects.value, item], '已载入虚构练习资料。')
+      selectProject(item.id)
+      const draftFile = item.files.find(file => file.name === '待核验订单.md')
+      if (draftFile) selectFile(draftFile.id)
+      await nextTick()
+      document.getElementById(draftFile ? 'project-file-heading' : 'project-home-title')?.focus()
     })
     const upload = () => run(async () => {
       const current = project.value, input = form.value
@@ -170,7 +181,7 @@ export default {
     return { projects, activeId, view, folder, query, project, folders, files, notes, source, note, version, chosenVersion,
       form, error, status, busy, sharePreview, visibleNotesForSource, currentNoteSource, noteSource, hasNoteVersion,
       views: [['files', '文件'], ['wiki', '知识页'], ['memory', '记忆流转']], projectFileAccept, selectProject, switchView, selectFile, selectNote,
-      openForm, makeProject, upload, createNote, editNote, adoptLatest, persistNote, deleteFile, changeFolder, deleteNote, deleteProject,
+      openForm, makeProject, openOrderPractice, upload, createNote, editNote, adoptLatest, persistNote, deleteFile, changeFolder, deleteNote, deleteProject,
       exportSelected, readBundle, confirmImport, ask, noteStatus, dateLabel }
   },
   template: `
@@ -180,6 +191,7 @@ export default {
         <div class="project-select-list">
           <button type="button" v-for="item in projects" :key="item.id" :aria-pressed="item.id === activeId" :disabled="busy" @click="selectProject(item.id)">{{ item.name }} <small>{{ item.files.length }}</small></button>
           <button type="button" class="project-import-link" @click="openForm({kind:'import', file:null, preview:null})" :disabled="busy">导入项目分享包</button>
+          <button type="button" class="project-import-link" @click="openOrderPractice" :disabled="busy">打开订单核验练习</button>
         </div>
         <div class="project-shortcuts">
           <button type="button" @click="$emit('chat')">去对话 →</button>
@@ -257,7 +269,7 @@ export default {
             </section>
             <section class="project-detail" aria-label="资料详情">
               <template v-if="view === 'files' && source">
-                <header><h2>{{ source.name }}</h2><small>{{ source.folder }} · {{ dateLabel(version.date) }}</small></header>
+                <header><h2 id="project-file-heading" tabindex="-1">{{ source.name }}</h2><small>{{ source.folder }} · {{ dateLabel(version.date) }}</small></header>
                 <div class="project-actions"><label>版本 <select :value="version.number" @change="chosenVersion = Number($event.target.value)"><option v-for="v in [...source.versions].reverse()" :key="v.number" :value="v.number">v{{ v.number }}</option></select></label><button type="button" class="project-button" @click="openForm({kind:'version', sourceId:source.id, file:null})" :disabled="busy">新增版本</button><button type="button" class="project-button" @click="createNote" :disabled="busy">整理知识卡</button></div>
                 <pre class="project-preview">{{ version.content }}</pre>
                 <div class="project-actions"><button type="button" class="project-button" @click="ask(source.name, version.content)" :disabled="busyChat">带到对话</button><button type="button" class="project-button" @click="openForm({kind:'move', folder:source.folder})" :disabled="busy">移动到目录</button><button type="button" class="project-button danger" @click="deleteFile" :disabled="busy">移除文件</button></div>
