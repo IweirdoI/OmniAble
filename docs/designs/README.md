@@ -1,8 +1,7 @@
-# 设计文档索引
+# 历史 Clerk 设计文稿
 
-通过 Clerk `documents` 文稿类型登记。下表由文稿创建、修改和归档命令维护，不手改记录。
-`implementation` 是实施状态说明；文档已登记、文档任务已完成都不代表功能已实现或已部署。
-使用方式见 [Clerk 指南](../CLERK.md#设计文档管理)。
+下表保留原文稿与任务的关联。当前方案从 [产品方向](../PRODUCT.md) 进入，直接用 Git 更新。
+`implementation` 是历史文稿记录的实施状态。查看 [Clerk 指南](../CLERK.md#设计文档管理) 了解使用方式。
 
 | file | title | revision | implementation | task |
 | --- | --- | --- | --- | --- |

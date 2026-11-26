@@ -1,6 +1,6 @@
 # 协作入口与邀请说明
 
-协作者的 AI 新对话先读 [Agent 开工指南](AGENT_ONBOARDING.md)。它汇总必读顺序、模块路径、Clerk、环境与验证方式；可直接转发文末的开工提示词。
+协作者的 AI 新对话先读主线的 [Agent 开工指南](AGENT_ONBOARDING.md)，按其中的步骤刷新并读取最新设计。接手旧分支和提交前也要核对。可直接转发指南文末的开工提示词。
 
 任务工具已接入 [Clerk](CLERK.md)，状态见 [TEAM_STATUS.md](TEAM_STATUS.md)。每位协作者按指南安装后即可使用仓库中的共享配置与记录。
 
@@ -36,6 +36,7 @@
 
 - [仓库](https://github.com/IweirdoI/OmniAble)
 - [产品方向与演示](https://github.com/IweirdoI/OmniAble/blob/master/docs/PRODUCT.md)
+- [当前助手设计](https://github.com/IweirdoI/OmniAble/blob/master/docs/ASSISTANT_DESIGN.md)
 - [AI Agent 开工指南](https://github.com/IweirdoI/OmniAble/blob/master/docs/AGENT_ONBOARDING.md)
 - [Windows 开发](https://github.com/IweirdoI/OmniAble/blob/master/docs/WINDOWS.md)
 - [LangGraph 接入](https://github.com/IweirdoI/OmniAble/blob/master/docs/LANGGRAPH_AGENT.md)

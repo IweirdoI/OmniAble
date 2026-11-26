@@ -3,13 +3,30 @@
 这是协作者在新对话中交给 AI 的统一入口。目标是让 Agent 先建立准确的项目上下文，
 确认任务与协作边界，再继续开发；不要求每次通读整个仓库。
 
+## 0. 先同步主线设计
+
+开工、接手或恢复旧分支时，先核对 `git remote -v`。若 `origin` 指向 `IweirdoI/OmniAble`，在仓库根目录执行：
+
+```bash
+git fetch --no-recurse-submodules origin refs/heads/master:refs/remotes/origin/master
+git rev-parse origin/master
+git --no-pager show origin/master:docs/PRODUCT.md
+git --no-pager show origin/master:docs/ASSISTANT_DESIGN.md
+```
+
+Fork 将上面的 `origin` 全部换成指向主仓的 `upstream`。这组命令只刷新远端引用和读取文件，个人分支、工作树以及尚未提交的改动都可继续使用。记录读到的主线提交，按任务查看该提交里的模块文档和 [团队任务状态](TEAM_STATUS.md)。
+
+提交或送审前再抓取一次。如果主线有变化，就比较上次读到的提交与新主线在 `docs/PRODUCT.md`、`docs/ASSISTANT_DESIGN.md` 和本任务相关文档上的差异。涉及当前交付时，按最新已合入设计和 Issue 范围核对实现与测试。文档和任务范围冲突时，在对应 Issue 对齐后继续。
+
+网络中断时，可尝试读取 GitHub 的 [最新产品方向](https://github.com/IweirdoI/OmniAble/blob/master/docs/PRODUCT.md) 和 [最新助手设计](https://github.com/IweirdoI/OmniAble/blob/master/docs/ASSISTANT_DESIGN.md)。两种方式都不可用时，注明正在用的本地提交和未核对的范围。
+
 ## 1. 每次开工先读什么
 
 按以下顺序阅读，先完成前四项，再按任务深入：
 
 1. [根目录 AGENTS.md](../AGENTS.md)：整个仓库的工作规则。
 2. [贡献指南](../CONTRIBUTING.md)：分支、提交、审查、DCO 和验证方式。
-3. [项目介绍](../README.md)、[产品方向](PRODUCT.md) 与 [发布说明](发布说明.md)：通用生活与工作助手、无障碍适配、演示计划及贡献来源。
+3. [项目介绍](../README.md)、[产品方向](PRODUCT.md)、[助手设计](ASSISTANT_DESIGN.md) 与 [发布说明](发布说明.md)：通用生活与工作助手、无障碍适配、技术方案及贡献来源。
 4. [Clerk 指南](CLERK.md)、[共享任务状态](TEAM_STATUS.md) 和用户指定的 Issue／任务／PR：确认实际工作范围、认领及验收标准。
 5. 本机开发选读 [Windows 开发](WINDOWS.md)；涉及聊天或前后端联调，再读 [LangGraph 接入](LANGGRAPH_AGENT.md)。其他环境按本任务的实际部署文档核对。
 6. 根据下面的模块索引，读相关实现和对应测试。首次贡献在提交前阅读 [LICENSE](../LICENSE) 与 [DCO](../DCO)。
@@ -37,8 +54,7 @@ git remote -v
 优先查看真实 Issue／PR，不让用户重复粘贴已有信息。只读输出不要包含令牌或 `.env` 正文。
 
 确认 `origin` 指向谁：直接克隆时通常是本项目；Fork 的 `origin` 是协作者自己的仓库，
-主仓通常命名为 `upstream`。先 `git fetch` 对应主仓远端，再比较当前分支和它的 `master`。
-网络失败就说明主线尚未核对，不把缓存的远端引用当最新状态，也不覆盖别人的提交。
+主仓通常命名为 `upstream`。按第 0 节同步并读取主线，再比较当前分支与主线的差异。
 
 有未提交改动时先区分归属，保留用户和其他协作者的工作；不要自动 reset、清理目录、
 全量覆盖文件或打包无关改动。需要隔离时使用独立分支或工作树。
@@ -50,7 +66,7 @@ git remote -v
 ## 3. 项目与模块索引
 
 本仓是 OmniAble 的开发主仓，面向残障人士在手机或电脑上的生活、学习和工作任务。
-查看 [通用任务与无障碍协作设计](designs/DOC-002-accessible-job-workflow.md) 了解用户直接发起任务、有限授权、确认与接管。岗位模板与设备是可选能力，见 [产品方向](PRODUCT.md)。
+查看 [通用任务与无障碍协作设计](ASSISTANT_DESIGN.md) 了解用户直接发起任务、有限授权、确认与接管。岗位模板与设备是可选能力，见 [产品方向](PRODUCT.md)。
 Memory Orchestrator 是共用记忆层。
 聊天入口是 Vue 页面 → FastAPI → LangGraph → 现有记忆编排；
 摄取、偏好、知识、隐私与记忆生命周期通过现有接口协作，不另建一套平行记忆系统。
@@ -60,7 +76,7 @@ Memory Orchestrator 是共用记忆层。
   工作流改造另读 [Agent 工作流实施设计](AGENT_WORKFLOW.md)，按其中任务边界与验收场景实施。
   文件工具与侧栏集成另见 [Agent 文件与网页工作区](AGENT_WORKSPACE.md)。
   涉及语音无障碍、操作录制、离线插件、定时任务或代码解析时，先看 [Windows 桌面 Agent 扩展路线图](DESKTOP_AGENT_ROADMAP.md) 的任务依赖。
-  涉及华为云参赛适配时，先读 [AgentArts 适配方案](designs/DOC-001-agentarts-adaptation.md)，区分文档交付和真实云端验收；设计文稿使用 [Clerk 文稿管理](CLERK.md#设计文档管理)。
+  涉及华为云参赛适配时，先读 [AgentArts 适配方案](AGENTARTS_ADAPTATION.md)，区分文档交付和真实云端验收。
 - **编排、冲突、生命周期**：`src/core/orchestrator.py`、`factory.py`、`layer_manager.py`、
   `conflict_resolver.py`、`entry_adapter.py`；对应 `tests/test_core.py`、`test_consolidator.py`、
   `test_logic_fixes.py`、`test_knowledge_conflict_ordering.py`。
@@ -176,7 +192,7 @@ PR 说明参考 [模板](../.github/PULL_REQUEST_TEMPLATE.md)：问题、行为�
 
 可以把下面这段发给任意协作者的 Agent：
 
-> 请先读取仓库根目录 AGENTS.md 和 docs/AGENT_ONBOARDING.md，按必读清单建立上下文。
+> 请先读取 OmniAble 主线的 AGENTS.md 和 docs/AGENT_ONBOARDING.md，按「先同步主线设计」更新产品与设计上下文。
 > 核对当前分支、Git 状态、主线和 Clerk／Issue 任务，再阅读本任务模块的实现与测试。
 > 简要说明任务范围和验证方式后继续执行。不要改动其他人的工作，也不要把历史报告当最新任务。
 > 本次任务：填写具体目标、Issue 或 Clerk 任务编号。

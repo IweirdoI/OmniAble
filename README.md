@@ -21,7 +21,7 @@
 - **已有基础** · Vue 工作台、项目资料和按版本追溯的知识卡、本地分享包、LangGraph 对话与文件工作区、短中长期记忆、偏好和多源资料接入。
 - **待设计验证与集成** · 通用任务委托和接管、手机端任务确认、端到端辅助技术体验、机械臂真机联动和 AgentArts 云部署。相关原型和验证结果按实际环境记录。
 
-技术主线是 Vue → FastAPI → LangGraph。Agent 通过既有 Memory Orchestrator 处理记忆召回、摄取与遗忘。Windows 是当前本地开发环境。开发使用进程内存储和 hash 向量，完整环境按需配置语义模型和持久化后端。[记忆架构](docs/ARCHITECTURE.md) · [Agent 工作流](docs/AGENT_WORKFLOW.md) · [AgentArts 适配方案](docs/designs/DOC-001-agentarts-adaptation.md)
+技术主线是 Vue → FastAPI → LangGraph。Agent 通过既有 Memory Orchestrator 处理记忆召回、摄取与遗忘。Windows 是当前本地开发环境。开发使用进程内存储和 hash 向量，完整环境按需配置语义模型和持久化后端。[通用助手设计](docs/ASSISTANT_DESIGN.md) · [记忆架构](docs/ARCHITECTURE.md) · [AgentArts 适配方案](docs/AGENTARTS_ADAPTATION.md)
 
 ## 本地启动
 

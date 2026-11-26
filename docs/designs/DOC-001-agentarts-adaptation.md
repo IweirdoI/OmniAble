@@ -10,6 +10,8 @@ task = TASK-040
 updated = 20261124-001512
 -->
 
+> 历史 Clerk 文稿。后续更新见 [AgentArts 参赛适配方案](../AGENTARTS_ADAPTATION.md)。
+
 ## 适用范围与状态
 
 方案日期：2026-11-23。代码核对基线：`963e78cb4ac6e249a83e178d373f5512f00be1b7`。登记任务：[TASK-040 / Issue #51](https://github.com/IweirdoI/mokoa-windows/issues/51)。
