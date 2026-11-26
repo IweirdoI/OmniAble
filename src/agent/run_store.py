@@ -120,8 +120,18 @@ class RunStore:
                 " VALUES(:id, :u, :pid, :s, :k, :r, 'pending', :ts, :ts)",
                 {"id": run_id, "u": user_id, "pid": os.getpid(), "s": session_id,
                  "k": idempotency_key, "r": route, "ts": ts})
+            # 并发同键竞态兜底：IGNORE 可能因唯一索引(用户,键)跳过——
+            # 无论按 id 还是按键查，只要本用户存在同键活跃行就返回它
             row = self._conn.execute(
-                "SELECT * FROM runs WHERE id = :id", {"id": run_id}).fetchone()
+                "SELECT * FROM runs WHERE id = :id AND user_id = :u",
+                {"id": run_id, "u": user_id}).fetchone()
+            if row is None and idempotency_key:
+                row = self._conn.execute(
+                    "SELECT * FROM runs WHERE user_id = :u AND idempotency_key = :k"
+                    " ORDER BY created_at LIMIT 1",
+                    {"u": user_id, "k": idempotency_key}).fetchone()
+                if row is not None and row["status"] in _ACTIVE:
+                    return dict(row), True
             if row is None:
                 raise RuntimeError(f"运行注册失败：{run_id}")
             return dict(row), False
@@ -281,21 +291,23 @@ class RunStore:
                 orphans.append(self._expand(row))
         return orphans[:limit]
 
-    def passivate_incomplete(self, user_id: str, *, now: str | None = None) -> int:
+    def passivate_incomplete(self, user_id: str, *, now: str | None = None) -> list[dict[str, Any]]:
         """服务重启/会话清理：只把**孤儿**运行（不属于本进程）标注为
-        interrupted 并返回候选清单；本进程正在执行的运行不受影响。"""
+        interrupted，并**返回本次标注的候选记录**（修「返回空候选」）；
+        本进程正在执行的运行不受影响。"""
         orphans = self.find_recent_incomplete(user_id, limit=1000)
         if not orphans:
-            return 0
+            return []
         with self._lock, self._conn:
-            cur = self._conn.execute(
+            self._conn.execute(
                 "UPDATE runs SET status='interrupted', stop_reason='service_restart',"
                 " updated_at=:ts WHERE user_id=:u AND status IN ('pending','running')"
                 " AND id IN (" + ",".join(
                     ":id" + str(i) for i in range(len(orphans))) + ")",
                 {"ts": now or _now(), "u": user_id,
                  **{f"id{i}": record["id"] for i, record in enumerate(orphans)}})
-            return cur.rowcount
+        # 返回标注后的完整记录（含 steps/artifacts），供恢复界面直接展示
+        return [self.get_run(user_id, record["id"]) or record for record in orphans]
 
     # -- 内部 ---------------------------------------------------------------
 
@@ -304,6 +316,9 @@ class RunStore:
         record = dict(row)
         record["steps"] = json.loads(record.pop("steps_json") or "[]")
         record["artifacts"] = json.loads(record.pop("artifacts_json") or "[]")
+        # 恢复候选携带已确认步骤：重试时跳过这些步骤（Clerk 复核要求）
+        record["confirmed_steps"] = json.loads(
+            record.pop("confirmed_steps_json", "[]") or "[]")
         return record
 
 
@@ -340,3 +355,48 @@ def test_finish_run_allows_terminal_transition_to_needs_review(store) -> None:
     store.mark_running("u_a", "rn-4")
     store.finish_run("u_a", "rn-4", "interrupted")
     assert store.finish_run("u_a", "rn-4", "completed") is False
+
+
+# ---------------------------------------------------------------------------
+# 活跃运行的进程内注册表（TASK-022 复核整改）：取消入口必须能触达正在
+# 执行的 RunContext——run_store.cancel_run 落盘状态后，经此表对活跃
+# 上下文发出协作取消（下一步骤启动前由 ctx.check 边界拦截）。
+# ---------------------------------------------------------------------------
+
+class ActiveRunRegistry:
+    """run_id → RunContext 的进程内注册；线程安全。
+
+    服务层在运行开始时 register、终态（finally）时 unregister。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._contexts: dict[str, Any] = {}
+
+    def register(self, run_id: str, ctx: Any) -> None:
+        with self._lock:
+            self._contexts[run_id] = ctx
+
+    def unregister(self, run_id: str) -> None:
+        with self._lock:
+            self._contexts.pop(run_id, None)
+
+    def cancel(self, run_id: str, reason: str = "user_stop") -> bool:
+        """向活跃上下文发出协作取消；返回是否命中正在执行的运行。"""
+        with self._lock:
+            ctx = self._contexts.get(run_id)
+        if ctx is None:
+            return False
+        try:
+            ctx.cancel(reason)
+            return True
+        except Exception:
+            return False
+
+
+_ACTIVE_RUNS = ActiveRunRegistry()
+
+
+def active_runs() -> ActiveRunRegistry:
+    """进程级活跃运行注册表。"""
+    return _ACTIVE_RUNS

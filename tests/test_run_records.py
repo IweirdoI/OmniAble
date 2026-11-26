@@ -83,7 +83,7 @@ def test_two_users_cannot_read_each_others_runs(store) -> None:
     # 恢复只动本人（且只动孤儿；owner_pid 由 begin_run 记为本进程 → 直接
     # 恢复只动本人需通过孤儿语义：这里 B 的运行同为本进程，先验证不动 A）
     changed = store.passivate_incomplete("u_b")
-    assert changed == 0  # 本进程创建（owner=当前进程）→ 非孤儿，不误伤
+    assert changed == []  # 本进程创建（owner=当前进程）→ 非孤儿，不误伤
     assert store.get_run("u_a", "run-a")["status"] == "running"  # A 不受影响
     assert store.get_run("u_b", "run-b")["status"] == "pending"  # 活跃态不被误伤
 
@@ -246,7 +246,10 @@ def test_recovery_spares_active_runs_same_process(store) -> None:
             "INSERT INTO runs(id, user_id, owner_pid, status, created_at, updated_at)"
             " VALUES('orphan-1', 'u_a', NULL, 'running', 't', 't')")
     changed = store.passivate_incomplete("u_a")
-    assert changed == 1
+    # 返回本次标注的候选（复核项：恢复须返回刚标中断的记录）
+    assert [c["id"] for c in changed] == ["orphan-1"]
+    assert changed[0]["status"] == "interrupted"
+    assert changed[0]["confirmed_steps"] == []
     statuses = {r["id"]: r["status"] for r in store.list_runs("u_a")["runs"]}
     assert statuses["active-1"] == "running"   # 本进程活跃运行不受影响
     assert statuses["orphan-1"] == "interrupted"  # 孤儿进中断
@@ -326,3 +329,96 @@ def test_api_sync_idempotency_key_header(tmp_path, monkeypatch) -> None:
         ids = {first.json()["run_record_id"], retry.json()["run_record_id"]}
         assert len(ids) == 2, "终态后同键重试应创建新运行（不改写历史）"
     fresh.close()
+
+
+# ---------------------------------------------------------------------------
+# 复核项：取消必须传递到活跃 RunContext（步骤启动边界拦截）
+# ---------------------------------------------------------------------------
+
+def test_cancel_propagates_to_active_run_context() -> None:
+    """取消入口 → ActiveRunRegistry 协作取消 → 下一步骤启动边界抛 RunAborted。"""
+    from src.agent.run_store import active_runs
+    from src.agent.runtime import RunAborted, RunContext
+
+    ctx = RunContext(route="tool_task")
+    registry = active_runs()
+    registry.register("rc-live", ctx)
+    try:
+        # 取消前：步骤边界可正常通过
+        ctx.check("before_tool")
+        # 触发协作取消（与 POST /agent/runs/{u}/{r}/cancel 的路径一致）
+        assert registry.cancel("rc-live", reason="user_stop") is True
+        assert ctx.cancelled is True
+        # 下一步骤启动边界：拦截（执行器不会启动下一步）
+        with pytest.raises(RunAborted):
+            ctx.check("before_tool")
+    finally:
+        registry.unregister("rc-live")
+    # 注销后取消不再命中
+    assert registry.cancel("rc-live") is False
+
+
+def test_cancel_endpoint_cancels_active_run(tmp_path, monkeypatch) -> None:
+    """API 取消端点：命中活跃 RunContext 时传递取消（不是只改数据库）。"""
+    import api.server as server
+    import threading as _threading
+    from src.agent.run_store import active_runs
+    from src.agent.runtime import RunContext
+
+    fresh = RunStore(tmp_path / "cancel_run.db")
+    server.run_store._conn.close()
+    server.run_store = fresh
+    ctx = RunContext(route="tool_task")
+    record, _ = fresh.begin_run("ru_live", "live-1", route="tool_task")
+    fresh.mark_running("ru_live", "live-1")
+    active_runs().register("live-1", ctx)
+    try:
+        with TestClient(server.app) as client:
+            resp = client.post("/agent/runs/ru_live/live-1/cancel")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["cancelled"] is True and body["status"] == "cancelled"
+        assert ctx.cancelled is True  # 取消已触达执行器
+    finally:
+        active_runs().unregister("live-1")
+        fresh.close()
+
+
+# ---------------------------------------------------------------------------
+# 复核项：同一持久操作键并发/重启后稳定去重（不开启重复运行）
+# ---------------------------------------------------------------------------
+
+def test_same_key_concurrent_begin_never_opens_two_runs(store) -> None:
+    """同用户同键并发注册：唯一（用户,键）索引下绝不出现两条活跃运行。"""
+    import threading as _threading
+    results = []
+
+    def worker(i):
+        record, dup = store.begin_run("u_a", f"race-{i}", idempotency_key="same-key")
+        results.append((record["id"], dup))
+
+    threads = [_threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    ids = {record_id for record_id, _ in results}
+    dups = [dup for _, dup in results]
+    assert len(ids) == 1, f"同键并发不得开启多个运行：{ids}"
+    assert sum(1 for d in dups if d) == 7, "其余 7 个必须去重返回既有运行"
+    active = [r for r in store.list_runs("u_a")["runs"] if r["status"] in ("pending", "running")]
+    assert len(active) == 1
+
+
+def test_recovery_returns_confirmed_steps_for_skip(store) -> None:
+    """恢复候选携带已确认步骤（重试按此跳过，不重复执行）。"""
+    import sqlite3 as _sq
+    with store._lock, store._conn:
+        store._conn.execute(
+            "INSERT INTO runs(id, user_id, owner_pid, status, steps_json,"
+            " confirmed_steps_json, created_at, updated_at)"
+            " VALUES('orphan-2', 'u_a', NULL, 'running', '[]', '[\"row-1\", \"row-2\"]', 't', 't')")
+    candidates = store.passivate_incomplete("u_a")
+    assert len(candidates) == 1
+    assert candidates[0]["confirmed_steps"] == ["row-1", "row-2"]

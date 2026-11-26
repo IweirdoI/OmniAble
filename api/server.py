@@ -21,7 +21,7 @@ from src.core.factory import create_orchestrator
 from src.core.orchestrator import MemoryOrchestrator, ProcessInputResult
 from src.knowledge.memory_service.memory_schema import MemoryEntry
 from src.agent.context import ContextLimitExceeded
-from src.agent.runtime import RunTimedOut, get_stream_slots
+from src.agent.runtime import RunAborted, RunTimedOut, get_stream_slots
 from src.agent.service import ChatMessage, ChatRequest, MemoryAgent, ModelUnavailable
 from src.agent.session_store import SessionStore
 from src.agent.run_store import RunStore
@@ -129,6 +129,9 @@ def agent_chat(req: ChatRequest, request: Request) -> dict[str, Any]:
             "detail": "相同 Idempotency-Key 的请求仍在执行，未重复发起。",
             "run_record_id": actual_run_id, "duplicate": True})
     run_store.mark_running(req.user_id, actual_run_id)
+    from src.agent.run_store import active_runs
+    if agent._ctx is not None:
+        active_runs().register(actual_run_id, agent._ctx)
     try:
         result = agent.chat(req)
         workflow = result.get("workflow") or {}
@@ -165,6 +168,19 @@ def agent_chat(req: ChatRequest, request: Request) -> dict[str, Any]:
             detail={"message": "执行超过请求时间预算已停止；请缩小任务范围后重试。",
                     "workflow": agent._workflow("timed_out", exc.reason)},
         ) from exc
+    except RunAborted as exc:
+        # 取消贯通（TASK-022 复核项）：取消入口对活跃 RunContext 发协作取消，
+        # 下一步骤启动边界抛出 RunAborted——落 cancelled 终态并如实返回
+        run_store.finish_run(req.user_id, actual_run_id, "cancelled",
+                             stop_reason=exc.reason or "user_stop",
+                             steps=(agent._workflow("cancelled", exc.reason) or {}).get("steps"))
+        return JSONResponse(status_code=409, content={
+            "detail": "运行已取消；已开始的步骤可能完成，请同步确认结果。",
+            "run_record_id": actual_run_id, "cancelled": True,
+            "workflow": agent._workflow("cancelled", exc.reason),
+        })
+    finally:
+        active_runs().unregister(actual_run_id)
     _finalize_session_turn(req, result, history_memory_ids)
     return result
 
@@ -187,6 +203,13 @@ def _finalize_session_turn(req: ChatRequest, terminal: dict,
     deleted_ids = terminal.get("deleted_ids") or []
     if deleted_ids:
         session_store.forget_memories(req.user_id, deleted_ids)
+
+
+async def _register_ctx_hook(gen, register_coro):
+    """运行记录（TASK-022）：先把 ctx 注册协程并入流，再透传业务事件。"""
+    await register_coro()
+    async for chunk in gen:
+        yield chunk
 
 
 async def _record_session_stream(gen, req: ChatRequest,
@@ -286,7 +309,19 @@ async def agent_chat_stream(req: ChatRequest, request: Request):
                         run_store.finish_run(
                             req.user_id, stream_run_id, "interrupted",
                             stop_reason="client_disconnected_or_worker_exit")
+                    from src.agent.run_store import active_runs
+                    active_runs().unregister(stream_run_id)
         gen = agent.chat_stream(req, on_finished=slots.release)
+        # ctx 在 worker 首节点创建后注册到活跃表（供取消入口触达）；
+        # 终态/断线注销在 RunResponse finally 中完成
+        async def _register_ctx():
+            for _ in range(200):
+                if agent._ctx is not None:
+                    active_runs().register(stream_run_id, agent._ctx)
+                    return
+                await asyncio.sleep(0.02)
+        from src.agent.run_store import active_runs
+        gen = _register_ctx_hook(gen, _register_ctx)
         # 包装器总是启用：遗忘抑制不依赖 session_id（前端仍会发无会话的
         # 遗忘请求），落库仍只在有 session_id 时发生（见 _finalize_session_turn）
         gen = _record_session_stream(gen, req, history_memory_ids, _record_stream_terminal)
@@ -342,6 +377,10 @@ def cancel_agent_run(user_id: str, run_id: str) -> dict[str, Any]:
     result = run_store.cancel_run(user_id, run_id)
     if result is None:
         raise HTTPException(status_code=404, detail="run not found")
+    if result["cancelled"]:
+        # 向正在执行的 RunContext 发协作取消：下一步骤启动边界即停
+        from src.agent.run_store import active_runs
+        active_runs().cancel(run_id, reason="user_stop")
     return result
 
 
@@ -358,10 +397,11 @@ def mark_run_needs_review(user_id: str, run_id: str) -> dict[str, Any]:
 
 @app.post("/agent/runs/{user_id}/recover")
 def recover_agent_runs(user_id: str) -> dict[str, Any]:
-    """重启/断线后恢复：把该用户遗留的 pending/running 标注 interrupted。"""
-    changed = run_store.passivate_incomplete(user_id)
-    return {"user_id": user_id, "interrupted": changed,
-            "candidates": run_store.find_recent_incomplete(user_id)}
+    """重启/断线后恢复：把该用户遗留的 pending/running 标注 interrupted，
+    并返回**本次标注的候选记录**（修「标了却返回空」）。"""
+    candidates = run_store.passivate_incomplete(user_id)
+    return {"user_id": user_id, "interrupted": len(candidates),
+            "candidates": candidates}
 
 
 @app.post("/agent/confirmations/{confirm_id}")
