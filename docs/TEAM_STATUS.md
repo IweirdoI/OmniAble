@@ -37,7 +37,7 @@
 | TASK-029 | [P1] 录制一次操作并生成可编辑的参数化流程 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/37 | 20261122-204459 |
 | TASK-030 | [P1] 按模板批量录入并核对每行提交结果 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/38 | 20261122-204503 |
 | TASK-031 | [P1] 实现本地定时任务与错过执行的处理 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/39 | 20261122-204505 |
-| TASK-032 | [P2] 实现只读代码解析插件与可追溯依赖图 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/40 | 20261122-204508 |
+| TASK-032 | [P2] 实现只读代码解析插件与可追溯依赖图 | 待审查 | 123456s-ai | https://github.com/IweirdoI/mokoa-windows/issues/40 | 20261126-204926 |
 | TASK-033 | [P2] 把 AI 代码解释与依赖图联动到源码 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/41 | 20261122-204511 |
 | TASK-034 | [P1] 划清流程和插件数据与长期记忆的保留边界 | 已完成 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/42 | 20261125-091133 |
 | TASK-035 | [P1] 验收断网桌面与无障碍端到端使用场景 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/43 | 20261122-204516 |
