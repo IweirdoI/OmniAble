@@ -185,6 +185,12 @@ class ChatModel:
         连接类异常由调用方负责代理重试（见 complete）。
         """
         messages, tools = self._outbound_payload(messages, tools)
+        # 离线档：非回环聊天端点在发起任何连接前拒绝（TASK-025 复核项）
+        from src.common.offline_profile import OutboundBlocked, ensure_outbound
+        try:
+            ensure_outbound("llm_chat", self.base_url)
+        except OutboundBlocked as exc:
+            raise ModelUnavailable(str(exc)) from None
         import httpx
         from openai import OpenAI
 
@@ -232,6 +238,9 @@ class ChatModel:
                     return self._complete_once(messages, tools, None, remaining)
                 raise
         except ContextLimitExceeded:
+            raise
+        except ModelUnavailable:
+            # 离线裁决等既有结构化拒绝直接传播，不包装成通用消息
             raise
         except Exception as exc:
             status = getattr(exc, "status_code", None)
@@ -282,6 +291,12 @@ class ChatModel:
 
     def _stream_once(self, messages, tools, proxy, timeout: float | None = None):
         messages, tools = self._outbound_payload(messages, tools)
+        # 离线档：非回环聊天端点在发起任何连接前拒绝（TASK-025 复核项）
+        from src.common.offline_profile import OutboundBlocked, ensure_outbound
+        try:
+            ensure_outbound("llm_chat", self.base_url)
+        except OutboundBlocked as exc:
+            raise ModelUnavailable(str(exc)) from None
         import httpx
         from openai import OpenAI
 

@@ -105,6 +105,10 @@ metadata 的特殊性：注意列表中包含 metadata（JSON类型）。
         """
         if self.client is not None:
             return
+        # 离线档：远端向量库（http/https URI）在发起连接前拒绝；
+        # milvus-lite 本地文件（.db 路径）不受影响（TASK-025 复核项）
+        from src.common.offline_profile import ensure_outbound
+        ensure_outbound("vector_store", self.uri if "://" in self.uri else "file://local")
         try:
             from pymilvus import MilvusClient as PyMilvusClient
 

@@ -36,13 +36,17 @@ _AUDIT_LIMIT = 200
 
 # 出站目标类别（审计与离线裁决共用；新增入口必须登记）
 OUTBOUND_CATEGORIES: frozenset[str] = frozenset({
-    "llm_chat",          # 云端聊天 / LM Studio 远端（回环例外）
-    "preference_llm",    # 偏好抽象 LLM
-    "embedding_remote",  # 云端嵌入
-    "web_fetch",         # 网页抓取
-    "voice_cloud",       # 云端语音
-    "telemetry",         # 遥测
-    "update_check",      # 更新检查
+    "llm_chat",           # 云端聊天 / LM Studio 远端（回环例外）
+    "preference_llm",     # 偏好抽象 LLM
+    "embedding_remote",   # 云端嵌入
+    "web_fetch",          # 网页抓取
+    "voice_cloud",        # 云端语音
+    "semantic_detection", # 语义脱敏检测服务
+    "vision",             # 视觉/图片理解
+    "model_download",     # 模型权重下载（HF/远端仓库）
+    "vector_store",       # 远端向量库
+    "telemetry",          # 遥测
+    "update_check",       # 更新检查
 })
 
 
@@ -73,12 +77,35 @@ def outbound_allowed(category: str, url: str) -> tuple[bool, str | None]:
     """
     if category not in OUTBOUND_CATEGORIES:
         return False, f"未登记的出站类别：{category}"
+    # 本地资源（milvus-lite 文件路径等）不是网络出站：任何档位都放行
+    if "://" not in url or url.startswith("file:"):
+        return True, None
     if not offline_mode():
         return True, None
     if loopback_allowed(url):
         return True, None
     audit_outbound(category, url, allowed=False, reason="offline_mode")
     return False, "离线模式：该类出站已停用（回环服务除外）。"
+
+
+class OutboundBlocked(RuntimeError):
+    """离线档拒绝的出站尝试（在发起任何 DNS/连接之前抛出）。"""
+
+    def __init__(self, category: str, reason: str) -> None:
+        super().__init__(f"离线模式：{category} 出站已停用（{reason}）。")
+        self.category = category
+        self.reason = reason
+
+
+def ensure_outbound(category: str, url: str) -> None:
+    """统一出站守卫：离线档下非回环出站**在发起前**抛 OutboundBlocked。
+
+    聊天、偏好抽取、视觉、语义检测、模型下载、远端存储等实际出站入口
+    统一调用本函数（TASK-025 复核项：一致离线策略）。
+    """
+    allowed, reason = outbound_allowed(category, url)
+    if not allowed:
+        raise OutboundBlocked(category, reason or "出站已停用")
 
 
 def audit_outbound(category: str, url: str, *, allowed: bool,

@@ -97,6 +97,9 @@ class SiliconFlowClient:
             raise RuntimeError(
                 "No API key. Set SILICONFLOW_API_KEY (or OPENAI_API_KEY) for preference LLM extraction."
             )
+        # 离线档：非回环端点在发起连接前拒绝（TASK-025 复核项）
+        from src.common.offline_profile import ensure_outbound
+        ensure_outbound("preference_llm", self.base_url)
         client = self._ensure_client()
         response = client.chat.completions.create(
             model=model or self.model,

@@ -151,3 +151,117 @@ def test_deterministic_actions_work_offline(monkeypatch, tmp_path) -> None:
         ok, content, error = dispatch_action(name, args, ctx)
         assert ok is True, f"{name} 断网必须可用：{content}"
         assert error is None
+
+
+# ---------------------------------------------------------------------------
+# 复核项：实际出站入口一致离线策略（传输替身证明「不触及传输入口」）
+# ---------------------------------------------------------------------------
+
+def test_remote_chat_never_touches_transport_offline(monkeypatch) -> None:
+    """离线档 + 远端聊天：complete/complete_stream 在创建传输客户端前拒绝。"""
+    import httpx
+    from src.agent.service import ChatModel, ModelUnavailable
+
+    monkeypatch.setenv("OS_AGENT_OFFLINE_MODE", "1")
+    monkeypatch.setenv("LM_STUDIO_BASE_URL", "https://api.example.com/v1")
+    monkeypatch.setenv("AGENT_API_KEY", "sk-real-key")
+
+    calls = {"n": 0}
+    class _ForbiddenTransport:
+        def __init__(self, *args, **kwargs):
+            calls["n"] += 1
+            raise AssertionError("离线档不得创建传输客户端")
+    monkeypatch.setattr(httpx, "Client", _ForbiddenTransport)
+
+    model = ChatModel(context_window_tokens=4096)
+    with pytest.raises(ModelUnavailable) as err:
+        model.complete([{"role": "user", "content": "hi"}])
+    assert "离线" in str(err.value)
+    with pytest.raises(ModelUnavailable):
+        list(model.complete_stream([{"role": "user", "content": "hi"}]))
+    assert calls["n"] == 0, "传输入口零调用"
+
+
+def test_loopback_chat_still_allowed_offline(monkeypatch) -> None:
+    """离线档 + 显式回环端点：聊天放行（本地模型档），由传输层真实发起。"""
+    from src.common.offline_profile import ensure_outbound
+    monkeypatch.setenv("OS_AGENT_OFFLINE_MODE", "1")
+    ensure_outbound("llm_chat", "http://127.0.0.1:1234/v1")  # 不抛
+
+
+def test_preference_llm_blocked_offline(monkeypatch) -> None:
+    """偏好抽取 LLM：离线 + 远端在创建客户端前拒绝。"""
+    from src.common.offline_profile import OutboundBlocked
+    from src.preference.llm_client import SiliconFlowClient
+
+    monkeypatch.setenv("OS_AGENT_OFFLINE_MODE", "1")
+    client = SiliconFlowClient(api_key="sk-real", base_url="https://api.example.com/v1")
+    with pytest.raises(OutboundBlocked):
+        client.chat_completion([{"role": "user", "content": "x"}])
+
+
+def test_semantic_detection_blocked_offline(monkeypatch) -> None:
+    """语义检测：离线策略接线 + 既有回环约束（双重防线，均不触达传输）。
+
+    1) 语义检测本就只允许回环服务（比离线策略更严）：远端 + strict →
+       SemanticDetectionUnavailable，不发起 HTTP；
+    2) 离线档下非回环检测服务经 ensure_outbound 拒绝（发起前）；
+    3) 回环检测服务在离线档放行（本地能力）。
+    """
+    from src.common.offline_profile import OutboundBlocked, ensure_outbound
+    from src.security.semantic_detector import SemanticDetectionUnavailable
+    import src.security.semantic_detector as sd
+
+    monkeypatch.setenv("OS_AGENT_OFFLINE_MODE", "1")
+    detector = sd.SemanticPiiDetector(
+        base_url="https://api.example.com", api_key="sk-real", model="m",
+        timeout_seconds=5.0, max_tokens=64)
+    with pytest.raises(SemanticDetectionUnavailable):
+        detector.detect("测试文本", strict=True)  # 远端被回环约束拒绝（更早）
+    with pytest.raises(OutboundBlocked):
+        ensure_outbound("semantic_detection", "https://api.example.com")
+    ensure_outbound("semantic_detection", "http://127.0.0.1:1234")  # 回环放行
+
+
+def test_vision_blocked_offline(monkeypatch) -> None:
+    """视觉理解：离线 + 远端在发起 HTTP 前拒绝。"""
+    from src.common.offline_profile import OutboundBlocked
+    import src.ingestion.vision as vision
+
+    monkeypatch.setenv("OS_AGENT_OFFLINE_MODE", "1")
+    with pytest.raises(OutboundBlocked):
+        vision._get_json("https://api.example.com/models", api_key="k", timeout=5)
+
+
+def test_model_download_local_only_offline(monkeypatch) -> None:
+    """模型下载：离线档下 SentenceTransformer 以 local_files_only 加载。"""
+    import src.embedding.local_embedding as le
+
+    monkeypatch.setenv("OS_AGENT_OFFLINE_MODE", "1")
+    captured: dict = {}
+
+    class _FakeST:
+        def __init__(self, name, **kwargs):
+            captured.update(kwargs)
+            raise RuntimeError("no local cache")  # 触发既有 fallback 链
+
+    monkeypatch.setattr(le, "_MODEL_CACHE", {})
+    import sys as _sys
+    fake_mod = type(_sys)("sentence_transformers")
+    fake_mod.SentenceTransformer = _FakeST
+    monkeypatch.setitem(_sys.modules, "sentence_transformers", fake_mod)
+
+    adapter = le.LocalEmbeddingAdapter(dimension=4)
+    vec = adapter.embed(["离线模型缺失"])
+    assert captured.get("local_files_only") is True, "离线档必须禁止远端下载"
+    assert vec and len(vec[0]) == 4  # 降级为哈希向量（既有 fallback）
+
+
+def test_remote_vector_store_blocked_offline(monkeypatch) -> None:
+    """远端向量库：离线档拒绝 http(s) URI；milvus-lite 本地文件放行。"""
+    from src.common.offline_profile import OutboundBlocked, ensure_outbound
+
+    monkeypatch.setenv("OS_AGENT_OFFLINE_MODE", "1")
+    with pytest.raises(OutboundBlocked):
+        ensure_outbound("vector_store", "https://milvus.example.com:19530")
+    ensure_outbound("vector_store", "file://local")  # 本地库放行（不抛）

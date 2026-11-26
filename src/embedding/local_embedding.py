@@ -92,6 +92,11 @@ class LocalEmbeddingAdapter(EmbeddingProvider):
             kwargs: dict[str, Any] = {}
             if self._device:
                 kwargs["device"] = self._device
+            # 离线档：禁止向 HF 等远端仓库发起模型下载（仅用本地缓存；
+            # 无缓存时按既有 fallback 链降级为哈希向量并明确警告）
+            from src.common.offline_profile import offline_mode
+            if offline_mode():
+                kwargs["local_files_only"] = True
             try:
                 model = SentenceTransformer(self._model_name, **kwargs)
             except Exception:
