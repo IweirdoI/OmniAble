@@ -1,3 +1,3 @@
-"""MOKOA Agent Memory - Memory Orchestrator for Windows desktop agents."""
+"""OmniAble agent, memory and workspace modules."""
 
 __version__ = "0.1.0"

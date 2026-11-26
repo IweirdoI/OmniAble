@@ -6,9 +6,9 @@
 
 ## 1 任务分工与实施顺序
 
-- 现有 TASK-008 / [#7](https://github.com/IweirdoI/mokoa-windows/issues/7)：SSE 生命周期、取消、限流和资源回收。作为第一阶段，不重复登记。
-- 现有 TASK-009 / [#8](https://github.com/IweirdoI/mokoa-windows/issues/8)：流式解析、权威终态、部分失败和停止按钮。与第一阶段联调，不重复登记。
-- TASK-016 / [#16](https://github.com/IweirdoI/mokoa-windows/issues/16)：仅覆盖本方案的路由、预算、结构化执行证据、结果核验和最小进度展示。
+- 现有 TASK-008 / [#7](https://github.com/IweirdoI/OmniAble/issues/7)：SSE 生命周期、取消、限流和资源回收。作为第一阶段，不重复登记。
+- 现有 TASK-009 / [#8](https://github.com/IweirdoI/OmniAble/issues/8)：流式解析、权威终态、部分失败和停止按钮。与第一阶段联调，不重复登记。
+- TASK-016 / [#16](https://github.com/IweirdoI/OmniAble/issues/16)：仅覆盖本方案的路由、预算、结构化执行证据、结果核验和最小进度展示。
 - #9 的面板过期状态、#10/#11 的整体视觉改版、#12 的场景选择、#5/#6 的规模与真机性能仍保持原任务边界。本轮传递现有 scene_id，但不抢做这些功能。
 
 实施次序：先落实终态及预算契约和生命周期；再完善路由、工具执行记录和核验；最后接前端进度及端到端回归。每阶段形成独立、可验证的提交。不得通过同时修改两端来掩盖旧客户端不兼容。

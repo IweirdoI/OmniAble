@@ -3,7 +3,7 @@ import { defineConfig, loadEnv } from 'vite'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
-  // MOKOA FastAPI
+  // OmniAble FastAPI
   // Allow VITE_API_TARGET to override the Windows API default port.
   const apiTarget = env.VITE_API_TARGET || 'http://127.0.0.1:18080'
 

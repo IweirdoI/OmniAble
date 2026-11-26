@@ -65,7 +65,7 @@ if ($args.Count -ge 2 -and $args[0] -eq 'tasks' -and $args[1] -in @('list', 'sho
     $taskBranch = git -C $taskRoot branch --show-current
     $taskOrigin = git -C $taskRoot config --get remote.origin.url
     if ($taskBranch -eq 'master' -and
-        $taskOrigin -match '^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)IweirdoI/mokoa-windows(?:\.git)?/?$') {
+        $taskOrigin -match '^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)IweirdoI/(?:OmniAble|mokoa-windows)(?:\.git)?/?$') {
         $taskChanges = git -C $taskRoot status --porcelain --untracked-files=all
         if ($LASTEXITCODE -ne 0 -or $taskChanges) {
             Write-Warning 'Clerk is showing local tasks because the worktree could not be verified clean.'

@@ -4,7 +4,7 @@
 
 漏洞、令牌或个人数据问题不要直接发公开 Issue／PR。
 
-1. 优先查看 [私密漏洞报告入口](https://github.com/IweirdoI/mokoa-windows/security/advisories/new)，其可用性取决于仓库是否启用该功能。
+1. 优先查看 [私密漏洞报告入口](https://github.com/IweirdoI/OmniAble/security/advisories/new)，其可用性取决于仓库是否启用该功能。
 2. 如不可用，查看 [维护者资料](https://github.com/IweirdoI) 的私密联系方式。无可用渠道时只公开请求建立私下联系，不披露细节。
 3. 令牌泄露立即在提供方撤销并轮换，再协调清理；删除文件不能撤销令牌。
 

@@ -2,14 +2,14 @@
 
 使用 AI Agent 的协作者，新对话先读 [AGENTS.md](AGENTS.md) 与 [Agent 开工指南](docs/AGENT_ONBOARDING.md)，再按本指南执行贡献流程。
 
-适用于 `IweirdoI/mokoa-windows` 的新贡献。README 以模块角色说明历史协作范围，不公开旧成员账户，也不自动成为新团队分工或署名排名。固定团队成员以可追溯行为确认 [团队协议](docs/TEAM_AGREEMENT.md)。
+适用于 OmniAble 的新贡献。岗位与适配方向见 [产品说明](docs/PRODUCT.md)，模块入口见 [Agent 开工指南](docs/AGENT_ONBOARDING.md)。固定团队成员以可追溯行为确认 [团队协议](docs/TEAM_AGREEMENT.md)。
 
 ## 认领与开发
 
 固定团队使用 [Clerk](docs/CLERK.md) 记录任务认领与状态，并关联 GitHub Issue。任务与受管记录变更提交前运行 `./scripts/clerk.ps1 check`；各人自行安装工具，不共享本机身份或凭据。
 
 1. 先阅读 [项目说明](README.md)、[发布说明](docs/发布说明.md)、[Windows 开发](docs/WINDOWS.md)。
-2. 在 [Issues](https://github.com/IweirdoI/mokoa-windows/issues) 认领或新建任务，约定负责人、目录、交付、验收人、时间和依赖，由维护者确认。
+2. 在 [Issues](https://github.com/IweirdoI/OmniAble/issues) 认领或新建任务，约定负责人、目录、交付、验收人、时间和依赖，由维护者确认。
 3. 一个任务一个分支、一个 PR；较大改动先讨论接口。文档、测试、设计、评测和审查也是贡献。
 4. PR 目标为 `master`，维护者审查后合并；不直接推主线，不强推共享分支，不用旧分支整份文件覆盖主线。
 
@@ -18,9 +18,9 @@
 新人优先 Fork，不需要写权限。Fork 后在自己的克隆中执行：
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_LOGIN/mokoa-windows.git
-cd mokoa-windows
-git remote add upstream https://github.com/IweirdoI/mokoa-windows.git
+git clone https://github.com/YOUR_GITHUB_LOGIN/OmniAble.git
+cd OmniAble
+git remote add upstream https://github.com/IweirdoI/OmniAble.git
 git fetch upstream
 git switch -c feat/123-short-description upstream/master
 ```
@@ -33,9 +33,9 @@ git commit -s -m "fix(preference): 修复偏好版本更新"
 git push -u origin HEAD
 ```
 
-Fork 的 `origin` 是自己的仓库。在 GitHub 创建 PR，base 选择 `IweirdoI/mokoa-windows:master`。
+Fork 的 `origin` 是自己的仓库。在 GitHub 创建 PR，base 选择 `IweirdoI/OmniAble:master`。
 
-只改任务约定范围。公共接口、`api/server.py`、`src/core/`、配置、依赖变更先说明影响。历史分工见 README，当前认领以 Issue 为准。维护者为 [@IweirdoI](https://github.com/IweirdoI)。CODEOWNERS 用于请求审查；强制走 PR 需要仓库端另行启用分支保护。
+只改任务约定范围。公共接口、`api/server.py`、`src/core/`、配置、依赖变更先说明影响。任务认领以 Issue 和 Clerk 记录为准。CODEOWNERS 用于请求审查，主线保护见[协作说明](docs/COLLABORATION.md#主线保护配置)。维护者为 [@IweirdoI](https://github.com/IweirdoI)。
 
 ## 接口与环境
 
