@@ -256,6 +256,9 @@ def _chat_with_image(llm_cfg: dict[str, Any], messages: list[dict[str, Any]]) ->
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
+    # 离线档：非回环视觉端点在发起连接前拒绝（TASK-025 复核项）
+    from src.common.offline_profile import ensure_outbound
+    ensure_outbound("vision", base_url)
     response = httpx.post(
         f"{_openai_root(base_url)}/chat/completions",
         json={
@@ -281,7 +284,9 @@ def _get_json(url: str, *, api_key: str, timeout: float) -> Any:
     headers = {"Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    response = httpx.get(url, headers=headers, timeout=timeout)
+    from src.common.offline_profile import ensure_outbound, offline_mode
+    ensure_outbound("vision", url)
+    response = httpx.get(url, headers=headers, timeout=timeout, trust_env=not offline_mode())
     response.raise_for_status()
     return response.json()
 

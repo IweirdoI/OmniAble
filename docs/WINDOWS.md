@@ -36,6 +36,16 @@ powershell -ExecutionPolicy Bypass -File scripts\dev_windows.ps1
 
 提示：默认控制台是 GBK 编码，`curl -d "…中文…"` 会报 body 解析错误（TASK-002 复核）。测中文载荷请用 UTF-8 文件 `curl --data-binary @payload.json`，或改用 PowerShell `Invoke-RestMethod`。
 
+## 断网运行配置
+
+在启动 API 的同一 PowerShell 窗口设置 `$env:OS_AGENT_OFFLINE_MODE = '1'`，
+再运行 `./scripts/dev_windows.ps1 -Port 18080`。`GET /agent/capabilities` 显示基础档、
+已配置的本地模型档，以及各组件的可用状态。基础档可运行计算、时间和已开启的本地只读文件动作。
+
+本地聊天模型需显式配置回环端点和模型名。离线嵌入只从已下载的权重加载，
+远端 Milvus 停用，可选择进程内记忆或本机 Milvus。断网档停用 Agent 网页抓取和终端命令。
+真实模型与干净 Windows 环境的离线验收还需按 TASK-025 的 Issue 记录实测。
+
 ## 语义检索
 
 ```powershell

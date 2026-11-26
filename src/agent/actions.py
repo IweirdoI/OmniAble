@@ -146,6 +146,9 @@ def _exec_terminal(command: str, timeout: int | None = None, *,
     Returns:
         (是否真正执行了命令, 回传给模型的文本结果)
     """
+    from src.common.offline_profile import offline_mode
+    if offline_mode():
+        return False, "离线模式停用终端命令。"
     cmd = (command or "").strip()
     if not cmd:
         return False, "命令为空。"
@@ -457,6 +460,11 @@ def _web_fetch(url: str, timeout: float | None = None) -> tuple[bool, str]:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         return False, "仅支持 http/https 链接。"
+    # 离线档：非回环出站在发起前拒绝（TASK-025）；审计记录这次尝试
+    from src.common.offline_profile import outbound_allowed
+    allowed, offline_reason = outbound_allowed("web_fetch", url)
+    if not allowed:
+        return False, offline_reason or "出站已停用。"
     from src.security.outbound import is_external_url_safe
 
     if not is_external_url_safe(url):

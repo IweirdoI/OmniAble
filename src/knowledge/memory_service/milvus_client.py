@@ -103,13 +103,25 @@ metadata 的特殊性：注意列表中包含 metadata（JSON类型）。
         任何连接/建集合故障统一包装为 MemoryBackendUnavailable，供 API 层映射为 503
         而非 500。pymilvus 在此处函数内导入，使 memory 后端在缺失该可选依赖时仍能启动。
         """
+        # 离线档：远端向量库（http/https URI）在发起连接前拒绝；
+        # milvus-lite 本地文件（.db 路径）不受影响（TASK-025 复核项）
+        from src.common.offline_profile import OutboundBlocked, ensure_outbound, loopback_allowed, offline_mode
+        offline = offline_mode()
+        if offline:
+            try:
+                ensure_outbound("vector_store", getattr(self, "uri", ""))
+            except OutboundBlocked as exc:
+                raise MemoryBackendUnavailable(str(exc)) from exc
         if self.client is not None:
             return
         try:
             from pymilvus import MilvusClient as PyMilvusClient
 
             self._ensure_lite_parent(self.uri)
-            self.client = PyMilvusClient(uri=self.uri)
+            options = {}
+            if offline and loopback_allowed(self.uri):
+                options["grpc_options"] = {"grpc.enable_http_proxy": 0}
+            self.client = PyMilvusClient(uri=self.uri, **options)
             self._ensure_collection()
         except Exception as exc:  # noqa: BLE001
             self.client = None

@@ -236,6 +236,9 @@ class SemanticPiiDetector:
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
+        # 离线档：非回环检测服务在发起连接前拒绝（TASK-025 复核项）
+        from src.common.offline_profile import ensure_outbound
+        ensure_outbound("semantic_detection", self._base_url)
         response = httpx.post(
             f"{self._base_url}/api/v1/chat",
             json=payload,

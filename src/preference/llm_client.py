@@ -74,12 +74,24 @@ class SiliconFlowClient:
                     or "Pro/deepseek-ai/DeepSeek-V3.2"
                 )
         self._client: Any = None
+        self._offline_client: Any = None
 
     @property
     def available(self) -> bool:
         return bool(self.api_key)
 
     def _ensure_client(self) -> Any:
+        from src.common.offline_profile import offline_mode
+        if offline_mode():
+            if self._offline_client is None:
+                import httpx
+                from openai import OpenAI
+
+                self._offline_client = OpenAI(
+                    api_key=self.api_key, base_url=self.base_url,
+                    http_client=httpx.Client(trust_env=False, follow_redirects=False),
+                )
+            return self._offline_client
         if self._client is None:
             from openai import OpenAI
 
@@ -97,6 +109,9 @@ class SiliconFlowClient:
             raise RuntimeError(
                 "No API key. Set SILICONFLOW_API_KEY (or OPENAI_API_KEY) for preference LLM extraction."
             )
+        # 离线档：非回环端点在发起连接前拒绝（TASK-025 复核项）
+        from src.common.offline_profile import ensure_outbound
+        ensure_outbound("preference_llm", self.base_url)
         client = self._ensure_client()
         response = client.chat.completions.create(
             model=model or self.model,
