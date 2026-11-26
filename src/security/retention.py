@@ -105,7 +105,7 @@ RETENTION_POLICY: tuple[RetentionPolicy, ...] = (
     ),
     RetentionPolicy(
         kind="task_log", label="任务执行日志",
-        owner_scope=OwnerScope.PER_USER, location=None,
+        owner_scope=OwnerScope.PER_USER, location="data/agent_runs.db",
         retention="persistent（只留最小结果：状态/耗时/错误码，不留正文）",
         forget_propagation=False, long_term_ingestible=False,
     ),

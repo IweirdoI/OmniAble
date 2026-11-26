@@ -87,3 +87,12 @@ forgotten_memories(user_id TEXT NOT NULL, memory_id TEXT NOT NULL,
 
 会话列表/切换的前端 UI 属 #11/012 的设计范围，与 UI 负责人协调后接入；
 本阶段交付后端存储、最小 API 与聊天集成，前端可直接消费上述端点。
+
+## 执行记录
+
+聊天运行可以关联会话，但执行状态单独存入 `data/agent_runs.db`。
+同步响应通过 `run_record_id` 返回记录 ID，SSE 响应通过 `X-Run-Record-ID` 返回。
+同一用户在同步或流式入口重试同一 `Idempotency-Key` 时，收到 HTTP 409 和原始运行记录 ID、状态。
+可以查询 `GET /agent/runs/{user_id}/{run_id}`，向同一路径加 `/cancel` 发起协作取消，
+或调用 `POST /agent/runs/{user_id}/recover` 查询本次恢复标注的记录。
+取消请求由执行该运行的进程接收。恢复候选提供已确认步骤，供后续工作流跳过。

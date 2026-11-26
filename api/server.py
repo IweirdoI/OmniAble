@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import time
+from uuid import uuid4
 from collections import defaultdict, deque
 from contextlib import aclosing
 from pathlib import Path
@@ -21,9 +22,10 @@ from src.core.factory import create_orchestrator
 from src.core.orchestrator import MemoryOrchestrator, ProcessInputResult
 from src.knowledge.memory_service.memory_schema import MemoryEntry
 from src.agent.context import ContextLimitExceeded
-from src.agent.runtime import RunTimedOut, get_stream_slots
+from src.agent.runtime import RunAborted, RunTimedOut, get_stream_slots
 from src.agent.service import ChatMessage, ChatRequest, MemoryAgent, ModelUnavailable
 from src.agent.session_store import SessionStore
+from src.agent.run_store import RunStore, active_runs
 from src.knowledge.memory_service.milvus_client import MemoryBackendUnavailable
 from src.security.semantic_detector import SemanticDetectionUnavailable
 
@@ -32,6 +34,10 @@ orchestrator: MemoryOrchestrator = create_orchestrator()
 # Agent 本地会话存储（TASK-018 / Issue #23）：data/agent_sessions.db，
 # 与 Memory Orchestrator 长期记忆生命周期独立；设计说明见 docs/AGENT_SESSIONS.md
 session_store = SessionStore(project_root=str(Path(__file__).resolve().parents[1]))
+
+# Agent 运行记录持久层（TASK-022 / Issue #30）：data/agent_runs.db，
+# 执行步骤/工件/终态落盘；两用户隔离、幂等去重、中断恢复。
+run_store = RunStore(project_root=str(Path(__file__).resolve().parents[1]))
 
 
 class SessionCreateRequest(BaseModel):
@@ -105,31 +111,103 @@ def _restore_session(req: ChatRequest) -> set[str]:
     return memory_ids
 
 
+def _begin_chat_run(req: ChatRequest, request: Request):
+    key = request.headers.get("Idempotency-Key", "").strip()
+    if len(key) > 128:
+        raise HTTPException(status_code=422, detail="Idempotency-Key 不能超过 128 字符。")
+    return run_store.begin_run(req.user_id, uuid4().hex, session_id=req.session_id,
+                               idempotency_key=f"chat:{key}" if key else None)
+
+
+def _duplicate_chat_run(record: dict[str, Any]) -> JSONResponse:
+    active = record["status"] in {"pending", "running"}
+    return JSONResponse(status_code=409, content={
+        "detail": "相同操作键已关联运行记录，未重复发起。",
+        "run_record_id": record["id"], "status": record["status"], "duplicate": True,
+    }, headers={"Retry-After": "2"} if active else None)
+
+
+def _activate_chat_run(user_id: str, run_id: str, ctx) -> None:
+    active_runs().register(run_id, ctx)
+    if not run_store.mark_running(user_id, run_id):
+        ctx.cancel("user_stop")
+
+
 @app.post("/agent/chat")
-def agent_chat(req: ChatRequest) -> dict[str, Any]:
+def agent_chat(req: ChatRequest, request: Request) -> dict[str, Any]:
     history_memory_ids = _restore_session(req)
     agent = MemoryAgent(orchestrator)
+    record, dup = _begin_chat_run(req, request)
+    actual_run_id = record["id"]
+    if dup:
+        return _duplicate_chat_run(record)
     try:
-        result = agent.chat(req)
+        # ctx 在 chat() 内部创建：经 on_ctx_ready 回调在创建后立即注册，
+        # 取消入口才能触达同步执行器（TASK-022 复核项：原实现注册时
+        # agent._ctx 仍为 None，从未注册）
+        result = agent.chat(
+            req, on_ctx_ready=lambda ctx: _activate_chat_run(req.user_id, actual_run_id, ctx))
+        workflow = result.get("workflow") or {}
+        result["run_record_id"] = actual_run_id
+        run_store.finish_run(
+            req.user_id, actual_run_id, _run_status(workflow.get("status", "completed")),
+            stop_reason=workflow.get("stop_reason"),
+            latency_ms=result.get("latency_ms"),
+            steps=workflow.get("steps"),
+            artifacts=workflow.get("artifacts"))
     except ContextLimitExceeded as exc:
+        run_store.finish_run(req.user_id, actual_run_id, "failed",
+                             stop_reason="context_budget",
+                             steps=(agent._workflow("failed", "context_budget") or {}).get("steps"))
         return JSONResponse(status_code=422, content={
             "detail": str(exc), "workflow": agent._workflow("failed", "context_budget"),
+            "run_record_id": actual_run_id,
         })
     except ModelUnavailable as exc:
         # Keep the legacy string detail while adding structured run state.
-        content = {"detail": str(exc)}
+        content = {"detail": str(exc), "run_record_id": actual_run_id}
         if agent._ctx is not None:
             content["workflow"] = agent._workflow("failed", "model_unavailable")
+        run_store.finish_run(req.user_id, actual_run_id, "failed",
+                             stop_reason="model_unavailable",
+                             steps=(content.get("workflow") or {}).get("steps"))
         return JSONResponse(status_code=503, content=content)
     except RunTimedOut as exc:
         # 同步入口：超时沿用 HTTP 错误语义，不伪装成 200 成功
+        run_store.finish_run(req.user_id, actual_run_id, "timed_out",
+                             stop_reason=exc.reason,
+                             steps=(agent._workflow("timed_out", exc.reason) or {}).get("steps"))
         raise HTTPException(
             status_code=504,
             detail={"message": "执行超过请求时间预算已停止；请缩小任务范围后重试。",
-                    "workflow": agent._workflow("timed_out", exc.reason)},
+                    "workflow": agent._workflow("timed_out", exc.reason),
+                    "run_record_id": actual_run_id},
         ) from exc
+    except RunAborted as exc:
+        # 取消贯通（TASK-022 复核项）：取消入口对活跃 RunContext 发协作取消，
+        # 下一步骤启动边界抛出 RunAborted——落 cancelled 终态并如实返回
+        run_store.finish_run(req.user_id, actual_run_id, "cancelled",
+                             stop_reason=exc.reason or "user_stop",
+                             steps=(agent._workflow("cancelled", exc.reason) or {}).get("steps"))
+        return JSONResponse(status_code=409, content={
+            "detail": "运行已取消；已开始的步骤可能完成，请同步确认结果。",
+            "run_record_id": actual_run_id, "cancelled": True,
+            "workflow": agent._workflow("cancelled", exc.reason),
+        })
+    except Exception:
+        run_store.finish_run(req.user_id, actual_run_id, "failed", stop_reason="runtime_error")
+        raise
+    finally:
+        active_runs().unregister(actual_run_id)
     _finalize_session_turn(req, result, history_memory_ids)
     return result
+
+
+_RUN_STATUS_MAP = {"needs_clarification": "partial"}
+
+def _run_status(status: str) -> str:
+    """将正常的澄清结果映射为记录库支持的终态。"""
+    return _RUN_STATUS_MAP.get(status, status)
 
 
 def _finalize_session_turn(req: ChatRequest, terminal: dict,
@@ -146,8 +224,13 @@ def _finalize_session_turn(req: ChatRequest, terminal: dict,
 
 
 async def _record_session_stream(gen, req: ChatRequest,
-                                 history_memory_ids: set[str] | None = None):
-    """Complete session writes before sending the SSE terminal event."""
+                                 history_memory_ids: set[str] | None = None,
+                                 record_terminal=None):
+    """Complete session writes before sending the SSE terminal event.
+
+    record_terminal：本请求的运行记录终态钩子（闭包注入、随请求传递——
+    并发请求互不影响；修复「全局钩子在双流下互相覆盖」）。
+    """
     async with aclosing(gen):
         async for chunk in gen:
             event = None
@@ -156,14 +239,17 @@ async def _record_session_stream(gen, req: ChatRequest,
                     event = json.loads(chunk[6:].strip())
                 except (ValueError, TypeError):
                     event = None
-            if (isinstance(event, dict) and event.get("type") in ("done", "error")
-                    and (req.session_id or event.get("deleted_ids"))):
-                await asyncio.to_thread(_finalize_session_turn, req, event, history_memory_ids)
+            if isinstance(event, dict) and event.get("type") in ("done", "error"):
+                if record_terminal is not None:
+                    # 终态落盘先于终态帧发出：客户端此后断开也不丢运行结果
+                    await asyncio.to_thread(record_terminal, event)
+                if (req.session_id or event.get("deleted_ids")):
+                    await asyncio.to_thread(_finalize_session_turn, req, event, history_memory_ids)
             yield chunk
 
 
 @app.post("/agent/chat/stream")
-async def agent_chat_stream(req: ChatRequest):
+async def agent_chat_stream(req: ChatRequest, request: Request):
     """SSE 流式对话：逐事件推送 token、工具调用开始/结果与最终答案。
 
     并发上限在开始输出 SSE 前检查（进程内约束，非分布式限流）；
@@ -180,6 +266,28 @@ async def agent_chat_stream(req: ChatRequest):
         )
     try:
         agent = MemoryAgent(orchestrator, stream=True)
+        # 运行记录（TASK-022 / 复核整改）：终态钩子与运行记录按请求闭包绑定，
+        # 经参数传入包装器——并发请求互不影响（原全局钩子在双流下互相覆盖）。
+        run_record, dup = _begin_chat_run(req, request)
+        stream_run_id = run_record["id"]
+        if dup:
+            slots.release()
+            return _duplicate_chat_run(run_record)
+        recorded: list = []
+
+        def _record_stream_terminal(event: dict) -> None:
+            # 只记一次；worker 的终态事件是权威结果；终态后禁止回写
+            if recorded:
+                return
+            workflow = event.get("workflow") or {}
+            fallback = "failed" if event.get("type") == "error" else "completed"
+            run_store.finish_run(
+                req.user_id, stream_run_id, _run_status(workflow.get("status", fallback)),
+                stop_reason=workflow.get("stop_reason") or ("stream_error" if fallback == "failed" else None),
+                latency_ms=event.get("latency_ms"), steps=workflow.get("steps"),
+                artifacts=workflow.get("artifacts"))
+            recorded.append(True)
+
         class RunResponse(StreamingResponse):
             async def __call__(self, scope, receive, send):
                 try:
@@ -189,13 +297,22 @@ async def agent_chat_stream(req: ChatRequest):
                         agent._ctx.cancel("client_disconnected")
                     if not agent._worker_started:
                         slots.release()
-        gen = agent.chat_stream(req, on_finished=slots.release)
+                    # 未收到 worker 终态（客户端断线/提前退出）→ interrupted；
+                    # 已收到终态则不得覆盖（recorded 保证只落一次）
+                    if not recorded:
+                        run_store.finish_run(
+                            req.user_id, stream_run_id, "interrupted",
+                            stop_reason="client_disconnected_or_worker_exit")
+                    active_runs().unregister(stream_run_id)
+        gen = agent.chat_stream(req, on_finished=slots.release,
+                                on_ctx_ready=lambda ctx: _activate_chat_run(req.user_id, stream_run_id, ctx))
         # 包装器总是启用：遗忘抑制不依赖 session_id（前端仍会发无会话的
         # 遗忘请求），落库仍只在有 session_id 时发生（见 _finalize_session_turn）
-        gen = _record_session_stream(gen, req, history_memory_ids)
+        gen = _record_session_stream(gen, req, history_memory_ids, _record_stream_terminal)
         return RunResponse(gen,
                            media_type="text/event-stream",
-                           headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+                           headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                                    "X-Run-Record-ID": stream_run_id})
     except Exception:
         # 响应未能建立时立即归还；正常路径由 worker 退出时释放
         slots.release()
@@ -211,6 +328,68 @@ async def agent_chat_stream(req: ChatRequest):
 def create_agent_session(req: SessionCreateRequest) -> dict[str, Any]:
     session = session_store.create_session(req.user_id, title=req.title)
     return {"user_id": req.user_id, "session": session}
+
+
+# ---------------------------------------------------------------------------
+# Agent 运行记录（TASK-022 / Issue #30）：两用户仅可读自己的运行；
+# 中断恢复：重启后把遗留活跃运行标注 interrupted，不冒充成功。
+# ---------------------------------------------------------------------------
+
+@app.get("/agent/runs/{user_id}")
+def list_agent_runs(
+    user_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    """按更新时间倒序列出本用户的运行记录（严格用户隔离）。"""
+    return {"user_id": user_id,
+            **run_store.list_runs(user_id, offset=offset, limit=limit)}
+
+
+@app.get("/agent/runs/{user_id}/{run_id}")
+def get_agent_run(user_id: str, run_id: str) -> dict[str, Any]:
+    """单条运行记录（步骤/工件为最小结果）；跨用户 → 404。"""
+    record = run_store.get_run(user_id, run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return record
+
+
+@app.post("/agent/runs/{user_id}/{run_id}/cancel")
+def cancel_agent_run(user_id: str, run_id: str) -> dict[str, Any]:
+    """取消入口（TASK-022 复核项）：活跃运行 → cancelled，不启动新步骤；
+    已终态返回当前状态不可取消；跨用户 → 404。"""
+    record = run_store.get_run(user_id, run_id)
+    if (record is not None and record["status"] in {"pending", "running"}
+            and record["owner_pid"] != os.getpid()):
+        raise HTTPException(status_code=409, detail="当前进程不负责此运行，请在运行宿主取消或先查询恢复状态。")
+    result = run_store.cancel_run(user_id, run_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    if result["cancelled"]:
+        # 向正在执行的 RunContext 发协作取消：下一步骤启动边界即停
+        active_runs().cancel(run_id, reason="user_stop")
+    return result
+
+
+@app.post("/agent/runs/{user_id}/{run_id}/review")
+def mark_run_needs_review(user_id: str, run_id: str) -> dict[str, Any]:
+    """外部提交结果未知 → 人工核对状态（不冒充成功/失败）。"""
+    record = run_store.get_run(user_id, run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    if record["route"] == "chat" or not run_store.mark_needs_review(user_id, run_id):
+        raise HTTPException(status_code=409, detail="仅外部工作流的活跃运行可转入人工核对。")
+    return {"run_id": run_id, "status": "needs_review"}
+
+
+@app.post("/agent/runs/{user_id}/recover")
+def recover_agent_runs(user_id: str) -> dict[str, Any]:
+    """重启/断线后恢复：把该用户遗留的 pending/running 标注 interrupted，
+    并返回**本次标注的候选记录**（修「标了却返回空」）。"""
+    candidates = run_store.passivate_incomplete(user_id)
+    return {"user_id": user_id, "interrupted": len(candidates),
+            "candidates": candidates}
 
 
 @app.get("/agent/capabilities")
@@ -288,6 +467,7 @@ app.add_middleware(
     allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Run-Record-ID"],
 )
 
 # ---------------------------------------------------------------------------
