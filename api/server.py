@@ -130,7 +130,7 @@ def agent_chat(req: ChatRequest, request: Request) -> dict[str, Any]:
             "run_record_id": actual_run_id, "duplicate": True})
     run_store.mark_running(req.user_id, actual_run_id)
     from src.agent.run_store import active_runs
-    if agent._ctx is not None:
+    if getattr(agent, "_ctx", None) is not None:
         active_runs().register(actual_run_id, agent._ctx)
     try:
         result = agent.chat(req)
@@ -316,8 +316,9 @@ async def agent_chat_stream(req: ChatRequest, request: Request):
         # 终态/断线注销在 RunResponse finally 中完成
         async def _register_ctx():
             for _ in range(200):
-                if agent._ctx is not None:
-                    active_runs().register(stream_run_id, agent._ctx)
+                ctx_now = getattr(agent, "_ctx", None)
+                if ctx_now is not None:
+                    active_runs().register(stream_run_id, ctx_now)
                     return
                 await asyncio.sleep(0.02)
         from src.agent.run_store import active_runs
