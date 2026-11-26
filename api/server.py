@@ -26,6 +26,7 @@ from src.agent.runtime import RunAborted, RunTimedOut, get_stream_slots
 from src.agent.service import ChatMessage, ChatRequest, MemoryAgent, ModelUnavailable
 from src.agent.session_store import SessionStore
 from src.agent.run_store import RunStore, active_runs
+from src.agent.scheduler import LocalScheduler, TaskStore as SchedulerTaskStore
 from src.knowledge.memory_service.milvus_client import MemoryBackendUnavailable
 from src.security.semantic_detector import SemanticDetectionUnavailable
 
@@ -39,12 +40,24 @@ session_store = SessionStore(project_root=str(Path(__file__).resolve().parents[1
 # 执行步骤/工件/终态落盘；两用户隔离、幂等去重、中断恢复。
 run_store = RunStore(project_root=str(Path(__file__).resolve().parents[1]))
 
+# 本地定时任务（TASK-031 / Issue #39）：任务定义与触发历史持久化
+scheduler_store = SchedulerTaskStore(project_root=str(Path(__file__).resolve().parents[1]))
+
 
 class SessionCreateRequest(BaseModel):
     # 定义在路由注册之前：`from __future__ import annotations` 下 FastAPI 在
     # 装饰器执行时解析注解，模型必须已定义（TASK-018 实测踩坑）
     user_id: str = Field(min_length=1, max_length=128)
     title: str | None = Field(default=None, max_length=200)
+
+
+class SchedulerTaskCreate(BaseModel):
+    # 本地定时任务（TASK-031）：动作 + 参数 + 调度定义
+    user_id: str = Field(min_length=1, max_length=128)
+    action: str = Field(min_length=1, max_length=64)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    schedule_kind: str = Field(pattern="^(once|interval|daily)$")
+    schedule: dict[str, Any] = Field(default_factory=dict)
 
 
 class ConfirmationDecision(BaseModel):
@@ -401,6 +414,74 @@ def agent_capabilities() -> dict[str, Any]:
     """
     from src.common.offline_profile import capability_report
     return capability_report()
+
+
+# ---------------------------------------------------------------------------
+# 本地定时任务（TASK-031 / Issue #39）：一次/周期/每日，暂停删除，下次执行
+# 预览与触发历史（错过/等待/实际结果）。调度触发在宿主进程内（run_forever）。
+# ---------------------------------------------------------------------------
+
+@app.post("/agent/scheduler/tasks")
+def create_scheduler_task(req: SchedulerTaskCreate) -> dict[str, Any]:
+    """新建任务（严格用户隔离；schedule 语义见 docs/AGENT_SCHEDULER.md）。"""
+    try:
+        task = scheduler_store.create_task(
+            req.user_id, req.action, req.arguments,
+            schedule_kind=req.schedule_kind, schedule=req.schedule)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return task
+
+
+@app.get("/agent/scheduler/tasks/{user_id}")
+def list_scheduler_tasks(user_id: str) -> dict[str, Any]:
+    return {"user_id": user_id, "tasks": scheduler_store.list_tasks(user_id)}
+
+
+@app.get("/agent/scheduler/tasks/{user_id}/{task_id}/preview")
+def preview_scheduler_task(user_id: str, task_id: str) -> dict[str, Any]:
+    """下次执行预览（暂停/不存在 → None）。"""
+    scheduler = LocalScheduler(scheduler_store)
+    task = scheduler_store.get_task(user_id, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"task_id": task_id, "enabled": task["enabled"],
+            "next_fire_at": scheduler.preview(user_id, task_id)}
+
+
+@app.post("/agent/scheduler/tasks/{user_id}/{task_id}/pause")
+def pause_scheduler_task(user_id: str, task_id: str) -> dict[str, Any]:
+    if not scheduler_store.set_enabled(user_id, task_id, False):
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"task_id": task_id, "enabled": False}
+
+
+@app.post("/agent/scheduler/tasks/{user_id}/{task_id}/resume")
+def resume_scheduler_task(user_id: str, task_id: str) -> dict[str, Any]:
+    if not scheduler_store.set_enabled(user_id, task_id, True):
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"task_id": task_id, "enabled": True}
+
+
+@app.delete("/agent/scheduler/tasks/{user_id}/{task_id}")
+def delete_scheduler_task(user_id: str, task_id: str) -> dict[str, Any]:
+    if not scheduler_store.delete_task(user_id, task_id):
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"task_id": task_id, "deleted": True}
+
+
+@app.get("/agent/scheduler/tasks/{user_id}/{task_id}/history")
+def scheduler_task_history(
+    user_id: str,
+    task_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    """触发历史：错过（missed）/无人确认等待（waiting_confirmation）/
+    实际结果（executed/failed）——界面据此显示错过、等待与实际结果。"""
+    if scheduler_store.get_task(user_id, task_id) is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"task_id": task_id,
+            "history": scheduler_store.fire_history(user_id, task_id, limit=limit)}
 
 
 @app.post("/agent/confirmations/{confirm_id}")
