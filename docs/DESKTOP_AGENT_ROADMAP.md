@@ -20,7 +20,7 @@
 
 编号按登记顺序，开发顺序按依赖。首次对接用合成数据。每个 Issue 列出了建议修改范围、前置任务及能复核的验收场景。
 
-- **可以并行开工**。TASK-021 做统一动作入口与本地调用身份；TASK-023 做离线插件包与验签；TASK-025 做断网配置和模型缺失时的能力清单；TASK-034 明确数据保留和遗忘范围。TASK-035 的测试场景与无障碍使用者反馈方式也可以先设计。
+- **可以并行开工**。TASK-021 做统一动作入口与本地调用身份；TASK-023 做离线插件包与验签；TASK-025 做断网配置和模型缺失时的能力清单；TASK-034 明确数据保留和遗忘范围。TASK-035 的测试场景与无障碍使用者反馈方式也可以先设计。插件包、签名和离线验签契约见 [PLUGIN_PACKAGE.md](PLUGIN_PACKAGE.md)。
 - **第一个用户闭环是录一遍、填多行**。TASK-027 让命令可由键盘、读屏和语音定位；TASK-029 在工作台内录一张合成表单，参数化变化字段。TASK-022 提供运行恢复，TASK-030 将模板用于一批数据。TASK-028 接入离线普通话与可打断播报；TASK-036 将同一流程扩展到用户指定的 Windows 原生窗口。
 - **分发与后台运行**。TASK-024 用内置工具验证插件宿主，再由 TASK-026 打成可校验、可回滚的 U 盘发行包。程序由用户在允许使用介质的终端显式启动；现场策略阻止执行时给出明确原因。TASK-031 首版在宿主运行期间调度，退出、睡眠和拔盘期间错过的任务在下次启动可见。真正关机期间的执行或企业后台服务需要另行确定运行环境。
 - **用代码解析检验插件边界**。TASK-032 先用 Python 样例校验静态依赖图；TASK-033 让用户从 AI 解释中的判断跳到依赖边和对应版本源码，无模型时仍可查图。TASK-037 后续用一个只读本地 MCP 服务验证第三方工具接入。
@@ -35,6 +35,6 @@
 ## 设计参考
 
 - DeepSeek Harness 把能力注册与具体提供者拆开，并有独立的交互确认契约。这里采用可替换提供者的思路，权限判定留在本机宿主。[能力提供者](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/skills.md) · [确认接口源码](https://github.com/deepseek-ai/deepseek-harness/blob/d98f5d68519215da48f3002da2cb9c9d2068d81d/packages/interaction/user-approval/src/types.ts)
-- Claude Code 将常用能力打成带清单的插件，OpenClaw 将定时运行和运行时访问权限分开处理。MOKOA 的包需本地验签，定时触发时也要重查权限。[Claude Code 插件](https://code.claude.com/docs/en/plugins) · [OpenClaw 调度](https://docs.openclaw.ai/automation/cron-jobs)
+- Claude Code 将常用能力打成带清单的插件，OpenClaw 将定时运行和运行时访问权限分开处理。OmniAble 的包需本地验签，定时触发时也要重查权限。[Claude Code 插件](https://code.claude.com/docs/en/plugins) · [OpenClaw 调度](https://docs.openclaw.ai/automation/cron-jobs)
 - Power Automate 的桌面录制器把操作关联到界面元素。Windows UI Automation 给辅助技术和自动化提供可查询控件；这里优先保存控件语义，控件无法可靠定位就停下来请用户确认。[桌面流程录制](https://learn.microsoft.com/en-us/power-automate/desktop-flows/recording-flow) · [Windows UI Automation](https://learn.microsoft.com/en-us/dotnet/framework/ui-automation/ui-automation-overview)
 - MCP 提供工具发现与调用协议，可作为宿主的一种本地适配器。先用限权的只读工具检验兼容性。[MCP 架构](https://modelcontextprotocol.io/docs/learn/architecture)

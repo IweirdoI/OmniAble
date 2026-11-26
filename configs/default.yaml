@@ -1,4 +1,4 @@
-# 麒忆智脑 - Default Configuration
+# OmniAble default configuration
 # 全项目默认值的单一事实来源。环境变量（OS_AGENT_* / LM_STUDIO_* / SILICONFLOW_* / AGENT_*）可覆盖对应键，优先级高于本文件。
 # 密钥（api_key 等）一律经 .env / 环境变量注入，禁止写入本文件。
 

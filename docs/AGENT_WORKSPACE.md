@@ -1,6 +1,6 @@
 # Agent 文件与网页工作区
 
-TASK-017 / [Issue #19](https://github.com/IweirdoI/mokoa-windows/issues/19)。
+TASK-017 / [Issue #19](https://github.com/IweirdoI/OmniAble/issues/19)。
 侧栏新增“工作区 / 记忆”切换；现有记忆摄取、查询和遗忘仍走原接口。
 实现为 `src/agent/workspace.py`、`api/workspace.py`、`frontend/src/WorkspacePanel.js`。
 没有新依赖，也没有修改 MemoryEntry 或记忆存储 Schema。

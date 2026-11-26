@@ -1,8 +1,8 @@
 # Windows 开发
 
-本文覆盖 MOKOA 在 Windows 上的安装、前后端联调、语义检索与性能验收。
+本文覆盖 OmniAble 在 Windows 上的安装、前后端联调、语义检索与性能验收。
 
-原版代码在 [mokoa-kylin](https://github.com/IweirdoI/mokoa-kylin)，对应原项目的提交 `220bdd1`。本仓与上游的关系见 [发布说明.md](发布说明.md)。
+产品方向及历史记忆系统的来源见 [README](../README.md) 与 [发布说明](发布说明.md)。
 
 ## 能证明什么
 

@@ -20,17 +20,17 @@
 | TASK-012 | [P1] 落地工作台 UI 改版，恢复手机操作并完善键盘可用性 | 已完成 | 123456s-ai | https://github.com/IweirdoI/mokoa-windows/issues/11 | 20261123-014119 |
 | TASK-013 | [P2] 贯通聊天、偏好画像和记忆查询的场景选择 | 已完成 | 123456s-ai | https://github.com/IweirdoI/mokoa-windows/issues/12 | 20261125-085718 |
 | TASK-014 | [P2] 增加可分页的长期记忆浏览与筛选，独立于本轮聊天召回 | 进行中 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/13 | 20261122-161744 |
-| TASK-015 | [P1] 建立前端自动化回归 CI，覆盖聊天流式与响应式主流程 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/14 | 20261122-185731 |
+| TASK-015 | [P1] 建立前端自动化回归 CI，覆盖聊天流式与响应式主流程 | 已完成 | 123456s-ai | https://github.com/IweirdoI/mokoa-windows/issues/14 | 20261125-235824 |
 | TASK-016 | [P1] 按设计完善 Agent 路由、执行预算与结果核验 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/16 | 20261122-151543 |
 | TASK-017 | [P1] 集成 Agent 文件工作区、变更预览与网页侧栏 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/19 | 20261122-151544 |
 | TASK-018 | [P1] Windows Agent 本地会话列表与重启恢复 | 进行中 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/23 | 20261123-210916 |
 | TASK-019 | [P1] Agent 上下文预算与长会话截断 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/24 | 20261122-193044 |
 | TASK-020 | [P1] Agent 文件变更的逐次用户确认 | 已完成 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/25 | 20261125-140938 |
 | TASK-021 | [P1] 统一 Agent 动作目录与调用入口 | 待审查 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/29 | 20261125-091153 |
-| TASK-022 | [P1] 持久化执行记录、取消与中断恢复 | 待审查 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/30 | 20261125-193435 |
-| TASK-023 | [P1] 制定可离线验证的插件包格式与版本契约 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/31 | 20261122-204441 |
+| TASK-022 | [P1] 持久化执行记录、取消与中断恢复 | 待审查 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/30 | 20261125-235828 |
+| TASK-023 | [P1] 制定可离线验证的插件包格式与版本契约 | 待审查 | 123456s-ai | https://github.com/IweirdoI/mokoa-windows/issues/31 | 20261125-235826 |
 | TASK-024 | [P1] 实现受限插件宿主与常用内置工具迁移 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/32 | 20261122-204443 |
-| TASK-025 | [P1] 建立 Windows 断网运行配置与本地模型降级 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/33 | 20261122-204445 |
+| TASK-025 | [P1] 建立 Windows 断网运行配置与本地模型降级 | 待审查 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/33 | 20261125-235830 |
 | TASK-026 | [P1] 提供免安装的 Windows U 盘发行包 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/34 | 20261122-204450 |
 | TASK-027 | [P1] 建立可被语音、键盘和读屏调用的桌面命令 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/35 | 20261122-204452 |
 | TASK-028 | [P1] 实现普通话离线语音操控与可打断反馈 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/36 | 20261122-204455 |

@@ -1,6 +1,6 @@
 # 团队协作协议
 
-适用项目：https://github.com/IweirdoI/mokoa-windows
+适用项目：https://github.com/IweirdoI/OmniAble
 
 协作方式为开源协作 + Clerk 任务辅助：成员以认领／完成 Clerk 任务、DCO 签署提交等可追溯行为确认参与，不另设签署仪式。本协议不是已签署合同，不代表原团队、学校、企业或第三方已经同意；无约定的经济或知识产权安排不因阅读或加入本仓库产生。加入群聊、仓库或阅读本文件不视为接受全部条款。
 

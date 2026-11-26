@@ -1,0 +1,42 @@
+{
+  "schema": "mokoa.plugin/v1",
+  "id": "com.mokoa.sample.echo",
+  "name": "Echo Sample Plugin",
+  "version": "1.0.0",
+  "host_api": ">=1.0.0 <2.0.0",
+  "entry": "payload/main.py",
+  "license": "MIT",
+  "license_file": "LICENSE",
+  "publisher": {
+    "key_id": "mokoa-test-root-2026",
+    "name": "MOKOA Test Fixture"
+  },
+  "capabilities": [
+    "files.read"
+  ],
+  "actions": [
+    {
+      "id": "echo",
+      "name": "Echo text",
+      "description": "Return supplied text without side effects. This sample is never executed by the verifier.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "capabilities": [
+        "files.read"
+      ],
+      "mutates": false
+    }
+  ],
+  "dependencies": [],
+  "files": {}
+}
