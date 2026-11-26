@@ -27,10 +27,10 @@
 | TASK-019 | [P1] Agent 上下文预算与长会话截断 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/24 | 20261122-193044 |
 | TASK-020 | [P1] Agent 文件变更的逐次用户确认 | 已完成 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/25 | 20261125-140938 |
 | TASK-021 | [P1] 统一 Agent 动作目录与调用入口 | 待审查 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/29 | 20261125-091153 |
-| TASK-022 | [P1] 持久化执行记录、取消与中断恢复 | 待审查 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/30 | 20261125-235828 |
+| TASK-022 | [P1] 持久化执行记录、取消与中断恢复 | 待审查 | HXFhappiness | https://github.com/IweirdoI/OmniAble/issues/30 | 20261126-163352 |
 | TASK-023 | [P1] 制定可离线验证的插件包格式与版本契约 | 待审查 | 123456s-ai | https://github.com/IweirdoI/mokoa-windows/issues/31 | 20261125-235826 |
 | TASK-024 | [P1] 实现受限插件宿主与常用内置工具迁移 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/32 | 20261122-204443 |
-| TASK-025 | [P1] 建立 Windows 断网运行配置与本地模型降级 | 待审查 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/33 | 20261125-235830 |
+| TASK-025 | [P1] 建立 Windows 断网运行配置与本地模型降级 | 待审查 | HXFhappiness | https://github.com/IweirdoI/OmniAble/issues/33 | 20261126-163331 |
 | TASK-026 | [P1] 提供免安装的 Windows U 盘发行包 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/34 | 20261122-204450 |
 | TASK-027 | [P1] 建立可被语音、键盘和读屏调用的桌面命令 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/35 | 20261122-204452 |
 | TASK-028 | [P1] 实现普通话离线语音操控与可打断反馈 | 待开始 |  | https://github.com/IweirdoI/mokoa-windows/issues/36 | 20261122-204455 |

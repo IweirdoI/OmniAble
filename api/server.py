@@ -405,6 +405,17 @@ def recover_agent_runs(user_id: str) -> dict[str, Any]:
             "candidates": candidates}
 
 
+@app.get("/agent/capabilities")
+def agent_capabilities() -> dict[str, Any]:
+    """能力清单（TASK-025 / Issue #33）：逐项可用性、后端与降级说明。
+
+    由真实配置与组件状态推导；断网档（OS_AGENT_OFFLINE_MODE=1）下
+    非回环出站类目显示停用。前端据此渲染功能可用性面板。
+    """
+    from src.common.offline_profile import capability_report
+    return capability_report()
+
+
 @app.post("/agent/confirmations/{confirm_id}")
 def decide_confirmation(confirm_id: str, req: ConfirmationDecision) -> dict[str, Any]:
     """一次性确认决定（TASK-020）：携带 SSE 下发的宿主凭据（token）。
