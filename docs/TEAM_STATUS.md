@@ -46,5 +46,14 @@
 | TASK-038 | [P1] 优化 Windows recall 词面补召与 CPU 编码并发 | 已完成 | HXFhappiness | https://github.com/IweirdoI/mokoa-windows/issues/47 | 20261124-024042 |
 | TASK-039 | [P2] 修复空白图片无说明时接入接口返回 500 | 已完成 | 123456s-ai | https://github.com/IweirdoI/mokoa-windows/issues/49 | 20261125-085204 |
 | TASK-040 | [P1] 制定 AgentArts 参赛适配方案并登记设计文档 | 已完成 | Linnea | https://github.com/IweirdoI/mokoa-windows/issues/51 | 20261124-001937 |
+| TASK-041 | [P0] 提供内置订单核验练习资料 | 待审查 | Linnea | https://github.com/IweirdoI/OmniAble/issues/61 | 20261126-174140 |
+| TASK-042 | [P0] 设计并实现岗位选择、协作配置与练习状态 | 待开始 |  | https://github.com/IweirdoI/OmniAble/issues/62 | 20261126-174032 |
+| TASK-043 | [P0] 实现可读屏的字段核验与提交前差异核对 | 待开始 |  | https://github.com/IweirdoI/OmniAble/issues/63 | 20261126-174032 |
+| TASK-044 | [P1] 设计并实现字幕纠错到业务确认 | 待开始 |  | https://github.com/IweirdoI/OmniAble/issues/64 | 20261126-174032 |
+| TASK-045 | [P1] 实现可审核的对外文字与语音表达 | 待开始 |  | https://github.com/IweirdoI/OmniAble/issues/65 | 20261126-174032 |
+| TASK-046 | [P1] 设计并实现备货模拟、缺货接管与设备验收契约 | 待开始 |  | https://github.com/IweirdoI/OmniAble/issues/66 | 20261126-174032 |
+| TASK-047 | [P2][设计] 远程接待与现场设备协作 | 待开始 |  | https://github.com/IweirdoI/OmniAble/issues/67 | 20261126-174032 |
+| TASK-048 | [P1] 将资料核验 Demo 接入 AgentArts 并留存部署证据 | 待开始 |  | https://github.com/IweirdoI/OmniAble/issues/68 | 20261126-174032 |
+| TASK-049 | [P2][设计] 团队岗位资料共享、版本与撤销访问 | 待开始 |  | https://github.com/IweirdoI/OmniAble/issues/69 | 20261126-174032 |
 
 <!-- clerk:end tasks -->

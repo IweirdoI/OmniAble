@@ -3,6 +3,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises')
 const path = require('node:path')
+const { captureFailure, launchOptions } = require('./browser-artifacts.cjs')
 
 const base = process.env.FRONTEND_TEST_URL || 'http://127.0.0.1:5186'
 const artifacts = process.argv[2]
@@ -14,10 +15,11 @@ const noOverflow = async page => assert(await page.evaluate(() =>
   document.querySelector('.project-home').scrollWidth <= innerWidth && document.documentElement.scrollWidth <= innerWidth))
 
 ;(async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true })
+  const browser = await chromium.launch(launchOptions())
   const errors = []
+  let page = null
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+    page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
     page.setDefaultTimeout(9000)
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(base)
@@ -122,6 +124,29 @@ const noOverflow = async page => assert(await page.evaluate(() =>
     assert.equal(sent, false)
     assert.deepEqual(errors, [])
     console.log('PASS lifecycle topic and lane views, independent retry and unsent chat draft')
+
+    await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '项目资料' }).click()
+    const outgoing = []
+    page.on('request', request => { if (request.method() === 'POST') outgoing.push(request.url()) })
+    const openPractice = button(page, '打开订单核验练习')
+    await openPractice.press('Enter')
+    const order = page.getByRole('heading', { name: '待核验订单.md' })
+    await order.waitFor()
+    assert.equal(await order.evaluate(element => document.activeElement === element), true)
+    await page.getByText(/数量：2 件/).waitFor()
+    await page.getByRole('button', { name: /客户确认单\.md/ }).click()
+    await page.getByText(/数量：3 件/).waitFor()
+    await button(page, '订单核验步骤').click()
+    await button(page, '查看来源（v1）').click()
+    await openPractice.press('Enter')
+    await order.waitFor()
+    assert.equal(await page.getByRole('button', { name: /订单核验练习（虚构样例）/ }).count(), 1)
+    assert.deepEqual(outgoing, [])
+    assert.deepEqual(errors, [])
+    console.log('PASS keyboard entry, conflicting source fields, source link, no duplicate project or POST')
+  } catch (error) {
+    await captureFailure(page, 'project-library', error)
+    throw error
   } finally {
     await browser.close()
   }
