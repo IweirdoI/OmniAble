@@ -9,7 +9,7 @@
 
 1. [根目录 AGENTS.md](../AGENTS.md)：整个仓库的工作规则。
 2. [贡献指南](../CONTRIBUTING.md)：分支、提交、审查、DCO 和验证方式。
-3. [项目介绍](../README.md)、[产品方向](PRODUCT.md) 与 [发布说明](发布说明.md)：岗位适配、演示计划、当前能力与贡献来源。
+3. [项目介绍](../README.md)、[产品方向](PRODUCT.md) 与 [发布说明](发布说明.md)：通用生活与工作助手、无障碍适配、演示计划及贡献来源。
 4. [Clerk 指南](CLERK.md)、[共享任务状态](TEAM_STATUS.md) 和用户指定的 Issue／任务／PR：确认实际工作范围、认领及验收标准。
 5. 本机开发选读 [Windows 开发](WINDOWS.md)；涉及聊天或前后端联调，再读 [LangGraph 接入](LANGGRAPH_AGENT.md)。其他环境按本任务的实际部署文档核对。
 6. 根据下面的模块索引，读相关实现和对应测试。首次贡献在提交前阅读 [LICENSE](../LICENSE) 与 [DCO](../DCO)。
@@ -49,8 +49,8 @@ git remote -v
 
 ## 3. 项目与模块索引
 
-本仓是 OmniAble 的开发主仓。工作台按岗位和个人需要配置无障碍适配、Agent 与设备分工。
-查看 [产品方向](PRODUCT.md) 了解五条适配路线与三项演示，按当前任务核对已有实现和待验证能力。
+本仓是 OmniAble 的开发主仓，面向残障人士在手机或电脑上的生活、学习和工作任务。
+查看 [通用任务与无障碍协作设计](designs/DOC-002-accessible-job-workflow.md) 了解用户直接发起任务、有限授权、确认与接管。岗位模板与设备是可选能力，见 [产品方向](PRODUCT.md)。
 Memory Orchestrator 是共用记忆层。
 聊天入口是 Vue 页面 → FastAPI → LangGraph → 现有记忆编排；
 摄取、偏好、知识、隐私与记忆生命周期通过现有接口协作，不另建一套平行记忆系统。

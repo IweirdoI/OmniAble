@@ -7,4 +7,4 @@
 | file | title | revision | implementation | task |
 | --- | --- | --- | --- | --- |
 | [DOC-001-agentarts-adaptation.md](DOC-001-agentarts-adaptation.md) | AgentArts 参赛适配实施方案 | 0.1 | planned-not-deployed | TASK-040 |
-| [DOC-002-accessible-job-workflow.md](DOC-002-accessible-job-workflow.md) | OmniAble 岗位工作流与适配设计 | 0.1 | planned | TASK-042 |
+| [DOC-002-accessible-job-workflow.md](DOC-002-accessible-job-workflow.md) | OmniAble 通用任务委托与无障碍协作设计 | 0.2 | planned | TASK-042 |
