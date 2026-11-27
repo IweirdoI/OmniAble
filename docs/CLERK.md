@@ -1,6 +1,6 @@
 # Clerk 团队协作
 
-这里接入 [invefa/Clerk](https://github.com/invefa/Clerk) 开源任务与文档管理工具的公开发行版。只使用上游工具，不开发或内置其源码；本仓保留独立配置与任务记录。
+这里接入 [invefa/Clerk](https://github.com/invefa/Clerk) 的公开发行版，用来认领任务、记录进度与验收。本仓的产品与设计直接用 Git 管理。
 
 ## 安装与共享
 
@@ -61,27 +61,17 @@ Windows x64 协作者克隆本仓库后，在 PowerShell 执行：
 
 ## 设计文档管理
 
-设计文稿使用 `documents` 类型，正文保存在 `docs/designs/`，索引见 [设计文档](designs/README.md)。
-这是本仓声明的工具种类，不需要安装或修改 Clerk 源码。文稿的编号、标题与元信息通过工具维护，
-正文可审阅修改；索引不手改。设计文稿要求包含范围、实施步骤、验收、待确认项及来源。
+日常产品与设计直接更新 `docs/` 下的普通 Markdown。Git 提交保存修改内容和原因。由 [产品方向](PRODUCT.md) 进入当前设计，涉及已有实现任务时，在对应 Issue 链接设计章节或提交。日常方案变更无需建 Clerk 任务、分配文稿号或修改已有文稿版本。
+
+Clerk 的 `context tasks` 可打包当前检出的任务及相关材料，供 Agent 接手。例如：
 
 ```powershell
-./scripts/clerk.ps1 documents list
-./scripts/clerk.ps1 documents show DOC-001
-./scripts/clerk.ps1 context documents DOC-001 --full
-./scripts/clerk.ps1 context tasks TASK-040 --full
-./scripts/clerk.ps1 documents set DOC-001 --revision "0.2" --implementation "planned-not-deployed"
-./scripts/clerk.ps1 check
+./scripts/clerk.ps1 context tasks TASK-042 --full
 ```
 
-上例 DOC-001 / TASK-040 对应 [AgentArts 适配方案](designs/DOC-001-agentarts-adaptation.md)及其文档任务。
-新建其他设计时使用 `documents new --title ... --slug ... --revision ... --implementation ... --task 实际编号 --file 正文文件`，
-以工具返回的编号为准。`revision` 是设计修订号，`implementation` 记录真实实施状态，
-`task` 为必须存在的任务引用。创建后使用
-`tasks link <真实任务编号> design documents <真实文稿编号>` 建立正式关系，使任务上下文可读取文稿正文。
-正文修改后通过 `documents set` 更新实际修订号，再执行 `render` 和 `check`。
-`implementation=planned-not-deployed` 表示待实施；文档任务完成不代表云接入或赛题验收完成。
-方案的 P0—P5 是待拆分的工作包，不因文档任务完成自动成为已实施任务。
+Clerk 的 `sync` 支持检查、抓取和安全快进，文件随 Git 提交共享。`context` 读取当前检出内容，旧分支可能仍显示旧任务材料和历史文稿。读取最新设计时按 [Agent 开工指南](AGENT_ONBOARDING.md#0-先同步主线设计)直接看主线，保留现场改动。
+
+旧的 DOC-001 和 DOC-002 保留在 [历史文稿索引](designs/README.md)，用于追溯原任务和旧链接。每份历史文稿开头都有当前维护文档的链接，后续内容在新位置更新。
 
 ## 合并后的验收闭环
 

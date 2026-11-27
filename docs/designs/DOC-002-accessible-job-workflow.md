@@ -10,6 +10,8 @@ task = TASK-042
 updated = 20261126-175457
 -->
 
+> 历史 Clerk 文稿。后续更新见 [通用任务委托与无障碍协作设计](../ASSISTANT_DESIGN.md)。
+
 ## 适用范围与状态
 
 本设计覆盖通用任务入口、无障碍交互、Agent 执行授权和用户接管，供 [TASK-042 / Issue #62](https://github.com/IweirdoI/OmniAble/issues/62) 及各场景实现者共同评审。当前是设计草案。首轮用生活通知和工作资料两类任务验证共用流程。各任务状态见 [Clerk 台账](../TEAM_STATUS.md)。
