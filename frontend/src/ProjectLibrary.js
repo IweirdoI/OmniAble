@@ -4,11 +4,12 @@ import {
   loadLibrary, moveFile, noteStatus, projectFileAccept, projectStorageKey, readProjectFile, saveLibrary, saveNote,
 } from './project-library.js'
 import MemoryLifecycle from './MemoryLifecycle.js'
+import SubtitleCorrection from './subtitle-correction.js'
 import { createOrderPractice, orderPracticeId } from './order-practice.js'
 import './project-library.css'
 
 export default {
-  components: { MemoryLifecycle },
+  components: { MemoryLifecycle, SubtitleCorrection },
   props: { user: String, live: Boolean, visible: Boolean, busyChat: Boolean },
   emits: ['chat', 'workspace', 'ingest', 'memory', 'ask', 'forget'],
   setup(props, { emit }) {
@@ -22,6 +23,7 @@ export default {
     const files = computed(() => project.value?.files.filter(file => (!folder.value || file.folder === folder.value) && matches(file.name, file.folder)) || [])
     const notes = computed(() => project.value?.notes.filter(note => matches(note.title, note.body)) || [])
     const source = computed(() => project.value?.files.find(file => file.id === selectedId.value))
+    const showSubtitleCorrection = computed(() => activeId.value === orderPracticeId && source.value?.name === '待核验订单.md')
     const note = computed(() => project.value?.notes.find(item => item.id === selectedId.value))
     const noteSource = computed(() => project.value?.files.find(file => file.id === note.value?.sourceId))
     const hasNoteVersion = computed(() => noteSource.value?.versions.some(item => item.number === note.value.sourceVersion))
@@ -179,6 +181,7 @@ export default {
     const ask = (title, body) => emit('ask', { title, body })
     const dateLabel = value => new Date(value).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' })
     return { projects, activeId, view, folder, query, project, folders, files, notes, source, note, version, chosenVersion,
+      showSubtitleCorrection,
       form, error, status, busy, sharePreview, visibleNotesForSource, currentNoteSource, noteSource, hasNoteVersion,
       views: [['files', '文件'], ['wiki', '知识页'], ['memory', '记忆流转']], projectFileAccept, selectProject, switchView, selectFile, selectNote,
       openForm, makeProject, openOrderPractice, upload, createNote, editNote, adoptLatest, persistNote, deleteFile, changeFolder, deleteNote, deleteProject,
@@ -270,6 +273,7 @@ export default {
             <section class="project-detail" aria-label="资料详情">
               <template v-if="view === 'files' && source">
                 <header><h2 id="project-file-heading" tabindex="-1">{{ source.name }}</h2><small>{{ source.folder }} · {{ dateLabel(version.date) }}</small></header>
+                <SubtitleCorrection v-if="showSubtitleCorrection" />
                 <div class="project-actions"><label>版本 <select :value="version.number" @change="chosenVersion = Number($event.target.value)"><option v-for="v in [...source.versions].reverse()" :key="v.number" :value="v.number">v{{ v.number }}</option></select></label><button type="button" class="project-button" @click="openForm({kind:'version', sourceId:source.id, file:null})" :disabled="busy">新增版本</button><button type="button" class="project-button" @click="createNote" :disabled="busy">整理知识卡</button></div>
                 <pre class="project-preview">{{ version.content }}</pre>
                 <div class="project-actions"><button type="button" class="project-button" @click="ask(source.name, version.content)" :disabled="busyChat">带到对话</button><button type="button" class="project-button" @click="openForm({kind:'move', folder:source.folder})" :disabled="busy">移动到目录</button><button type="button" class="project-button danger" @click="deleteFile" :disabled="busy">移除文件</button></div>
