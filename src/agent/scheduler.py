@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -87,6 +88,30 @@ def _parse_iso(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+def _validate_schedule(*, kind: str, schedule: dict) -> None:
+    """保存前校验 schedule 内容（复核项：无效任务不得入库中断循环）。"""
+    if kind == "once":
+        try:
+            _parse_iso(str(schedule.get("at") or ""))
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"once 任务需要合法的 at 时刻：{exc}") from exc
+    elif kind == "interval":
+        every = schedule.get("every_seconds")
+        if not isinstance(every, (int, float)) or isinstance(every, bool) or every <= 0:
+            raise ValueError("interval 任务需要正数 every_seconds")
+    elif kind == "daily":
+        time_spec = str(schedule.get("time") or "")
+        if not re.fullmatch(r"\d{1,2}:\d{2}", time_spec):
+            raise ValueError('daily 任务需要 "HH:MM" 格式的 time')
+        hh, mm = (int(x) for x in time_spec.split(":"))
+        if not (0 <= hh <= 23 and 0 <= mm <= 59):
+            raise ValueError(f"time 时刻非法：{time_spec}")
+        try:
+            _zone(schedule.get("tz"))
+        except ValueError as exc:
+            raise ValueError(f"时区非法：{exc}") from exc
+
+
 class TaskStore:
     """任务定义、租约与触发历史的持久层；线程安全。"""
 
@@ -123,6 +148,7 @@ class TaskStore:
         """
         if schedule_kind not in {"once", "interval", "daily"}:
             raise ValueError(f"不支持的调度类型：{schedule_kind}")
+        _validate_schedule(kind=schedule_kind, schedule=schedule)
         task_id = "task-" + uuid.uuid4().hex[:12]
         ts = now or datetime.now().astimezone().isoformat(timespec="seconds")
         with self._lock, self._conn:
@@ -210,6 +236,30 @@ class TaskStore:
             rows = self._conn.execute(
                 "SELECT * FROM tasks WHERE enabled=1").fetchall()
         return [self._expand(r) for r in rows]
+
+    def mark_pending_fires_needs_review(self) -> int:
+        """把遗留 pending 的触发标为 needs_review（重启恢复：结果无法
+        确认 → 待核对；正常流程 runner 完成即更新，pending 只在崩溃遗留）。"""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE fire_log SET outcome='needs_review',"
+                " detail='进程退出，触发结果未确认' WHERE outcome='pending'")
+            return cur.rowcount
+
+    def record_task_error(self, task_id: str, detail: str) -> None:
+        """单任务调度异常留痕（不影响其它任务继续调度）。
+
+        fire_key 带随机后缀 + OR IGNORE：多次记录同任务错误互不冲突，
+        且留痕自身的失败绝不逃出调度循环（复核项：无效任务隔离）。
+        """
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO fire_log(task_id, fire_key, fired_at,"
+                " outcome, detail) VALUES(:t, :k, :at, 'scheduler_error', :d)",
+                {"t": task_id,
+                 "k": "error@" + uuid.uuid4().hex[:12],
+                 "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                 "d": detail[:200]})
 
     def fire_history(self, user_id: str, task_id: str,
                      *, limit: int = 50) -> list[dict[str, Any]]:
@@ -369,9 +419,21 @@ class LocalScheduler:
                                         ttl=self.lease_ttl, now=now_ts):
             return []  # 另一实例持有：待命
         now_iso = _now_iso(self._clock)
+        # 重启恢复（复核项）：上一进程崩溃遗留的 pending 触发——结果无法
+        # 确认，明确标为 needs_review（待核对），不冒充成功/失败。
+        self.store.mark_pending_fires_needs_review()
         fired: list[dict[str, Any]] = []
         for task in self._due_tasks(user_ids):
-            fired.extend(self._fire_task(task, now_iso))
+            try:
+                fired.extend(self._fire_task(task, now_iso))
+            except Exception as exc:  # noqa: BLE001 —— 单任务失败不中断循环
+                # 记录失败任务并继续（复核项：无效任务隔离）；留痕自身
+                # 失败同样吞掉，绝不中断整个调度循环
+                try:
+                    self.store.record_task_error(
+                        task["id"], f"调度异常：{type(exc).__name__}: {exc}")
+                except Exception:  # noqa: BLE001
+                    pass
         return fired
 
     def _due_tasks(self, user_ids: list[str] | None) -> list[dict[str, Any]]:

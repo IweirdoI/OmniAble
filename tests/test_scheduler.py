@@ -348,3 +348,76 @@ def test_scheduler_loop_integrates_with_server(store, monkeypatch) -> None:
     finally:
         server._scheduler_loop = original_loop
         server._scheduler_thread = original_thread
+
+
+# ---------------------------------------------------------------------------
+# 复核二轮：无效任务隔离 / 重启 pending 待核对 / 插件版本重查
+# ---------------------------------------------------------------------------
+
+def test_invalid_schedule_rejected_before_save(store) -> None:
+    """缺 every_seconds 的 interval 任务保存即拒绝（不入库）。"""
+    with pytest.raises(ValueError):
+        store.create_task("u_a", "calculate", {"expression": "1"},
+                          schedule_kind="interval", schedule={},
+                          now="2026-11-26T09:00:00+08:00")
+    assert store.list_tasks("u_a") == [], "无效任务不得入库"
+
+
+def test_single_bad_task_does_not_break_tick(store) -> None:
+    """单任务调度异常被隔离：其它任务继续触发，失败任务留痕。"""
+    clock = FakeClock(datetime(2026, 11, 26, 9, 0, tzinfo=timezone.utc))
+    # 直接往库里写一条缺 every_seconds 的坏任务（绕过校验，模拟历史脏数据）
+    import sqlite3 as _sq
+    with store._lock, store._conn:
+        store._conn.execute(
+            "INSERT INTO tasks(id, user_id, action, args_json, schedule_kind,"
+            " schedule_json, enabled, created_at, updated_at)"
+            " VALUES('bad-1', 'u_a', 'calculate', '{}', 'interval', '{}', 1, 't', 't')")
+    good = store.create_task("u_a", "calculate", {"expression": "1"},
+                             schedule_kind="interval",
+                             schedule={"every_seconds": 60, "start": clock.iso()},
+                             now=clock.iso())
+    calls: list = []
+    sched = LocalScheduler(store, clock=clock, sleep=lambda s: None,
+                           runner=_runner_records(calls))
+    sched.tick()  # 初始轮：登记 last_fired（不触发）
+    clock.advance(60)
+    fired = sched.tick()
+    # 好任务照常触发（未被坏任务中断）
+    assert [f["task_id"] for f in fired] == [good["id"]]
+    assert calls, "好任务必须照常执行"
+    # 坏任务留痕（scheduler_error）
+    history = store.fire_history("u_a", "bad-1")
+    assert any(h["outcome"] == "scheduler_error" for h in history)
+
+
+def test_pending_fires_marked_needs_review_on_restart(store) -> None:
+    """触发登记后进程退出 → 重启后 pending 标为 needs_review（待核对）。"""
+    clock = FakeClock(datetime(2026, 11, 26, 9, 0, tzinfo=timezone.utc))
+    task = store.create_task("u_a", "calculate", {"expression": "1"},
+                             schedule_kind="interval",
+                             schedule={"every_seconds": 60, "start": clock.iso()},
+                             now=clock.iso())
+    calls: list = []
+    sched = LocalScheduler(store, clock=clock, sleep=lambda s: None,
+                           runner=_runner_records(calls))
+    # 模拟：触发已登记但 runner 未完成即退出——直接造一条 pending
+    fire_at = next_fire_after(store.get_task("u_a", task["id"]), clock.iso())
+    store.claim_fire(task["id"], f"{task['id']}@{fire_at}", fired_at=clock.iso(),
+                     outcome="pending")
+    # 重启：新实例 tick 开头把遗留 pending 标为 needs_review
+    sched2 = LocalScheduler(store, clock=clock, sleep=lambda s: None,
+                            runner=_runner_records(calls))
+    sched2.tick()
+    history = store.fire_history("u_a", task["id"])
+    assert history and history[0]["outcome"] == "needs_review"
+    assert "未确认" in history[0]["detail"]
+
+
+def test_plugin_action_recheck_note() -> None:
+    """插件动作触发时重查：default_runner 经 get_action 查统一目录——
+    插件停用/注销后动作消失 → skipped（机制天然成立）。
+    TASK-024（PR #73）合入后在此补端到端回归（安装→定时触发→停用）。
+    """
+    from src.agent.actions import get_action
+    assert get_action("plugin.nonexistent.echo") is None
