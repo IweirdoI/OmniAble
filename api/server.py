@@ -30,7 +30,6 @@ from src.agent.run_store import RunStore, active_runs
 
 
 
-from src.agent.plugin_host import PluginHost, PluginHostError
 from src.agent.scheduler import LocalScheduler, TaskStore as SchedulerTaskStore
 from src.knowledge.memory_service.milvus_client import MemoryBackendUnavailable
 from src.security.semantic_detector import SemanticDetectionUnavailable
