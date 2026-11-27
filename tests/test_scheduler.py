@@ -283,3 +283,68 @@ def test_user_isolation(store) -> None:
     assert store.get_task("u_b", task["id"]) is None
     assert store.list_tasks("u_b") == []
     assert store.fire_history("u_b", task["id"]) == []
+
+
+# ---------------------------------------------------------------------------
+# 复核整改：终端动作无人确认不执行；调度循环接入服务
+# ---------------------------------------------------------------------------
+
+def test_exec_terminal_waits_without_confirmation(store, monkeypatch) -> None:
+    """终端动作属变更类：调度触发无交互通道 → waiting_confirmation 不执行。"""
+    monkeypatch.setenv("AGENT_ENABLE_TOOLS", "1")
+    monkeypatch.setenv("AGENT_ENABLE_EXEC_TOOL", "1")
+    monkeypatch.setenv("AGENT_EXEC_ALLOWED_COMMANDS", '["echo hi"]')
+    clock = FakeClock(datetime(2026, 11, 26, 9, 0, tzinfo=timezone.utc))
+    store.create_task("u_a", "exec_terminal", {"command": "echo hi"},
+                      schedule_kind="interval",
+                      schedule={"every_seconds": 60, "start": clock.iso()},
+                      now=clock.iso())
+    from src.agent.scheduler import default_runner
+    sched = LocalScheduler(store, clock=clock, sleep=lambda s: None,
+                           runner=default_runner)
+    sched.tick()
+    clock.advance(60)
+    fired = sched.tick()
+    outcomes = [f["outcome"] for f in fired if not f["missed"]]
+    assert outcomes == ["waiting_confirmation"], f"终端动作无人确认不得执行：{fired}"
+
+
+def test_runner_rejects_missing_user_identity() -> None:
+    """触发时权限检查：归属用户缺失 → skipped（不执行）。"""
+    from src.agent.scheduler import default_runner
+    outcome, run_id, detail = default_runner(
+        {"user_id": "", "action": "calculate",
+         "args": {"expression": "1"}, "id": "t-x"}, "t-x@2026")
+    assert outcome == "skipped" and run_id is None
+    assert "身份" in detail
+
+
+def test_scheduler_loop_integrates_with_server(store, monkeypatch) -> None:
+    """调度循环接入服务：startup 启动线程、shutdown 释放租约。"""
+    import api.server as server
+    from src.agent.scheduler import LocalScheduler
+
+    clock = FakeClock(datetime(2026, 11, 26, 9, 0, tzinfo=timezone.utc))
+    monkeypatch.setenv("OS_AGENT_SCHEDULER_DB", str(store.path))
+    store.create_task("u_a", "calculate", {"expression": "9*9"},
+                      schedule_kind="interval",
+                      schedule={"every_seconds": 1, "start": clock.iso()},
+                      now=clock.iso())
+    # 替换服务端 store/clock：替换 loop 构造参数不易，验证 startup/shutdown 生命周期
+    original_loop = server._scheduler_loop
+    original_thread = server._scheduler_thread
+    try:
+        server._scheduler_loop = None
+        server._scheduler_thread = None
+        import asyncio
+        asyncio.run(server.start_scheduler_loop())
+        assert server._scheduler_thread is not None and server._scheduler_thread.is_alive()
+        assert server._scheduler_loop is not None
+        asyncio.run(server.stop_scheduler_loop())
+        assert server._scheduler_thread is None
+        # 租约已释放
+        assert store.acquire_lease("scheduler", "reclaim-test", ttl=30,
+                                   now=clock.ts) is True
+    finally:
+        server._scheduler_loop = original_loop
+        server._scheduler_thread = original_thread

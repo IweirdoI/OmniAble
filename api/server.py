@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import json
 import os
 import time
@@ -26,6 +27,10 @@ from src.agent.runtime import RunAborted, RunTimedOut, get_stream_slots
 from src.agent.service import ChatMessage, ChatRequest, MemoryAgent, ModelUnavailable
 from src.agent.session_store import SessionStore
 from src.agent.run_store import RunStore, active_runs
+
+
+
+from src.agent.plugin_host import PluginHost, PluginHostError
 from src.agent.scheduler import LocalScheduler, TaskStore as SchedulerTaskStore
 from src.knowledge.memory_service.milvus_client import MemoryBackendUnavailable
 from src.security.semantic_detector import SemanticDetectionUnavailable
@@ -39,6 +44,9 @@ session_store = SessionStore(project_root=str(Path(__file__).resolve().parents[1
 # Agent 运行记录持久层（TASK-022 / Issue #30）：data/agent_runs.db，
 # 执行步骤/工件/终态落盘；两用户隔离、幂等去重、中断恢复。
 run_store = RunStore(project_root=str(Path(__file__).resolve().parents[1]))
+
+# 本地定时任务（TASK-031 / Issue #39）：任务定义与触发历史持久化
+scheduler_store = SchedulerTaskStore(project_root=str(Path(__file__).resolve().parents[1]))
 
 # 本地定时任务（TASK-031 / Issue #39）：任务定义与触发历史持久化
 scheduler_store = SchedulerTaskStore(project_root=str(Path(__file__).resolve().parents[1]))
@@ -557,6 +565,40 @@ app.add_middleware(
 # 不阻断既有前端/脚本。鉴权中间件注册在防御中间件之外层，未通过鉴权即不计入限流。
 # ---------------------------------------------------------------------------
 _API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "").strip()
+
+
+# ---------------------------------------------------------------------------
+# 本地调度循环（TASK-031 / Issue #39）：服务启动即接入桌面宿主——
+# 宿主进程活着时触发；关停释放租约（另一实例可接管）。
+# ---------------------------------------------------------------------------
+
+_scheduler_loop: LocalScheduler | None = None
+_scheduler_thread: threading.Thread | None = None
+
+
+@app.on_event("startup")
+async def start_scheduler_loop() -> None:
+    """服务启动：后台线程运行调度循环（错过执行在 tick 中处理）。"""
+    global _scheduler_loop, _scheduler_thread
+    if _scheduler_thread is not None and _scheduler_thread.is_alive():
+        return  # 测试中多次 startup 防重入
+    _scheduler_loop = LocalScheduler(scheduler_store)
+    _scheduler_thread = threading.Thread(
+        target=_scheduler_loop.run_forever, daemon=True, name="mokoa-scheduler")
+    _scheduler_thread.start()
+
+
+@app.on_event("shutdown")
+async def stop_scheduler_loop() -> None:
+    """服务关停：停止循环并释放租约（另一实例可接管触发）。"""
+    global _scheduler_thread
+    if _scheduler_loop is not None:
+        _scheduler_loop.stop()
+        try:
+            scheduler_store.release_lease("scheduler", _scheduler_loop.instance_id)
+        except Exception:  # noqa: BLE001 —— 关停失败不影响进程退出
+            pass
+    _scheduler_thread = None
 
 
 @app.middleware("http")

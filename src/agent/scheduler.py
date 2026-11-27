@@ -71,8 +71,12 @@ CREATE TABLE IF NOT EXISTS fire_log (
 );
 """
 
-# 变更类动作：调度触发时无交互通道 → 无人确认不执行（TASK-020 口径）
-_CONFIRMABLE = frozenset({"write_file", "edit_file", "delete_file"})
+# 变更类动作：调度触发时无交互通道 → 无人确认不执行（TASK-020 口径）。
+# exec_terminal 同样属变更类（可改文件/执行系统操作）——终端动作在
+# 无人确认时也不得执行（TASK-031 复核项）。
+_CONFIRMABLE = frozenset({
+    "write_file", "edit_file", "delete_file", "exec_terminal",
+})
 
 
 def _now_iso(clock: Callable[[], float]) -> str:
@@ -457,6 +461,9 @@ def default_runner(task: dict[str, Any], fire_key: str):
     """
     from src.agent.actions import ActionContext, actions_available, get_action
 
+    # 触发时权限检查（复核项）：归属用户身份缺失 → 拒绝执行
+    if not str(task.get("user_id") or "").strip():
+        return "skipped", None, "任务缺少归属用户身份，拒绝执行。"
     action = get_action(task["action"])
     if action is None:
         return "skipped", None, f"动作不存在：{task['action']}"
