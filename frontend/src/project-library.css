@@ -102,3 +102,25 @@
   .project-browser, .project-lanes, .project-topic-list { grid-template-columns: minmax(0, 1fr); }
   .project-memory > header { flex-wrap: wrap; }
 }
+.outbound-expression {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: var(--bg);
+  display: grid;
+  gap: 12px;
+}
+.outbound-expression > header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: start; }
+.outbound-expression h3, .outbound-expression h4 { margin: 0; }
+.outbound-expression h3 { font-size: 17px; }
+.outbound-expression h4 { font-size: 14px; margin-bottom: 6px; }
+.outbound-expression p { margin: 4px 0; }
+.outbound-expression pre { background: var(--panel); margin: 7px 0; padding: 10px; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.outbound-badge { border: 1px solid var(--border); border-radius: 999px; padding: 3px 9px; font-size: 12px; color: var(--muted); }
+.outbound-expression form { display: grid; gap: 7px; }
+.outbound-expression label { font-size: 13px; color: var(--muted); }
+.outbound-expression textarea { width: min(620px, 100%); resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+.outbound-highlight { border-left: 3px solid var(--accent); padding-left: 9px; font-size: 13px; color: var(--text) !important; }
+.outbound-check { display: flex; gap: 7px; align-items: center; color: var(--text) !important; }
+.outbound-status, .outbound-result { font-size: 13px; }
+.outbound-result { border-left: 3px solid var(--success); padding-left: 9px; color: var(--text) !important; }
