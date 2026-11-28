@@ -5,11 +5,9 @@
 - **安装/启用/停用/升级/回滚可审计**：`installed` 表记录版本与指针，
   `audit` 表记录全部操作（时间/操作/插件/版本/结果）；升级先验包后切换，
   失败保留旧版本；回滚切回上一版本。
-- **宿主管理权限，执行前约束文件、网络和进程能力**：插件动作经
-  `PluginHost.register_actions()` 进入 TASK-021 统一动作目录（聊天与桌面
-  同一入口）；执行在**独立子进程**（`-I` 隔离模式）中经 `plugin_runner`
-  完成——runner 在导入插件代码前收紧 builtins.open（仅插件目录内）、
-  禁用 socket 联网与 subprocess 进程启动；越界/联网/未授权进程被拒绝。
+- 桌面宿主保留包管理与审计，默认关闭插件代码执行，待宿主隔离验收后接入。
+- 受信任的开发样例可显式选择 Python 工作进程。源码检查、受限命名空间
+  与 Job Object 的 UI 和生命周期约束用于测试开发样例。
 - **超时/崩溃只终止插件**：子进程超时 kill、非零退出/异常只影响本次调用。
 - **停用后动作消失**：停用即从动作目录注销（`actions_available` 不再可见）。
 - **保留旧工具名兼容**：插件动作不得与内置动作同名（register_action 拒绝
@@ -40,6 +38,7 @@ DEFAULT_DB_PATH = "data/plugin_host.db"
 DEFAULT_PLUGINS_DIR = "data/plugins"
 DEFAULT_TIMEOUT = 10.0
 MAX_OUTPUT_BYTES = 64 * 1024
+EXECUTION_UNAVAILABLE = "当前宿主尚未通过插件运行隔离验收，插件执行已关闭。"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS installed (
@@ -73,10 +72,7 @@ class PluginHostError(RuntimeError):
 
 
 # ---------------------------------------------------------------------------
-# 运行时强制（TASK-024 复核项）：OS 级隔离在宿主进程侧实施——Windows Job
-# Object 把插件子进程绑入受限作业（UI 桌面/句柄/剪贴板/全局原子访问禁止、
-# 活动进程数=1 阻止插件再启动子进程、作业关闭即终止）。源码改写与白名单
-# 保留为附加检查层。
+# Windows Job Object 的 UI 限制和关闭时终止用于受信任开发样例。
 # ---------------------------------------------------------------------------
 
 _JOB_LIMIT_KILL_ON_CLOSE = 0x00002000
@@ -278,7 +274,8 @@ class PluginHost:
     def __init__(self, *, db_path: str | Path | None = None,
                  plugins_dir: str | Path | None = None,
                  trust_store=None, project_root: str | None = None,
-                 runner_timeout: float = DEFAULT_TIMEOUT) -> None:
+                 runner_timeout: float = DEFAULT_TIMEOUT,
+                 allow_trusted_python: bool = False) -> None:
         root = Path(project_root) if project_root else Path.cwd()
         self.plugins_dir = Path(plugins_dir) if plugins_dir else root / DEFAULT_PLUGINS_DIR
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
@@ -293,11 +290,41 @@ class PluginHost:
         self._conn.commit()
         self.trust_store = trust_store
         self.runner_timeout = runner_timeout
+        self._allow_trusted_python = allow_trusted_python
         self._registered: dict[str, list[str]] = {}  # plugin_id -> 已注册动作名
+        if allow_trusted_python:
+            self._restore_actions()
 
     def close(self) -> None:
         with self._lock:
+            for plugin_id in list(self._registered):
+                self._unregister_actions(plugin_id)
             self._conn.close()
+
+    def _restore_actions(self) -> None:
+        for plugin in self.list_installed():
+            if not plugin["enabled"]:
+                continue
+            plugin_id, version = plugin["plugin_id"], plugin["version"]
+            try:
+                manifest = self._read_installed_manifest(plugin)
+                self._register_actions_from_manifest(plugin_id, manifest)
+            except (OSError, ValueError, PluginHostError) as exc:
+                self._audit("restore_actions", plugin_id, version=version,
+                            ok=False, detail=str(exc))
+
+    def _read_installed_manifest(self, plugin) -> dict[str, Any]:
+        target = self.plugins_dir / plugin["plugin_id"] / plugin["version"]
+        if (not target.resolve().is_relative_to(self.plugins_dir.resolve())
+                or Path(plugin["dir"]).resolve() != target.resolve()):
+            raise PluginHostError("已安装插件目录无效。")
+        manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
+        if (not isinstance(manifest, dict) or manifest.get("id") != plugin["plugin_id"]
+                or manifest.get("version") != plugin["version"]
+                or not isinstance(manifest.get("actions"), list)
+                or not all(isinstance(action, dict) for action in manifest["actions"])):
+            raise PluginHostError("已安装插件清单无效。")
+        return manifest
 
     # -- 审计 ---------------------------------------------------------------
 
@@ -341,7 +368,7 @@ class PluginHost:
                 if pure.is_absolute() or ".." in pure.parts or "\\" in member:
                     raise PluginHostError(f"包内路径非法：{member}")
                 destination = (target / pure).resolve()
-                if not str(destination).startswith(str(target.resolve())):
+                if not destination.is_relative_to(target.resolve()):
                     raise PluginHostError(f"包内路径越界：{member}")
             zf.extractall(target)
 
@@ -388,25 +415,6 @@ class PluginHost:
                     violations.append(f"{py.name}:{node.lineno} 赋值 open（绕过宿主限制）")
         return violations
 
-
-    def _extract_payload(self, package: VerifiedPackage, target: Path) -> None:
-        """解包 payload 到目标目录；防路径穿越（zip slip）。"""
-        self._extract_payload_file(package.path, target)
-
-    def _extract_payload_file(self, package_file: Path, target: Path) -> None:
-        """解包 payload 到目标目录；防路径穿越（zip slip）。"""
-        target.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(package_file) as zf:
-            for member in zf.namelist():
-                if member in ("manifest.json", "signature.json"):
-                    continue
-                pure = PurePosixPath(member)
-                if pure.is_absolute() or ".." in pure.parts or "\\" in member:
-                    raise PluginHostError(f"包内路径非法：{member}")
-                destination = (target / pure).resolve()
-                if not str(destination).startswith(str(target.resolve())):
-                    raise PluginHostError(f"包内路径越界：{member}")
-            zf.extractall(target)
 
     def install(self, package_path: str | Path) -> dict[str, Any]:
         """安装（验包 → 解包 → 静态扫描 → 注册动作）；同版本重复安装拒绝。
@@ -507,7 +515,8 @@ class PluginHost:
                     {"v": version, "pv": old_version, "d": str(target),
                      "ts": _now(), "p": plugin_id})
             self._unregister_actions(plugin_id)
-            self._register_actions_from_manifest(plugin_id, package.manifest)
+            if row["enabled"]:
+                self._register_actions_from_manifest(plugin_id, package.manifest)
             self._audit("upgrade", plugin_id, version=version, ok=True,
                         detail=f"{old_version} → {version}")
             return {"plugin_id": plugin_id, "version": version,
@@ -539,10 +548,11 @@ class PluginHost:
                 " dir=:d, updated_at=:ts WHERE plugin_id=:p",
                 {"v": previous, "pv": row["version"], "d": str(target),
                  "ts": _now(), "p": plugin_id})
-        # 重新注册动作（用回滚后版本的清单）
         self._unregister_actions(plugin_id)
-        manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
-        self._register_actions_from_manifest(plugin_id, manifest)
+        if row["enabled"] and self._allow_trusted_python:
+            manifest = self._read_installed_manifest(
+                {"plugin_id": plugin_id, "version": previous, "dir": str(target)})
+            self._register_actions_from_manifest(plugin_id, manifest)
         self._audit("rollback", plugin_id, version=previous, ok=True,
                     detail=f"{row['version']} → {previous}")
         return {"plugin_id": plugin_id, "version": previous}
@@ -561,9 +571,8 @@ class PluginHost:
             self._conn.execute(
                 "UPDATE installed SET enabled=:e, updated_at=:ts WHERE plugin_id=:p",
                 {"e": 1 if enabled else 0, "ts": _now(), "p": plugin_id})
-        if enabled:
-            manifest = json.loads(
-                (Path(row["dir"]) / "manifest.json").read_text(encoding="utf-8"))
+        if enabled and self._allow_trusted_python:
+            manifest = self._read_installed_manifest(row)
             self._register_actions_from_manifest(plugin_id, manifest)
         else:
             self._unregister_actions(plugin_id)
@@ -575,12 +584,15 @@ class PluginHost:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM installed ORDER BY updated_at DESC").fetchall()
-        return [{**dict(r), "enabled": bool(r["enabled"])} for r in rows]
+        return [{**dict(r), "enabled": bool(r["enabled"]),
+                 "executable": r["plugin_id"] in self._registered} for r in rows]
 
     # -- 动作注册（统一目录） -------------------------------------------------
 
     def _register_actions_from_manifest(self, plugin_id: str,
                                         manifest: dict[str, Any]) -> None:
+        if not self._allow_trusted_python:
+            return
         actions = manifest.get("actions") or []
         names: list[str] = []
         for spec in actions:
@@ -628,7 +640,7 @@ class PluginHost:
         entry = str(json.loads(
             (plugin_dir / "manifest.json").read_text(encoding="utf-8")).get("entry") or "")
         entry_path = (plugin_dir / entry).resolve()
-        if not str(entry_path).startswith(str(plugin_dir.resolve())) or not entry_path.is_file():
+        if not entry_path.is_relative_to(plugin_dir.resolve()) or not entry_path.is_file():
             raise PluginHostError(f"入口文件不存在或越界：{entry}")
         tree = _ast.parse(entry_path.read_text(encoding="utf-8", errors="replace"))
         # 保留全部模块级定义（import 行在下一步文本后处理中改写）
@@ -751,6 +763,8 @@ class PluginHost:
         执行代码由宿主**生成**（_build_restricted_source：剥离 import），
         子进程只执行受限代码——执行时的文件/网络/进程约束由宿主强制。
         """
+        if not self._allow_trusted_python:
+            return False, EXECUTION_UNAVAILABLE
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM installed WHERE plugin_id=:p",
@@ -770,9 +784,7 @@ class PluginHost:
         }
         runner = Path(__file__).resolve().parent / "plugin_runner.py"
         try:
-            # 运行时强制：Popen（非 run）以便先把子进程绑入受限 Job Object
-            # 再等待——Windows 下 UI/剪贴板/句柄访问禁止、活动进程数=1、
-            # 作业关闭即终止；限制失败如实降级（见 restrict_note）
+            # Windows 先绑定 Job，再把样例代码发送给工作进程。
             process = subprocess.Popen(
                 [sys.executable, "-I", str(runner)],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -783,33 +795,28 @@ class PluginHost:
             return False, f"插件进程启动失败：{exc}"
         restrict_note, job_handle = _apply_windows_job_restrictions(process)
         # OS 限制降级/生效均落审计（复核项：降级不得仅 pass）
-        self._audit("job_restrict", plugin_id, version=None,
-                    ok=restrict_note is None, detail=restrict_note)
         stderr_tail = ""
         try:
+            self._audit("job_restrict", plugin_id, version=row["version"],
+                        ok=restrict_note is None, detail=restrict_note)
+            if sys.platform == "win32" and not job_handle:
+                return False, f"插件工作进程保护未生效：{restrict_note or '无法绑定 Windows Job'}"
             raw, _err = process.communicate(
                 input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                 timeout=timeout or self.runner_timeout)
         except subprocess.TimeoutExpired:
             # 超时只终止插件子进程；宿主继续
-            process.kill()
-            process.wait(timeout=5)
-            if job_handle:
-                kernel32_close(job_handle)
             return False, f"插件执行超时（{timeout or self.runner_timeout:.0f} 秒），已终止。"
         except OSError as exc:
-            process.kill()
+            return False, f"插件通信失败：{exc}"
+        finally:
             if job_handle:
                 kernel32_close(job_handle)
-            return False, f"插件通信失败：{exc}"
+            if process.poll() is None:
+                process.kill()
+            process.communicate()
         stderr_tail = (_err or b"")[-400:].decode("utf-8", errors="replace")
         raw = raw[:MAX_OUTPUT_BYTES]
-        if job_handle:
-            kernel32_close(job_handle)
-        if restrict_note:
-            # OS 限制失败如实降级：结果仍经受限代码 + 白名单执行，
-            # 降级原因进审计（见上方 job_restrict 记录）
-            pass
         try:
             result = json.loads(raw.decode("utf-8", errors="replace") or "{}")
         except ValueError:

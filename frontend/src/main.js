@@ -574,7 +574,8 @@ createApp({
     const sendMessage = async () => {
       if (!user.value.trim()) return tell('请先填写用户 ID')
       const text = draft.value.trim()
-      if (!text || sending.value || ingesting.value || syncing.value) return
+      if (!text || sending.value || ingesting.value || syncing.value ||
+          openingSession.value || deletingSession.value) return
       messages.value.push({ id: Date.now(), role: 'user', content: text, time: now() })
       draft.value = ''
       sending.value = true
@@ -869,7 +870,7 @@ createApp({
     // TASK-018：恢复已保存会话（只含已完成回合；被遗忘消息显示服务端占位）。
     // 打开期间发生切换（sessionKey 变化）时响应过期，不回填聊天区。
     const openSession = async (session) => {
-      if (!live.value || openingSession.value || sending.value) return
+      if (!live.value || openingSession.value || deletingSession.value || sending.value) return
       activeController?.abort()
       sessionKey.value++
       const requestSession = sessionKey.value
@@ -893,7 +894,7 @@ createApp({
     }
 
     const deleteSession = async (session) => {
-      if (!live.value || deletingSession.value || sending.value) return
+      if (!live.value || deletingSession.value || openingSession.value || sending.value) return
       if (!window.confirm(`删除会话「${session.title}」？删除后该会话的全部消息不可恢复。`)) return
       deletingSession.value = true
       try {
@@ -1049,6 +1050,7 @@ createApp({
     // 扫描以便正常输入（再按扫描键重新进入）。
     const scan = createScanController()
     const scanMode = ref(false)
+    let scanOpener = null
     const toggleScan = () => {
       if (scanMode.value) {
         scan.stop()
@@ -1057,6 +1059,7 @@ createApp({
         return
       }
       if (paletteOpen.value) closePalette({ restore: false })
+      scanOpener = document.activeElement
       scan.start()
       scanMode.value = true
       const first = scan.step()
@@ -1081,7 +1084,9 @@ createApp({
           if (el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) toggleScan()
         } else if (event.key === 'Escape') {
           event.preventDefault()
+          const opener = scanOpener
           toggleScan()
+          if (opener?.isConnected) opener.focus({ preventScroll: true })
         }
         return
       }
@@ -1169,11 +1174,11 @@ createApp({
             <p v-else-if="sessions.status === 'error'" class="rail-note rail-error" role="alert"><span>{{ sessions.error }}</span><button class="text-button" data-testid="session-retry" type="button" :disabled="sending || syncing" @click="loadSessions()">重试</button></p>
             <template v-else-if="sessions.items.length">
               <div v-for="session in sessions.items" :key="session.id" class="session-row">
-                <button class="session-item" :class="{ active: session.id === activeSessionId }" type="button" :data-testid="'session-open-' + session.id" :aria-current="session.id === activeSessionId ? 'true' : null" :disabled="openingSession" :title="session.title" @click="openSession(session)">
+                <button class="session-item" :class="{ active: session.id === activeSessionId }" type="button" :data-testid="'session-open-' + session.id" :aria-current="session.id === activeSessionId ? 'true' : null" :disabled="openingSession || deletingSession || sending" :title="session.title" @click="openSession(session)">
                   <span class="session-mark" aria-hidden="true"></span>
                   <span class="session-copy"><b>{{ session.title }}</b><small>已保存 · {{ session.message_count }} 条消息</small></span>
                 </button>
-                <button class="session-delete" type="button" :aria-label="'删除会话：' + session.title" :disabled="deletingSession" @click="deleteSession(session)">×</button>
+                <button class="session-delete" type="button" :aria-label="'删除会话：' + session.title" :disabled="deletingSession || openingSession || sending" @click="deleteSession(session)">×</button>
               </div>
               <button v-if="sessions.items.length < sessions.total" class="text-button rail-more" type="button" :disabled="sessions.status === 'loading'" @click="loadMoreSessions()">加载更多（{{ sessions.total - sessions.items.length }}）</button>
             </template>
@@ -1293,13 +1298,13 @@ createApp({
             </div>
             <form class="chat-composer" @submit.prevent="sendMessage">
               <label class="sr-only" for="chat-input">对话输入</label>
-              <textarea id="chat-input" ref="composer" v-model="draft" data-testid="chat-input" @keydown="handleComposerKeydown" @focus="onComposerFocus" placeholder="输入问题，或告诉我需要记住的内容…"></textarea>
+              <textarea id="chat-input" ref="composer" v-model="draft" data-testid="chat-input" :readonly="openingSession || deletingSession" @keydown="handleComposerKeydown" @focus="onComposerFocus" placeholder="输入问题，或告诉我需要记住的内容…"></textarea>
               <div class="composer-footer">
                 <span class="composer-hint">Enter 发送 · Shift+Enter 换行</span>
                 <div class="composer-actions">
                   <button type="button" class="file-button" data-testid="open-ingestion" @click="openIngestion">＋ 接入资料</button>
                   <button v-if="sending" type="button" class="ghost-button stop-button" data-testid="chat-stop" @click="stopMessage">停止</button>
-                  <button class="send-button" data-testid="chat-send" :disabled="!draft.trim() || sending || syncing || ingesting">{{ sending ? '处理中' : '发送 ↑' }}</button>
+                  <button class="send-button" data-testid="chat-send" :disabled="!draft.trim() || sending || syncing || ingesting || openingSession || deletingSession">{{ sending ? '处理中' : '发送 ↑' }}</button>
                 </div>
               </div>
             </form>

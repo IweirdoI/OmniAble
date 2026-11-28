@@ -131,6 +131,44 @@ const switchUser = async (page, next) => {
     await page.unroute('**/api/agent/chat/stream')
     check('interrupted turn is never restored as a completed conversation')
 
+    await page.getByTestId('session-new').click()
+    await send(page, '切换前会话')
+    await waitDone(page)
+    const target = page.locator('[data-testid^=session-open-]').filter({ hasText: 'EOF 消息' })
+    await target.waitFor()
+    const targetId = (await target.getAttribute('data-testid')).slice('session-open-'.length)
+    const detailPath = '**/api/agent/sessions/' + USER_A + '/' + targetId
+    let releaseDetail
+    const pending = new Promise(resolve => { releaseDetail = resolve })
+    await page.route(detailPath, async (route) => {
+      await pending
+      await route.continue()
+    })
+    let chatRequests = 0
+    const countChat = request => {
+      if (request.url().endsWith('/api/agent/chat/stream')) chatRequests += 1
+    }
+    page.on('request', countChat)
+    try {
+      await page.getByTestId('chat-input').fill('切换期间的草稿')
+      const loading = page.waitForRequest(request => request.url().endsWith('/' + targetId))
+      await target.click()
+      await loading
+      assert.equal(await page.getByTestId('chat-input').isEditable(), false)
+      assert.equal(await page.getByTestId('chat-send').isDisabled(), true)
+      await page.getByTestId('chat-send').evaluate(button => button.form.requestSubmit())
+      releaseDetail()
+      await page.waitForFunction(id =>
+        document.querySelector('[data-testid="session-open-' + id + '"]')?.getAttribute('aria-current') === 'true',
+      targetId)
+      assert.equal(chatRequests, 0)
+      check('session switch blocks button and form submission while detail is in flight')
+    } finally {
+      releaseDetail()
+      page.off('request', countChat)
+      await page.unroute(detailPath)
+    }
+
     console.log('All session browser checks passed.')
   } catch (error) {
     await captureFailure(page, 'session', error)

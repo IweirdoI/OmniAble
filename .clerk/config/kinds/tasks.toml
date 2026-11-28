@@ -119,6 +119,12 @@ to = "done"
 requires = ["evidence", "commit"]
 archive = true
 
+[[transition]]
+name = "reopen"
+from = ["done"]
+to = "review"
+requires = ["note"]
+
 [[action]]
 name = "claim"
 handler = "identity"

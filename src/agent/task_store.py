@@ -18,6 +18,7 @@ WAL、严格用户隔离。只做持久化与受控状态迁移，执行门控�
 from __future__ import annotations
 
 import json
+from datetime import datetime
 import os
 import sqlite3
 import threading
@@ -188,6 +189,7 @@ class TaskStore:
         if status not in TASK_STATUSES:
             raise TaskStoreError(f"未知任务状态：{status}")
         with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
             row = self._conn.execute(
                 "SELECT status FROM tasks WHERE id = :t AND user_id = :u",
                 {"t": task_id, "u": user_id}).fetchone()
@@ -221,6 +223,7 @@ class TaskStore:
     def takeover(self, user_id: str, task_id: str) -> dict[str, Any] | None:
         """接管：协助程度切 assist、状态转 waiting_user；不可对已完成任务接管。"""
         with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
             row = self._conn.execute(
                 "SELECT status FROM tasks WHERE id = :t AND user_id = :u",
                 {"t": task_id, "u": user_id}).fetchone()
@@ -248,59 +251,88 @@ class TaskStore:
         return None
 
     def mark_step_running(self, user_id: str, task_id: str,
-                          step_id: str) -> dict[str, Any] | None:
-        """步骤置 running；任务同步置 running（乐观守卫：任务不得在
-        suspended/completed/failed 下执行）。"""
+                          step_id: str, *,
+                          expected_step: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        """原子领取一个步骤，并复核执行前读到的参数和确认。"""
         with self._lock, self._conn:
-            task = self._conn.execute(
-                "SELECT status FROM tasks WHERE id = :t AND user_id = :u",
-                {"t": task_id, "u": user_id}).fetchone()
-            if task is None:
+            self._conn.execute("BEGIN IMMEDIATE")
+            params = {"t": task_id, "s": step_id, "u": user_id}
+            row = self._conn.execute(
+                "SELECT s.*, t.mode, t.status AS task_status FROM task_steps s"
+                " JOIN tasks t ON t.id = s.task_id"
+                " WHERE t.user_id = :u AND t.id = :t AND s.step_id = :s", params).fetchone()
+            if row is None:
                 return None
-            if task["status"] in ("suspended", "completed", "failed"):
-                raise TaskStoreError(f"任务状态 {task['status']} 不允许执行步骤")
+            if row["task_status"] not in ("ready", "waiting_user") or row["mode"] == "assist":
+                raise TaskStoreError("任务当前状态或协助程度不允许执行步骤")
+            if row["status"] != "pending" or self._conn.execute(
+                    "SELECT 1 FROM task_steps WHERE task_id = :t AND status = 'running'",
+                    params).fetchone():
+                raise TaskStoreError("步骤已领取或任务正在执行")
+            step = self._step_out(dict(row))
+            if expected_step is not None and any(
+                    step[key] != expected_step[key] for key in
+                    ("action", "args", "external", "confirmed_at", "confirmed_scope")):
+                raise TaskStoreError("步骤内容或确认已变化，请重新核对")
+            claimed_at = datetime.now().isoformat(timespec="microseconds")
             self._conn.execute(
                 "UPDATE task_steps SET status = 'running', updated_at = :ts"
-                " WHERE task_id = :t AND step_id = :s",
-                {"t": task_id, "s": step_id, "ts": _now()})
+                " WHERE task_id = :t AND step_id = :s", {**params, "ts": claimed_at})
             self._conn.execute(
                 "UPDATE tasks SET status = 'running', updated_at = :ts"
-                " WHERE id = :t AND user_id = :u",
-                {"t": task_id, "u": user_id, "ts": _now()})
-        return self.get_step(user_id, task_id, step_id)
+                " WHERE id = :t AND user_id = :u", {**params, "ts": claimed_at})
+            step.pop("mode")
+            step.pop("task_status")
+            return {**step, "status": "running", "updated_at": claimed_at}
 
     def finish_step(self, user_id: str, task_id: str, step_id: str, *,
                     status: str, result: str | None = None,
                     error_code: str | None = None,
-                    run_record_id: str | None = None) -> dict[str, Any] | None:
+                    run_record_id: str | None = None, attempt: str | None = None,
+                    draft_update: dict[str, Any] | None = None) -> dict[str, Any] | None:
         """步骤终态（done/failed/unknown/skipped）；未知/失败时任务停
         waiting_user（异常停下），成功则回到 ready 并推进说明。"""
         if status not in ("done", "failed", "unknown", "skipped"):
             raise TaskStoreError(f"非法步骤终态：{status}")
         with self._lock, self._conn:
-            self._conn.execute(
+            result_row = self._conn.execute(
                 "UPDATE task_steps SET status = :status, result = :result,"
                 " error_code = :error,"
                 " run_record_id = COALESCE(:rid, run_record_id),"
-                " updated_at = :ts WHERE task_id = :task_id AND step_id = :step_id",
+                " updated_at = :ts WHERE task_id = :task_id AND step_id = :step_id"
+                " AND task_id IN (SELECT id FROM tasks WHERE user_id = :u)"
+                " AND task_steps.status = 'running' AND (:attempt IS NULL OR updated_at = :attempt)"
+                " RETURNING *",
                 {"status": status, "result": result, "error": error_code,
                  "rid": run_record_id, "task_id": task_id, "step_id": step_id,
-                 "ts": _now()})
+                 "ts": _now(), "u": user_id, "attempt": attempt}).fetchone()
+            if result_row is None:
+                return None
             remaining = self._conn.execute(
                 "SELECT status, COUNT(*) AS n FROM task_steps"
                 " WHERE task_id = :t GROUP BY status",
                 {"t": task_id}).fetchall()
             counts = {r["status"]: r["n"] for r in remaining}
-        if counts.get("done", 0) == sum(counts.values()):
-            task_status, detail = "completed", "全部步骤完成"
-        elif status in ("failed", "unknown"):
-            task_status = "waiting_user"
-            detail = ("步骤结果未知，等待核对" if status == "unknown"
-                      else f"步骤失败：{error_code or '未说明原因'}")
-        else:
-            task_status, detail = "ready", None
-        self.set_task_status(user_id, task_id, task_status, detail=detail)
-        return self.get_step(user_id, task_id, step_id)
+            if counts.get("done", 0) == sum(counts.values()):
+                task_status, detail = "completed", "全部步骤完成"
+            elif status in ("failed", "unknown"):
+                task_status = "waiting_user"
+                detail = ("步骤结果未知，等待核对" if status == "unknown"
+                          else f"步骤失败：{error_code or '未说明原因'}")
+            else:
+                task_status, detail = "ready", None
+            task = self._conn.execute(
+                "SELECT draft_json FROM tasks WHERE id = :t AND status = 'running'",
+                {"t": task_id}).fetchone()
+            if task is not None:
+                draft = json.loads(task["draft_json"])
+                draft.update(draft_update or {})
+                self._conn.execute(
+                    "UPDATE tasks SET status = :status, detail = :detail, draft_json = :draft,"
+                    " updated_at = :ts WHERE id = :t",
+                    {"t": task_id, "status": task_status, "detail": detail,
+                     "draft": json.dumps(draft, ensure_ascii=False), "ts": _now()})
+            return self._step_out(dict(result_row))
 
     def confirm_step(self, user_id: str, task_id: str, step_id: str, *,
                      scope: str = "", review: bool = False) -> dict[str, Any] | None:
@@ -308,6 +340,7 @@ class TaskStore:
         unknown 步骤完成核对——回到 pending 允许重试（不自动重发，仍需
         显式触发）。"""
         with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
             step = self._conn.execute(
                 "SELECT s.* FROM task_steps s JOIN tasks t ON t.id = s.task_id"
                 " WHERE s.task_id = :t AND s.step_id = :s AND t.user_id = :u",
@@ -321,8 +354,11 @@ class TaskStore:
                     "UPDATE task_steps SET status = 'pending', updated_at = :ts"
                     " WHERE task_id = :t AND step_id = :s",
                     {"t": task_id, "s": step_id, "ts": _now()})
-                self.set_task_status(user_id, task_id, "waiting_user",
-                                     detail="步骤已核对，可显式重试")
+                # 更新同一事务，保留用户主动暂停或接管状态。
+                self._conn.execute(
+                    "UPDATE tasks SET status = 'waiting_user', detail = :detail, updated_at = :ts"
+                    " WHERE id = :t AND mode <> 'assist' AND status IN ('ready', 'waiting_user')",
+                    {"t": task_id, "detail": "步骤已核对，可显式重试", "ts": _now()})
             else:
                 if not step["external"]:
                     raise TaskStoreError("该步骤不是外发步骤，无需单独确认")
@@ -350,6 +386,7 @@ class TaskStore:
         其 running/unknown 步骤 → unknown（结果未知，不冒充成功/失败）。"""
         affected: list[dict[str, Any]] = []
         with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
             query = ("SELECT id, user_id FROM tasks WHERE status = 'running'"
                      + (" AND user_id = :u" if user_id else ""))
             params: dict[str, Any] = {"u": user_id} if user_id else {}

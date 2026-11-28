@@ -110,7 +110,6 @@
   display: grid;
   gap: 12px;
 }
-<<<<<<< HEAD
 .order-verification > header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: start; }
 .order-verification h3, .order-verification h4 { margin: 0; }
 .order-verification h3 { font-size: 17px; }

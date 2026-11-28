@@ -109,7 +109,7 @@ def host(tmp_path):
     from src.agent.plugin_host import PluginHost
     private, key = _keypair()
     trust = TrustStore({key.key_id: key}, set())
-    h = PluginHost(project_root=str(tmp_path), trust_store=trust,
+    h = PluginHost(project_root=str(tmp_path), trust_store=trust, allow_trusted_python=True,
                    runner_timeout=5.0)
     h._test_private = private  # type: ignore[attr-defined]
     yield h
@@ -119,6 +119,70 @@ def host(tmp_path):
 def _install(host, tmp_path, *, version: str = "1.0.0", payload: str = PAYLOAD):
     package = _pack(tmp_path, host._test_private, version=version, payload=payload)
     return host.install(package)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_restart_restores_only_enabled_trusted_fixture_actions(tmp_path, enabled):
+    from src.agent.actions import get_action
+    from src.agent.plugin_host import PluginHost
+
+    private, key = _keypair()
+    trust = TrustStore({key.key_id: key}, set())
+    package = _pack(tmp_path, private, action_ids=["echo"])
+    first = PluginHost(project_root=str(tmp_path), trust_store=trust, allow_trusted_python=True)
+    try:
+        plugin_id = first.install(package)["plugin_id"]
+        first.set_enabled(plugin_id, enabled)
+        action_name = f"plugin.{plugin_id}.echo"
+        assert (get_action(action_name) is not None) == enabled
+    finally:
+        first.close()
+    assert get_action(action_name) is None
+
+    second = PluginHost(project_root=str(tmp_path), trust_store=trust, allow_trusted_python=True)
+    try:
+        assert second.list_installed()[0]["executable"] == enabled
+        assert (get_action(action_name) is not None) == enabled
+    finally:
+        second.close()
+
+
+def test_default_host_manages_packages_without_executing_code(tmp_path, monkeypatch):
+    from src.agent.actions import get_action
+    from src.agent.plugin_host import EXECUTION_UNAVAILABLE, PluginHost
+
+    private, key = _keypair()
+    trust = TrustStore({key.key_id: key}, set())
+    package = _pack(tmp_path, private, action_ids=["echo"])
+    instance = PluginHost(project_root=str(tmp_path), trust_store=trust)
+    try:
+        plugin_id = instance.install(package)["plugin_id"]
+        assert instance.list_installed()[0]["enabled"] is True
+        assert instance.list_installed()[0]["executable"] is False
+        assert get_action(f"plugin.{plugin_id}.echo") is None
+        monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: pytest.fail("unexpected process"))
+        assert instance.run_action(plugin_id, "echo", {}) == (False, EXECUTION_UNAVAILABLE)
+    finally:
+        instance.close()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Job 绑定失败路径")
+def test_job_failure_does_not_send_plugin_code_to_worker(host, tmp_path, monkeypatch):
+    from unittest.mock import Mock
+    from src.agent import plugin_host
+
+    plugin_id = _install(host, tmp_path)["plugin_id"]
+    worker = Mock()
+    worker.poll.return_value = None
+    monkeypatch.setattr(plugin_host.subprocess, "Popen", Mock(return_value=worker))
+    monkeypatch.setattr(plugin_host, "_apply_windows_job_restrictions",
+                        lambda process: ("fixture job failure", None))
+    ok, message = host.run_action(plugin_id, "echo", {})
+    assert not ok and "fixture job failure" in message
+    worker.kill.assert_called_once_with()
+    worker.communicate.assert_called_once_with()
+    audit = host.audit_log()[0]
+    assert audit["operation"] == "job_restrict" and audit["ok"] == 0
 
 
 # ---------------------------------------------------------------------------

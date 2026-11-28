@@ -24,7 +24,8 @@ export function createScanController({
       for (const container of scope.querySelectorAll(selector)) {
         if (!visible(container)) continue
         for (const el of container.querySelectorAll(INTERACTIVE)) {
-          if (el.closest('[data-scan-skip]')) continue
+          if (el.closest('[data-scan-skip], [inert], [aria-hidden="true"]')) continue
+          if (el.matches(':disabled, [aria-disabled="true"]')) continue
           if (visible(el) && !found.includes(el)) found.push(el)
         }
       }
@@ -32,12 +33,13 @@ export function createScanController({
     return found
   }
 
-  function paint(next) {
+  function paint(next, focus = false) {
     for (const el of targets) el.classList.remove(highlightClass)
     targets = next
     if (index >= 0 && targets[index]) {
       const el = targets[index]
       el.classList.add(highlightClass)
+      if (focus) el.focus({ preventScroll: true })
       el.scrollIntoView({ block: 'nearest' })
     }
   }
@@ -65,21 +67,16 @@ export function createScanController({
   // 步进：越过失效目标；整轮无目标则保持空转。返回当前高亮元素或 null。
   function step() {
     if (!active) return null
-    targets = targets.filter((el) => el.isConnected && visible(el))
-    if (!targets.length) {
-      targets = collect()
+    const previous = current()
+    const next = collect()
+    if (!next.length) {
       index = -1
-      if (!targets.length) return null
+      paint([])
+      return null
     }
-    for (let hops = 0; hops <= targets.length; hops += 1) {
-      index = (index + 1) % targets.length
-      const el = targets[index]
-      if (el.isConnected && visible(el)) {
-        paint(targets)
-        return el
-      }
-    }
-    return null
+    index = (next.indexOf(previous) + 1) % next.length
+    paint(next, true)
+    return next[index]
   }
 
   function current() {
@@ -89,7 +86,7 @@ export function createScanController({
   // 激活：聚焦后触发 click（input 聚焦即可用，click 对按钮/链接生效）。
   function activate() {
     const el = current()
-    if (!el) return null
+    if (!el || !collect().includes(el)) return null
     el.focus({ preventScroll: true })
     if (typeof el.click === 'function') el.click()
     return el

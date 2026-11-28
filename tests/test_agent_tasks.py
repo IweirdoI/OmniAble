@@ -13,6 +13,8 @@ Module: agent | 覆盖验收口径：
 from __future__ import annotations
 
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 from fastapi.testclient import TestClient
@@ -141,6 +143,86 @@ def test_unknown_step_blocks_retry_until_review(stores):
     assert store.get_step("alice", task_id, organize)["status"] == "pending"
     step = runner.run_step("alice", task_id, organize)
     assert step["status"] == "done"
+
+
+def test_concurrent_step_requests_claim_once(stores, monkeypatch):
+    from src.agent import task_runner
+
+    store, runs = stores
+    task_id = _make_life_task(store)
+    other = TaskStore(store.path)
+    gate = Barrier(2)
+    calls = []
+    real_action = task_runner._run_local
+
+    def count_action(*args):
+        calls.append(args[0])
+        return real_action(*args)
+
+    monkeypatch.setattr(task_runner, "_run_local", count_action)
+
+    def request(connection):
+        original = connection.mark_step_running
+
+        def claim(*args, **kwargs):
+            gate.wait(timeout=5)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(connection, "mark_step_running", claim)
+        try:
+            return TaskRunner(connection, runs).run_step("alice", task_id, "push")["status"]
+        except TaskStepError as exc:
+            return exc.code
+
+    try:
+        runner = TaskRunner(store, runs)
+        runner.confirm_external("alice", task_id, "push")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            assert sorted(pool.map(request, (store, other))) == ["done", "task_not_runnable"]
+        assert calls == ["record_submission"]
+        assert runner.run_step("alice", task_id, "push")["status"] == "done"
+        assert calls == ["record_submission"]
+        assert runs.list_runs("alice")["total"] == 1
+    finally:
+        other.close()
+
+
+@pytest.mark.parametrize("takeover", [False, True])
+def test_late_result_preserves_pause_or_takeover(stores, monkeypatch, takeover):
+    from src.agent import task_runner
+
+    store, runs = stores
+    task_id = _make_life_task(store)
+    real_action = task_runner._run_local
+
+    def interrupt_task(*args):
+        if takeover:
+            store.takeover("alice", task_id)
+        else:
+            store.set_task_status("alice", task_id, "suspended", expect=("running",))
+        return real_action(*args)
+
+    monkeypatch.setattr(task_runner, "_run_local", interrupt_task)
+    assert TaskRunner(store, runs).run_step("alice", task_id, "organize")["status"] == "done"
+    task = store.get_task("alice", task_id)
+    assert task["status"] == ("waiting_user" if takeover else "suspended")
+    assert "schedule" not in task["draft"]
+
+
+def test_recovery_fences_late_attempt(stores):
+    store, _ = stores
+    task_id = _make_life_task(store)
+    previous = store.mark_step_running("alice", task_id, "organize")
+    store.passivate_running("alice")
+    store.confirm_step("alice", task_id, "organize", review=True)
+    store.set_task_status("alice", task_id, "waiting_user", expect=("suspended",))
+    current = store.mark_step_running("alice", task_id, "organize")
+    assert store.finish_step("alice", task_id, "organize", status="done",
+                             attempt=previous["updated_at"], draft_update={"schedule": ["old"]}) is None
+    assert store.get_step("alice", task_id, "organize")["status"] == "running"
+    store.finish_step("alice", task_id, "organize", status="done",
+                      attempt=current["updated_at"], draft_update={"schedule": ["new"]})
+    assert store.get_task("alice", task_id)["draft"]["schedule"] == ["new"]
 
 
 def test_suspend_blocks_execution_and_resume_waits(stores):

@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from uuid import uuid4
 
 from src.agent.task_store import TaskStoreError
 from typing import Any
@@ -68,9 +69,12 @@ class TaskRunner:
             raise TaskStepError("step_not_found", "步骤不存在。")
         if step["status"] == "unknown":
             self.store.set_task_status(user_id, task_id, "waiting_user",
-                                       detail="结果未知，等待核对")
+                                       detail="结果未知，等待核对",
+                                       expect=("ready", "waiting_user"))
             raise TaskStepError(
                 "review_required", "该步骤结果未知，请先核对再显式重试。")
+        if step["status"] == "done":
+            return step
         if step["status"] != "pending":
             raise TaskStepError(
                 "step_not_runnable", f"步骤当前状态 {step['status']}，不能执行。")
@@ -80,7 +84,7 @@ class TaskRunner:
             except TaskStepError as exc:
                 # 外发被拦：任务停在等待用户（异常/外发前停下确认）
                 self.store.set_task_status(user_id, task_id, "waiting_user",
-                                           detail=exc.message)
+                                           detail=exc.message, expect=("ready", "waiting_user"))
                 raise
         return self._execute(user_id, task_id, step)
 
@@ -131,34 +135,40 @@ class TaskRunner:
                  step: dict[str, Any]) -> dict[str, Any]:
         task = self.store.get_task(user_id, task_id)
         assert task is not None
-        running = self.store.mark_step_running(user_id, task_id,
-                                               step["step_id"])
+        running = self.store.mark_step_running(user_id, task_id, step["step_id"],
+                                               expected_step=step)
         if running is None:
             raise TaskStepError("step_not_found", "步骤不存在。")
-        run_record_id = self._begin_run_record(task, step)
-        action = step["action"]
+        run_record_id = self._begin_run_record(task, running)
+        action = running["action"]
         try:
             if action.startswith("local:"):
-                result = _run_local(action[len("local:"):], task, step)
+                result = _run_local(action[len("local:"):], task, running)
                 ok, error = True, None
             else:
-                ok, result, error = _dispatch_catalog(action, step["args"])
+                ok, result, error = _dispatch_catalog(action, running["args"])
         except TaskStepError:
-            self.store.finish_step(user_id, task_id, step["step_id"],
+            self.store.finish_step(user_id, task_id, running["step_id"],
                                    status="failed", error_code="step_failed",
-                                   run_record_id=run_record_id)
+                                   run_record_id=run_record_id, attempt=running["updated_at"])
             self._finish_run_record(user_id, run_record_id, "failed",
                                     "step_failed")
             raise
+        except Exception:
+            self.store.finish_step(user_id, task_id, running["step_id"], status="unknown",
+                                   error_code="execution_unknown", run_record_id=run_record_id,
+                                   attempt=running["updated_at"])
+            self._finish_run_record(user_id, run_record_id, "needs_review", "execution_unknown")
+            raise
         status = "done" if ok else "failed"
-        if ok:
-            _merge_draft(self.store, user_id, task_id, action, result, step)
         step = self.store.finish_step(
-            user_id, task_id, step["step_id"], status=status, result=result,
-            error_code=error, run_record_id=run_record_id)
-        assert step is not None
-        self._finish_run_record(user_id, run_record_id,
-                                "completed" if ok else "failed", error)
+            user_id, task_id, running["step_id"], status=status, result=result,
+            error_code=error, run_record_id=run_record_id, attempt=running["updated_at"],
+            draft_update=_draft_update(result) if ok else None)
+        if step is None:
+            self._finish_run_record(user_id, run_record_id, "needs_review", "claim_lost")
+            raise TaskStepError("review_required", "步骤状态已变化，请核对当前记录。")
+        self._finish_run_record(user_id, run_record_id, "completed" if ok else "failed", error)
         return step
 
     def _begin_run_record(self, task: dict[str, Any],
@@ -169,7 +179,7 @@ class TaskRunner:
             return None
         try:
             record, dup = self.run_store.begin_run(
-                task["user_id"], "task-" + step["step_id"][:12],
+                task["user_id"], "task-" + uuid4().hex,
                 route="task",
                 idempotency_key=f"task:{task['id']}:{step['step_id']}:"
                                 f"{step['updated_at']}")
@@ -279,23 +289,16 @@ def _extract_time(line: str) -> str | None:
     return match.group(1).replace("：", ":") if match else None
 
 
-def _merge_draft(store, user_id: str, task_id: str, action: str,
-                 result: str | None, step: dict[str, Any]) -> None:
-    """把步骤产出合并进任务草稿（display 口径；失败不写）。"""
+def _draft_update(result: str | None) -> dict[str, Any]:
     if not result:
-        return
+        return {}
     try:
         payload = json.loads(result)
     except (ValueError, TypeError):
-        return
-    task = store.get_task(user_id, task_id)
-    if task is None:
-        return
-    draft = dict(task.get("draft") or {})
-    for key in ("schedule", "fields", "verify", "outbox"):
-        if key in payload:
-            draft[key] = payload[key]
-    store.update_draft(user_id, task_id, draft)
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {key: payload[key] for key in ("schedule", "fields", "verify", "outbox") if key in payload}
 
 
 # ---------------------------------------------------------------------------

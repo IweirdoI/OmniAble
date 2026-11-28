@@ -1,6 +1,6 @@
 # 备货模拟、缺货接管与设备验收契约
 
-状态：TASK-046 / [Issue #66](https://github.com/IweirdoI/OmniAble/issues/66) 的设计 + 模拟实现。本文交付物料清单流程、模拟设备原型（`frontend/src/stock-simulation.js`）与**真机准入契约**（第 2 节）；真机部分按契约另行评估，模拟结果不计作真机成功。关联：[远程接待与现场设备协作设计](REMOTE_RECEPTION.md)（共用的控制权/断联/幂等词汇）、《团队岗位资料共享、版本与撤销访问设计》（`docs/TEAM_KB_ACCESS.md`，PR #80 待合并）。
+状态：TASK-046 / [Issue #66](https://github.com/IweirdoI/OmniAble/issues/66) 的设计 + 模拟实现。本文交付物料清单流程、模拟设备原型（`frontend/src/stock-simulation.js`）与**真机准入契约**（第 2 节）；真机部分按契约另行评估，模拟结果不计作真机成功。关联：[远程接待与现场设备协作设计](REMOTE_RECEPTION.md)（共用的控制权/断联/幂等词汇）、[团队岗位资料共享、版本与撤销访问设计](TEAM_KB_ACCESS.md)。
 
 ## 1 目标与范围
 
@@ -42,7 +42,7 @@
 | 断联正交模型 | TASK-047 的 linkFrozen/controlState 分离 | [REMOTE_RECEPTION.md](REMOTE_RECEPTION.md) 第 2 节 |
 | 业务资料与订单 | 订单核验工作样例及其来源复核语义 | [ORDER_VERIFICATION.md](ORDER_VERIFICATION.md) |
 
-物料与订单数据的访问权限按《团队岗位资料共享设计》（PR #80 待合并）的成员模型执行。
+物料与订单数据的访问权限按[团队岗位资料共享设计](TEAM_KB_ACCESS.md)的成员模型执行。
 
 ## 5 原型与测试
 

@@ -81,30 +81,29 @@ const waitAnnouncement = (page, pattern) => page.waitForFunction(
     // 5) 单开关等价扫描：空格步进移动高亮，回车激活，Esc 退出
     await page.keyboard.press('Escape') // 关闭顶栏菜单，回到基线
     await page.getByTestId('scan-toggle').click()
-    await page.waitForFunction(() => !!document.querySelector('.scan-active'))
+    await page.waitForFunction(() => document.activeElement?.classList.contains('scan-active'))
     const first = await page.evaluate(() =>
       document.querySelector('.scan-active')?.textContent || '')
     await page.keyboard.press(' ')
     await page.waitForFunction((prev) => {
       const el = document.querySelector('.scan-active')
-      return el && el.textContent !== prev
+      return el && el === document.activeElement && el.textContent !== prev
     }, first)
     check('scan mode: Space steps the highlight to the next target')
 
     // 回车激活：步进到顶栏"项目资料"按钮后激活，焦点随之转移
-    await page.waitForFunction(() => {
-      const el = document.querySelector('.scan-active')
-      return el && el.textContent.includes('项目资料')
-    }, undefined, { timeout: 10000 }).catch(() => {})
-    const hadTarget = await page.evaluate(() =>
-      document.querySelector('.scan-active')?.textContent.includes('项目资料'))
-    if (hadTarget) {
-      await page.keyboard.press('Enter')
-      await page.waitForFunction(() =>
-        document.activeElement?.textContent?.includes('项目资料'))
+    const hasTarget = () => page.evaluate(() =>
+      document.activeElement?.classList.contains('scan-active') &&
+      document.activeElement.textContent.includes('项目资料'))
+    for (let i = 0; i < 40 && !(await hasTarget()); i += 1) {
+      await page.keyboard.press('Space')
     }
+    assert.equal(await hasTarget(), true, '扫描必须能定位并聚焦项目资料')
+    await page.keyboard.press('Enter')
+    await page.getByTestId('project-home').waitFor()
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => !document.querySelector('.scan-active'))
+    await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '对话', exact: true }).click()
     assert.match(await page.getByTestId('scan-toggle').innerText(), /扫描导航/,
       'Esc 退出后按钮回到未按下态')
     check('scan mode: Enter activates, Escape exits and restores the toggle')

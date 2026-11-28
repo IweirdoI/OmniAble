@@ -1,4 +1,4 @@
-"""插件动作的受限执行器（TASK-024 / Issue #32）。
+"""受信任插件开发样例的 Python 工作进程（TASK-024 / Issue #32）。
 
 由 `PluginHost.run_action` 以 `python -I`（隔离模式）在独立子进程中启动；
 stdin 收 JSON 载荷，stdout 回 JSON 结果。**在导入插件代码之前**收紧：
@@ -13,7 +13,6 @@ stdin 收 JSON 载荷，stdout 回 JSON 结果。**在导入插件代码之前**
 from __future__ import annotations
 
 import builtins
-import io
 import json
 import os
 import sys
@@ -29,9 +28,11 @@ def _install_restrictions(plugin_dir: Path) -> None:
             target = Path(file).resolve()
         except (TypeError, ValueError, OSError):
             raise PermissionError(f"插件仅可访问自身目录内的文件：{file!r}")
-        if not str(target).startswith(str(root)):
+        if not target.is_relative_to(root):
             raise PermissionError(f"越界读取被拒绝：{file}")
-        return real_open(file, mode, *args, **kwargs)
+        if mode not in {"r", "rt", "rb"} or len(args) > 5 or "opener" in kwargs:
+            raise PermissionError("插件文件接口仅支持只读。")
+        return real_open(target, mode, *args, **kwargs)
 
     builtins.open = guarded_open
 
@@ -91,20 +92,8 @@ def main() -> int:
 
     _install_restrictions(plugin_dir)
 
-    # 受控 open：仅插件目录内（files.read 能力场景）；原始 open 不提供
-    real_open = builtins.open
-
-    def guarded_open(file, mode="r", *args, **kwargs):
-        try:
-            target = Path(file).resolve()
-        except (TypeError, ValueError, OSError):
-            raise PermissionError(f"插件仅可访问自身目录内的文件：{file!r}")
-        if not str(target).startswith(str(plugin_dir.resolve())):
-            raise PermissionError(f"越界读取被拒绝：{file}")
-        return real_open(file, mode, *args, **kwargs)
-
     safe_builtins = dict(_SAFE_BUILTINS)
-    safe_builtins["open"] = guarded_open
+    safe_builtins["open"] = builtins.open
 
     try:
         import time as _time
