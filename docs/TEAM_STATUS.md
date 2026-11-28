@@ -52,7 +52,7 @@
 | TASK-044 | [P1] 设计并实现字幕纠错到业务确认 | 已完成 | 123456s-ai | https://github.com/IweirdoI/OmniAble/issues/64 | 20261128-132417 |
 | TASK-045 | [P1] 实现可审核的对外文字与语音表达 | 已完成 | 123456s-ai | https://github.com/IweirdoI/OmniAble/issues/65 | 20261128-132419 |
 | TASK-046 | [P1] 设计并实现备货模拟、缺货接管与设备验收契约 | 待开始 |  | https://github.com/IweirdoI/OmniAble/issues/66 | 20261126-174032 |
-| TASK-047 | [P2][设计] 远程接待与现场设备协作 | 待开始 |  | https://github.com/IweirdoI/OmniAble/issues/67 | 20261126-174032 |
+| TASK-047 | [P2][设计] 远程接待与现场设备协作 | 待审查 | 123456s-ai | https://github.com/IweirdoI/OmniAble/issues/67 | 20261128-194754 |
 | TASK-048 | [P1] 将资料核验 Demo 接入 AgentArts 并留存部署证据 | 待开始 |  | https://github.com/IweirdoI/OmniAble/issues/68 | 20261126-174032 |
 | TASK-049 | [P2][设计] 团队岗位资料共享、版本与撤销访问 | 待审查 | 123456s-ai | https://github.com/IweirdoI/OmniAble/issues/69 | 20261128-192309 |
 | TASK-050 | [P0] 手机端发起任务、确认与接管 | 待开始 |  | https://github.com/IweirdoI/OmniAble/issues/70 | 20261126-175455 |
