@@ -67,9 +67,11 @@ const startNewChat = async (page) => {
       await page.getByTestId('chat-send').click()
       return (await request).postDataJSON()
     }
-    await ask('本轮上下文标记')
+    const first = await ask('本轮上下文标记')
+    assert.ok(first.session_id, '首轮发送应已创建服务端会话（TASK-018）')
     const beforeForget = await ask('检查是否有前文')
-    assert(beforeForget.history.some(item => item.content === '本轮上下文标记'))
+    assert.equal(beforeForget.session_id, first.session_id)
+    assert.equal(beforeForget.history, undefined, '带会话时上下文由服务端构建，前端不再自证 history')
     await page.locator('#dock-tab-memory').click()
     await page.getByTestId('tab-forget').click()
     await page.getByTestId('forget-input').fill('清理测试记忆')
@@ -78,7 +80,10 @@ const startNewChat = async (page) => {
     assert.equal((await forgetResponse).status(), 200)
     await page.waitForFunction(() => document.querySelector('[data-testid=forget-result]')?.textContent.includes('删除数量：0'))
     assert.match(await page.getByTestId('forget-result').innerText(), /清理测试记忆/)
-    assert.deepEqual((await ask('检查遗忘后的上下文')).history, [])
+    const afterForget = await ask('检查遗忘后的上下文')
+    assert.ok(afterForget.session_id && afterForget.session_id !== first.session_id,
+      '遗忘后新对话使用新的服务端会话')
+    assert.equal(afterForget.history, undefined, '遗忘后同样不重发前端 history')
     check('forget flow reports the backend result and clears chat history')
 
     console.log('All chat browser checks passed.')

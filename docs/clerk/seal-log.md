@@ -29,3 +29,6 @@
 - 20261128-182556 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: 认领 TASK-042（通用任务入口 P0）：首轮后端契约先行——任务存储/状态机/API/两类样例流同机制，前端入口待 #77/#78 合入后二轮；分支 hxf/task-042-task-entry
 - 20261128-184715 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: TASK-042 首轮后端交付 PR #79（8ef4d1d）：任务存储/状态机/执行门控/运行记录关联/两类样例流/17 项测试，全量 1027 passed；前端入口二轮待 #77/#78；转 review
 - 20261128-214528 Linnea <2312809203@qq.com>: merge PR #79 (TASK-042 backend) after #82: api endpoints for tasks coexist with plugin host
+- 20261128-162305 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: TASK-018 UI 收尾提交 PR #77（6eea218）：会话侧栏真列表/懒建/恢复/删除、session_id 契约、双层守卫防旧请求回填、浏览器回归入 CI；前端 54 过、后端会话 24 过、全量 1010 passed；转 review
+- 20261128-163744 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: 修复 seal 与 git eol=lf 规范化不一致：tasks.csv 统一 LF 后重建 seal（CI clerk-check 修复，PR #77）
+- 20261128-214559 Linnea <2312809203@qq.com>: merge PR #77 (TASK-018 UI finish) after #79

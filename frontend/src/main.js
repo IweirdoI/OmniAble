@@ -11,6 +11,7 @@ import { streamChat, applyChatEvent, expireConfirmations } from './chat-stream.j
 import './workbench.css'
 import './plugins.css'
 import { createMemorySync, memoryPanels } from './memory-sync.js'
+import { createSessionRail } from './session-rail.js'
 import { pluginCatalog, pluginCapabilityLabels, filterPlugins, loadInstalledPluginIds, saveInstalledPluginIds } from './plugin-catalog.js'
 
 // 把模型 markdown 文本安全渲染为 HTML（DOMPurify 消毒防 XSS）。流式场景下由 scheduleRender
@@ -330,6 +331,7 @@ createApp({
     ]
 
     const conversationTitle = computed(() => {
+      if (activeSession.value) return activeSession.value.title
       const first = messages.value.find(message => message.role === 'user')
       if (!first) return '新对话'
       const text = first.content
@@ -340,7 +342,12 @@ createApp({
       if (!text) return '代码片段'
       return text.length > 18 ? text.slice(0, 18) + '…' : text
     })
-    const conversationMeta = computed(() => messages.value.length ? '临时会话 · ' + messages.value.length + ' 条消息' : '尚未开始')
+    const conversationMeta = computed(() => {
+      if (activeSession.value) return `已保存 · ${activeSession.value.message_count} 条消息`
+      if (activeSessionId.value) return '会话同步中…'
+      if (!messages.value.length) return '尚未开始'
+      return live.value ? '尚未保存 · 发送后自动保存' : '临时会话 · ' + messages.value.length + ' 条消息'
+    })
 
     const onTabKeydown = (event, index) => {
       let next = index
@@ -409,9 +416,30 @@ createApp({
 
     const now = () => new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(new Date())
 
+    // TASK-018：本地会话列表与恢复。activeSessionId 为空表示尚未落库的临时
+    // 对话——首轮发送时才创建服务端会话（标题取首条消息摘要），避免空会话。
+    const sessions = reactive({ status: 'idle', items: [], total: 0, error: null, updatedAt: null })
+    const sessionRail = createSessionRail(sessions, (path, options) => requestApi(path, options), now)
+    const activeSessionId = ref(null)
+    const activeSession = computed(() => sessions.items.find((item) => item.id === activeSessionId.value) || null)
+    const openingSession = ref(false)
+    const deletingSession = ref(false)
+    const sessionTitleFrom = (text) => {
+      const clean = text
+        .replace(/```[\s\S]*?```/g, '代码片段')
+        .replace(/[#>*_`~]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+      if (!clean) return '新会话'
+      return clean.length > 18 ? clean.slice(0, 18) + '…' : clean
+    }
+    const loadSessions = () => sessionRail.load(user.value.trim())
+    const loadMoreSessions = () => sessionRail.load(user.value.trim(), { offset: sessions.items.length })
+
     const clearLiveSession = () => {
       agentHistory.value = []
       sessionKey.value++
+      activeSessionId.value = null
       memories.value = []
       memorySync.reset()
       messages.value = [greeting()]
@@ -491,6 +519,7 @@ createApp({
         sessionKey.value++
         live.value = false
         memorySync.reset()
+        sessionRail.reset()
         memories.value = [...demoMemories]
         messages.value = [greeting()]
         agentHistory.value = []
@@ -512,6 +541,7 @@ createApp({
             clearLiveSession()
             live.value = true
             await loadDashboard({ quiet: true })
+            loadSessions()
             if (!quiet) tell('已连接本地 API')
             lastError = null
             break
@@ -543,6 +573,7 @@ createApp({
       draft.value = ''
       sending.value = true
       modelSlow.value = false
+      const requestSession = sessionKey.value
       await scrollToBottom()
 
       if (!live.value) {
@@ -558,18 +589,39 @@ createApp({
       }
 
       const assistantMsg = reactive({ id: Date.now() + 1, role: 'assistant', content: '', steps: [], phases: [], confirmations: [], status: 'running', time: now() })
-      const requestSession = sessionKey.value
+      // TASK-018：首轮发送时才创建服务端会话（标题取首条消息摘要），
+      // 避免空会话；创建失败则本轮不落库，如实提示。
+      let sessionId = activeSessionId.value
+      if (!sessionId) {
+        try {
+          const created = await sessionRail.create(user.value.trim(), sessionTitleFrom(text))
+          if (requestSession !== sessionKey.value) {
+            sending.value = false
+            modelSlow.value = false
+            return
+          }
+          activeSessionId.value = created.id
+          sessionId = created.id
+          loadSessions()
+        } catch (error) {
+          tell(`会话创建失败，本轮对话不会保存：${error.message}`)
+        }
+      }
       activeController = new AbortController()
       let pushed = false
       const ensureMsg = () => { if (!pushed) { messages.value.push(assistantMsg); pushed = true } }
       const slowTimer = window.setTimeout(() => { modelSlow.value = true }, 2500)
       try {
-        await streamChat({
+        const payload = {
           user_id: user.value.trim(), message: text,
-          history: agentHistory.value.slice(-20),
           scene_id: sceneId.value,
           use_memory: useMemory.value, save_memory: saveMemory.value,
-        }, (event) => {
+        }
+        // 带会话时上下文由服务端按已完成回合构建（遗忘联动在服务端生效），
+        // 前端不再自证 history；无会话（创建失败/演示）保持旧行为兼容。
+        if (sessionId) payload.session_id = sessionId
+        else payload.history = agentHistory.value.slice(-20)
+        await streamChat(payload, (event) => {
           if (requestSession !== sessionKey.value) return
           ensureMsg()
           applyChatEvent(assistantMsg, event)
@@ -580,6 +632,7 @@ createApp({
             ensureMsg()
             memories.value = (event.memories || []).map(mapMemory)
             latency.value = `${Math.round(event.recall_ms)} ms`
+            if (sessionId) loadSessions()
             pushEvent('recall', runLabels[assistantMsg.status] || '收到执行结果', `${(event.memories || []).length} 条记忆 · 总耗时 ${Math.round(event.latency_ms)} ms`)
             const write = event.memory_write
             if (write && write.status === 'accepted') pushEvent('memory', '本轮内容已接收', write.memory_id || '已进入记忆处理流程')
@@ -592,6 +645,7 @@ createApp({
             if (event.reset_history) {
               messages.value = []
               memorySync.reset()
+              loadSessions()
             }
             renderNow(assistantMsg)
             scrollToBottom()
@@ -683,6 +737,7 @@ createApp({
         const deleted = new Set(result.deleted_ids)
         memories.value = memories.value.filter((item) => !deleted.has(item.id))
         pushEvent('forget', '执行安全遗忘', `${result.count} 条记忆已删除`)
+        loadSessions()
         memorySync.reset()
         const refreshed = await loadDashboard({ quiet: true })
         tell(refreshed ? '遗忘已处理，记忆数据已刷新' : '遗忘已处理，部分记忆数据未能刷新')
@@ -711,6 +766,10 @@ createApp({
     const resetUserState = () => {
       draft.value = ''
       agentHistory.value = []
+      activeSessionId.value = null
+      // 立即清空会话侧栏并作废在途列表响应：切换用户后旧用户的会话
+      // 不能残留显示（列表刷新排在 loadDashboard 之后，存在秒级窗口）
+      sessionRail.reset()
       messages.value = [greeting()]
       memories.value = []
       events.value = []
@@ -742,6 +801,7 @@ createApp({
       if (live.value) {
         clearLiveSession()
         const refreshed = await loadDashboard({ quiet: true })
+        loadSessions()
         tell(refreshed ? `已切换到 ${next}，记忆数据已同步` : `已切换到 ${next}，部分记忆数据未能同步`)
       } else {
         tell(`已切换到 ${next}（演示模式）`)
@@ -762,6 +822,7 @@ createApp({
       }
       scene.value = target.id
       agentHistory.value = []
+      activeSessionId.value = null
       messages.value = [greeting()]
       memories.value = []
       events.value = []
@@ -789,11 +850,62 @@ createApp({
       agentHistory.value = []
       messages.value = []
       activeController?.abort()
+      // 新对话回到未落库的临时态：首轮发送时才创建服务端会话
+      activeSessionId.value = null
+      sessionKey.value++
       if (focus) {
         await nextTick()
         composer.value?.focus()
       }
       if (announce) tell('已开始新对话')
+    }
+
+    // TASK-018：恢复已保存会话（只含已完成回合；被遗忘消息显示服务端占位）。
+    // 打开期间发生切换（sessionKey 变化）时响应过期，不回填聊天区。
+    const openSession = async (session) => {
+      if (!live.value || openingSession.value || sending.value) return
+      activeController?.abort()
+      sessionKey.value++
+      const requestSession = sessionKey.value
+      openingSession.value = true
+      try {
+        const detail = await sessionRail.open(user.value.trim(), session.id)
+        if (!detail || requestSession !== sessionKey.value) return
+        activeSessionId.value = session.id
+        agentHistory.value = []
+        messages.value = detail.messages
+        memories.value = []
+        latency.value = '尚未检索'
+        draft.value = ''
+        await scrollToBottom()
+        tell(`已恢复会话：${session.title}`)
+      } catch (error) {
+        if (requestSession === sessionKey.value) tell(`会话恢复失败：${error.message}`)
+      } finally {
+        openingSession.value = false
+      }
+    }
+
+    const deleteSession = async (session) => {
+      if (!live.value || deletingSession.value || sending.value) return
+      if (!window.confirm(`删除会话「${session.title}」？删除后该会话的全部消息不可恢复。`)) return
+      deletingSession.value = true
+      try {
+        await sessionRail.remove(user.value.trim(), session.id)
+        if (activeSessionId.value === session.id) {
+          activeSessionId.value = null
+          agentHistory.value = []
+          messages.value = [greeting()]
+          sessionKey.value++
+        }
+        await loadSessions()
+        tell('会话已删除')
+      } catch (error) {
+        tell(`删除会话失败：${error.message}`)
+        loadSessions()
+      } finally {
+        deletingSession.value = false
+      }
     }
 
     const syncViewport = () => {
@@ -828,6 +940,8 @@ createApp({
       workspaceTarget, workspaceRefresh, openWorkspace, openChatLink,
       decideConfirmation, confirmationLabels, confirmationStatusLabels,
       stopMessage, runLabels, stageLabels, useMemory, saveMemory, newChat,
+      sessions, activeSessionId, activeSession, openingSession, deletingSession,
+      openSession, deleteSession, loadSessions, loadMoreSessions,
       user, userDraft, live, syncing, sending, ingesting, sessionKey,
       onIngestionBusy, onIngestionCompleted, modelSlow, activeTab, onTabKeydown,
       draft, messages, memories, preferences, stats, profile, latency, memoryPanels,
@@ -886,12 +1000,26 @@ createApp({
       <ProjectLibrary v-show="surface === 'project'" :key="'projects-' + user" :inert="menuOpen" :user="user" :live="live" :visible="surface === 'project'" :busy-chat="sending || syncing || ingesting" @chat="openChat" @workspace="openDock('workspace')" @memory="showPanel('overview')" @ingest="openIngestion" @ask="askFromProject" @forget="prepareForget" />
       <main class="dual-layout" v-show="surface === 'chat'" :inert="menuOpen" :class="{ 'sidebar-hidden': !sidebarOpen, 'sidebar-wide': sidebarOpen && sidebarWide, 'mobile-panel-open': sidebarOpen }">
         <nav class="session-rail" aria-label="会话与工作台导航">
-          <div class="rail-heading"><span>会话</span><button class="rail-new" type="button" @click="newChat()">＋ 新对话</button></div>
+          <div class="rail-heading"><span>会话</span><button class="rail-new" data-testid="session-new" type="button" :disabled="sending" @click="newChat()">＋ 新对话</button></div>
           <div class="rail-sessions">
-            <button class="session-item active" type="button" @click="focusChat" aria-current="true">
+            <button v-if="!activeSessionId" class="session-item active" type="button" data-testid="session-current" @click="focusChat" aria-current="true">
               <span class="session-mark" aria-hidden="true"></span>
               <span class="session-copy"><b>{{ conversationTitle }}</b><small>{{ conversationMeta }}</small></span>
             </button>
+            <p v-if="!live" class="rail-note">连接本地 API 后，完成的对话会自动保存到本机，可随时恢复。</p>
+            <p v-else-if="sessions.status === 'loading' && !sessions.items.length" class="rail-note" role="status">正在读取会话列表…</p>
+            <p v-else-if="sessions.status === 'error'" class="rail-note rail-error" role="alert"><span>{{ sessions.error }}</span><button class="text-button" data-testid="session-retry" type="button" :disabled="sending || syncing" @click="loadSessions()">重试</button></p>
+            <template v-else-if="sessions.items.length">
+              <div v-for="session in sessions.items" :key="session.id" class="session-row">
+                <button class="session-item" :class="{ active: session.id === activeSessionId }" type="button" :data-testid="'session-open-' + session.id" :aria-current="session.id === activeSessionId ? 'true' : null" :disabled="openingSession" :title="session.title" @click="openSession(session)">
+                  <span class="session-mark" aria-hidden="true"></span>
+                  <span class="session-copy"><b>{{ session.title }}</b><small>已保存 · {{ session.message_count }} 条消息</small></span>
+                </button>
+                <button class="session-delete" type="button" :aria-label="'删除会话：' + session.title" :disabled="deletingSession" @click="deleteSession(session)">×</button>
+              </div>
+              <button v-if="sessions.items.length < sessions.total" class="text-button rail-more" type="button" :disabled="sessions.status === 'loading'" @click="loadMoreSessions()">加载更多（{{ sessions.total - sessions.items.length }}）</button>
+            </template>
+            <p v-else class="rail-note">还没有已保存的会话。</p>
           </div>
           <div class="rail-section">
             <span class="rail-label">工作台</span>
@@ -912,9 +1040,9 @@ createApp({
         <section class="chat-panel" aria-labelledby="chat-title">
           <header class="chat-header">
             <div class="chat-heading">
-              <span class="section-kicker">临时会话</span>
+              <span class="section-kicker">{{ activeSessionId ? '已保存会话' : '新对话' }}</span>
               <h1 class="chat-title" id="chat-title" tabindex="-1">对话</h1>
-              <p>当前场景：{{ sceneMeta.label }} · 消息只在本次打开期间保留，切换场景会清空当前对话。</p>
+              <p>当前场景：{{ sceneMeta.label }} · {{ activeSessionId ? '完成的对话已保存到本机，可在左侧恢复；' : '发送首轮消息后自动保存到本机；' }}切换场景会开始新对话。</p>
             </div>
             <div class="chat-header-actions">
               <label class="scene-control" for="scene-select">
@@ -947,7 +1075,7 @@ createApp({
             <article class="message-row" v-for="message in messages" :key="message.id" :class="message.role">
               <div class="message-wrap">
                 <div class="message-meta"><b>{{ message.role === 'assistant' ? 'OmniAble 助理' : '你' }}</b><span>{{ message.time }}</span></div>
-                <div class="bubble" @click="openChatLink" v-html="message.html || renderMarkdown(message.content)"></div>
+                <div class="bubble" :class="{ forgotten: message.suppressed }" @click="openChatLink" v-html="message.html || renderMarkdown(message.content)"></div>
                 <p class="run-status" data-testid="run-status" v-if="message.status" role="status">{{ runLabels[message.status] || message.status }}<span v-if="message.status === 'running' && message.stage"> · {{ stageLabels[message.stage] || message.stage }}</span></p>
                 <p class="run-failure" data-testid="run-failure" v-if="message.failure" role="alert">{{ message.failure }}</p>
                 <ul class="context-warnings" v-if="message.contextWarnings?.length" aria-label="上下文提示">

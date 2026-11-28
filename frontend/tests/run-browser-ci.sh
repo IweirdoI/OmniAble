@@ -66,6 +66,7 @@ export BROWSER_ARTIFACT_DIR="$ARTIFACTS"
 cd "$ROOT"
 node frontend/tests/chat-flow-browser.cjs
 node frontend/tests/workbench-browser.cjs
+node frontend/tests/session-browser.cjs
 node frontend/tests/ingestion-browser.cjs "$FIXTURE_DIR"
 node frontend/tests/project-library-browser.cjs "$ARTIFACTS"
 
