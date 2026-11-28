@@ -18,3 +18,4 @@
 - 20261126-230914 Linnea <2312809203@qq.com>: Preserve TASK-031 and TASK-024 contributor review records from PRs #71 and #73.
 - 20261128-130004 Linnea <2312809203@qq.com>: Preserve master records and TASK-043 contributor review after merging PR #74.
 - 20261128-130832 Linnea <2312809203@qq.com>: merge PR #75 (TASK-044 subtitle correction) after TASK-043/#74: union task records, rebuild seals
+- 20261128-131305 Linnea <2312809203@qq.com>: merge PR #76 (TASK-045 outbound review) after #74/#75: union task records, rebuild seals
