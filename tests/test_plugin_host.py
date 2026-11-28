@@ -405,17 +405,16 @@ def test_nested_import_also_rewritten(host, tmp_path) -> None:
 # 复核三轮：OS 层生效断言（内核回读 + fork 拒绝）与宿主强制改写
 # ---------------------------------------------------------------------------
 
-def test_os_job_kernel_readback_and_fork_denied(host, tmp_path) -> None:
-    """OS 层生效断言：Job 内核回读 limit_flags/UI 掩码；插件 import
-    subprocess 被宿主改写为 PermissionError（源码层 fork 防护）。"""
-    import ctypes
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="Job Object 为 Windows 宿主能力；内核回读仅 Windows 可验")
+def test_os_job_kernel_readback(host, tmp_path) -> None:
+    """OS 层生效断言（仅 Windows）：Popen runner 绑入受限 Job 后，
+    内核回读 limit_flags 含 KILL_ON_CLOSE、UI 掩码含剪贴板/全局原子禁止。"""
     from src.agent import plugin_host as ph
-    from src.common.offline_profile import OutboundBlocked
 
-    # 1) 安装默认包（echo/slow/read_outside，无禁用 API）
+    # 安装默认包（echo/slow/read_outside，无禁用 API）
     _install(host, tmp_path)
 
-    # 2) Popen runner + 绑入 Job + 内核回读
     plugin_dir = host.plugins_dir / "com.example.hostfixture" / "1.0.0"
     code = host._build_restricted_source(plugin_dir, "echo")
     runner = Path(__file__).resolve().parents[1] / "src" / "agent" / "plugin_runner.py"
@@ -436,8 +435,12 @@ def test_os_job_kernel_readback_and_fork_denied(host, tmp_path) -> None:
         if job:
             ph.kernel32_close(job)
 
-    # 3) fork 拒绝（源码层）：含 subprocess 的包被扫描拒绝安装；
-    #    且绕过扫描的受限代码中 import subprocess 改写为 PermissionError
+
+def test_fork_denied_by_scan_and_rewrite(host, tmp_path) -> None:
+    """fork 拒绝（跨平台，源码层）：含 subprocess 的包被扫描拒绝安装；
+    且绕过扫描的受限代码中 import subprocess 改写为 PermissionError。"""
+    from src.agent import plugin_host as ph
+
     bad = '''
 def fork_bomb():
     import subprocess
