@@ -1009,3 +1009,61 @@ p, h1, h2, h3, h4 { overflow-wrap: break-word; }
     transition-duration: .01ms !important;
   }
 }
+
+/* TASK-027：命令面板（免鼠标命令入口）与单开关扫描导航 */
+.rail-commands { justify-self: start; margin-top: 6px; }
+.command-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12vh 16px 16px;
+  background: rgba(8, 10, 14, .62);
+}
+.command-palette {
+  width: min(560px, 100%);
+  max-height: 62vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel-raised, #1a1f29);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .45);
+}
+.command-input {
+  min-height: 48px;
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+}
+.command-input:focus-visible { outline-offset: -2px; }
+.command-list {
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  overflow: auto;
+}
+.command-list li {
+  padding: 9px 10px;
+  border-radius: 9px;
+  color: var(--text);
+  cursor: pointer;
+}
+.command-list li small { display: block; margin-top: 2px; color: var(--faint); font-size: 12px; }
+.command-list li code { float: right; color: var(--faint); font-size: 11px; }
+.command-list li.active,
+.command-list li[aria-selected="true"] { background: #202630; box-shadow: inset 2px 0 0 var(--accent); }
+.command-empty { margin: 0; padding: 14px; color: var(--faint); font-size: 13px; }
+.scan-active {
+  outline: 3px solid #ffd166 !important;
+  outline-offset: 3px !important;
+  border-radius: 6px;
+  background: rgba(255, 209, 102, .14);
+}

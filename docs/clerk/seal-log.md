@@ -32,3 +32,6 @@
 - 20261128-162305 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: TASK-018 UI 收尾提交 PR #77（6eea218）：会话侧栏真列表/懒建/恢复/删除、session_id 契约、双层守卫防旧请求回填、浏览器回归入 CI；前端 54 过、后端会话 24 过、全量 1010 passed；转 review
 - 20261128-163744 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: 修复 seal 与 git eol=lf 规范化不一致：tasks.csv 统一 LF 后重建 seal（CI clerk-check 修复，PR #77）
 - 20261128-214559 Linnea <2312809203@qq.com>: merge PR #77 (TASK-018 UI finish) after #79
+- 20261128-171315 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: 认领 TASK-027（桌面命令无障碍化）：依赖 021/012 已合入；方案=命令目录模块+免鼠标命令面板+单开关扫描导航+讲述人播报受控；分支 hxf/task-027-desktop-commands
+- 20261128-174730 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: TASK-027 交付 PR #78（06747f1）：命令目录/命令面板/单开关扫描/播报受控；单测 50 过、浏览器 6 场景三连过；转 review
+- 20261128-214639 Linnea <2312809203@qq.com>: merge PR #78 (TASK-027 command palette) after #77: session rail and command palette coexist in main.js
