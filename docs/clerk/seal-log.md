@@ -26,3 +26,6 @@
 - 20261128-214230 Linnea <2312809203@qq.com>: merge PR #81 (TASK-047 remote reception) after #80
 - 20261128-214355 Linnea <2312809203@qq.com>: merge PR #82 (TASK-046 stock simulation) after #81: union task records (TASK-046 review claim from pr-82, TASK-047 review claim from #81)
 - 20261128-214412 Linnea <2312809203@qq.com>: regenerate TEAM_STATUS after PR #82 merge
+- 20261128-182556 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: 认领 TASK-042（通用任务入口 P0）：首轮后端契约先行——任务存储/状态机/API/两类样例流同机制，前端入口待 #77/#78 合入后二轮；分支 hxf/task-042-task-entry
+- 20261128-184715 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: TASK-042 首轮后端交付 PR #79（8ef4d1d）：任务存储/状态机/执行门控/运行记录关联/两类样例流/17 项测试，全量 1027 passed；前端入口二轮待 #77/#78；转 review
+- 20261128-214528 Linnea <2312809203@qq.com>: merge PR #79 (TASK-042 backend) after #82: api endpoints for tasks coexist with plugin host
