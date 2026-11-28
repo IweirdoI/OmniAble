@@ -24,3 +24,5 @@
 - 20261128-153649 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: TASK-024 四轮整改记录：0d89119 修六项根因（结构体 winnt.h 真实布局、UI 限制走 JobObjectBasicUIRestrictions(=4)、返回值检查、去 ActiveProcessLimit、CLI 安全 UI 掩码、降级落审计），补内核回读+fork 拒绝断言，宿主测试 18 项，保持 review
 - 20261128-214218 Linnea <2312809203@qq.com>: merge PR #80 (TASK-049 design) after #73: rebuild seals on cb0fea9 base
 - 20261128-214230 Linnea <2312809203@qq.com>: merge PR #81 (TASK-047 remote reception) after #80
+- 20261128-214355 Linnea <2312809203@qq.com>: merge PR #82 (TASK-046 stock simulation) after #81: union task records (TASK-046 review claim from pr-82, TASK-047 review claim from #81)
+- 20261128-214412 Linnea <2312809203@qq.com>: regenerate TEAM_STATUS after PR #82 merge
