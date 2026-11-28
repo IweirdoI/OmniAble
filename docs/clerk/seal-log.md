@@ -35,3 +35,4 @@
 - 20261128-171315 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: 认领 TASK-027（桌面命令无障碍化）：依赖 021/012 已合入；方案=命令目录模块+免鼠标命令面板+单开关扫描导航+讲述人播报受控；分支 hxf/task-027-desktop-commands
 - 20261128-174730 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: TASK-027 交付 PR #78（06747f1）：命令目录/命令面板/单开关扫描/播报受控；单测 50 过、浏览器 6 场景三连过；转 review
 - 20261128-214639 Linnea <2312809203@qq.com>: merge PR #78 (TASK-027 command palette) after #77: session rail and command palette coexist in main.js
+- 20261128-215654 Linnea <2312809203@qq.com>: accept TASK-024/018/027/046/047/049 after PR #73/#77/#78/#79/#80/#81/#82 merges; TASK-042 first-round backend recorded, second round pending
