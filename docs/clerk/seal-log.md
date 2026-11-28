@@ -21,3 +21,4 @@
 - 20261128-131305 Linnea <2312809203@qq.com>: merge PR #76 (TASK-045 outbound review) after #74/#75: union task records, rebuild seals
 - 20261128-132428 Linnea <2312809203@qq.com>: accept TASK-043/044/045 after merging PR #74/#75/#76 and review fixes (bfcd9f3); NVDA and real-device evidence roll up to TASK-035
 - 20261128-144101 Linnea <2312809203@qq.com>: record TASK-024 second review findings: OS job restriction ineffective, keep review
+- 20261128-162305 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: TASK-018 UI 收尾提交 PR #77（6eea218）：会话侧栏真列表/懒建/恢复/删除、session_id 契约、双层守卫防旧请求回填、浏览器回归入 CI；前端 54 过、后端会话 24 过、全量 1010 passed；转 review
