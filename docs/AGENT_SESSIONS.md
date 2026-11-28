@@ -83,10 +83,25 @@ forgotten_memories(user_id TEXT NOT NULL, memory_id TEXT NOT NULL,
 - 单连接 + 线程锁（`check_same_thread=False` + RLock）；流式落库发生在
   worker 终态之后，与请求线程共用同一把锁。
 
-## 七、前端入口（待协调）
+## 七、前端入口（已接入，TASK-018 UI 收尾）
 
-会话列表/切换的前端 UI 属 #11/012 的设计范围，与 UI 负责人协调后接入；
-本阶段交付后端存储、最小 API 与聊天集成，前端可直接消费上述端点。
+会话侧栏已接入聊天主界面（`frontend/src/main.js` 的 `session-rail` 区域），
+状态与操作封装在 `frontend/src/session-rail.js`（可单测）：
+
+- **懒建会话**：新对话回到未落库的临时态，首轮发送时才 `POST /agent/sessions`
+  创建服务端会话（标题取首条消息摘要），失败则该轮不落库并如实提示，请求退回
+  旧行为（自报 `history`），保持兼容。
+- **契约**：请求携带 `session_id` 时不再发送前端 `history`——上下文由服务端按
+  已完成回合构建，遗忘联动在服务端生效；前端不再自证上下文。
+- **恢复**：侧栏点击会话 → `GET /agent/sessions/{user}/{sid}` 恢复已完成对话；
+  被遗忘消息显示服务端占位文案并做弱化样式。恢复的消息不带运行状态，不冒充
+  "刚刚完成"。
+- **旧请求不回填**：切换用户/新对话/打开会话都会使 `sessionKey` 递增，在途
+  响应一律丢弃；`session-rail.js` 内部另有操作号守卫，过期响应不写入状态。
+- **删除**：确认后 `DELETE` 级联物理删除；删除当前会话会清空聊天区。
+- **浏览器回归**：`frontend/tests/session-browser.cjs` 覆盖首轮落库、重启恢复、
+  双用户隔离、删除与中断回合不冒充完成；单元测试见
+  `frontend/tests/session-rail.test.js`。
 
 ## 执行记录
 

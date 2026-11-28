@@ -234,6 +234,24 @@ p, h1, h2, h3, h4 { overflow-wrap: break-word; }
 .session-copy b, .session-copy small { display: block; }
 .session-copy b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
 .session-copy small { margin-top: 4px; color: var(--faint); font-size: 12px; }
+.session-row { display: flex; align-items: stretch; gap: 2px; }
+.session-row .session-item { flex: 1; min-width: 0; }
+.session-delete {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 15px;
+  line-height: 1;
+}
+.session-delete:hover { color: #ffb4b4; border-color: #5c3a3a; background: #2a1e1e; }
+.rail-note { margin: 2px 4px 0; color: var(--faint); font-size: 12px; line-height: 1.5; }
+.rail-note.rail-error { display: grid; gap: 6px; justify-items: start; color: #ffb4b4; }
+.rail-more { justify-self: start; margin: 4px 4px 0; }
 .rail-section { display: grid; gap: 4px; }
 .rail-label { padding: 0 8px 4px; }
 .rail-section button {
@@ -358,6 +376,7 @@ p, h1, h2, h3, h4 { overflow-wrap: break-word; }
 .bubble > :first-child { margin-top: 0; }
 .bubble > :last-child { margin-bottom: 0; }
 .bubble p { margin: .55em 0; }
+.bubble.forgotten { opacity: .72; font-style: italic; }
 .bubble ul, .bubble ol { margin: .55em 0; padding-left: 1.45em; }
 .bubble li { margin: .24em 0; }
 .bubble h1, .bubble h2, .bubble h3, .bubble h4 { margin: .8em 0 .4em; line-height: 1.35; }
