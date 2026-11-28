@@ -11,6 +11,9 @@
 from __future__ import annotations
 
 import json
+import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -396,3 +399,63 @@ def test_nested_import_also_rewritten(host, tmp_path) -> None:
     # 越界读取：受限 open 仍拦截（运行时第二层）
     ok2, content2 = host.run_action("com.example.hostfixture", "read_outside", {})
     assert ok2 is False and "越界" in content2
+
+
+# ---------------------------------------------------------------------------
+# 复核三轮：OS 层生效断言（内核回读 + fork 拒绝）与宿主强制改写
+# ---------------------------------------------------------------------------
+
+def test_os_job_kernel_readback_and_fork_denied(host, tmp_path) -> None:
+    """OS 层生效断言：Job 内核回读 limit_flags/UI 掩码；插件 import
+    subprocess 被宿主改写为 PermissionError（源码层 fork 防护）。"""
+    import ctypes
+    from src.agent import plugin_host as ph
+    from src.common.offline_profile import OutboundBlocked
+
+    # 1) 安装默认包（echo/slow/read_outside，无禁用 API）
+    _install(host, tmp_path)
+
+    # 2) Popen runner + 绑入 Job + 内核回读
+    plugin_dir = host.plugins_dir / "com.example.hostfixture" / "1.0.0"
+    code = host._build_restricted_source(plugin_dir, "echo")
+    runner = Path(__file__).resolve().parents[1] / "src" / "agent" / "plugin_runner.py"
+    process = subprocess.Popen(
+        [sys.executable, "-I", str(runner)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        cwd=str(plugin_dir))
+    note, job = ph._apply_windows_job_restrictions(process)
+    try:
+        assert note is None, f"Job 绑定失败：{note}"
+        readback = ph.query_job_limits(job)
+        assert readback.get("limit_flags", 0) & ph._JOB_LIMIT_KILL_ON_CLOSE
+        assert readback.get("ui", 0) & ph._JOB_UILIMIT_WRITECLIPBOARD
+        assert readback.get("ui", 0) & ph._JOB_UILIMIT_GLOBALATOMS
+    finally:
+        process.kill()
+        process.wait(timeout=5)
+        if job:
+            ph.kernel32_close(job)
+
+    # 3) fork 拒绝（源码层）：含 subprocess 的包被扫描拒绝安装；
+    #    且绕过扫描的受限代码中 import subprocess 改写为 PermissionError
+    bad = '''
+def fork_bomb():
+    import subprocess
+    return subprocess.run(["cmd"]).returncode
+'''
+    source = tmp_path / "src-fork"
+    (source / "payload").mkdir(parents=True)
+    (source / "manifest.json").write_text(
+        json.dumps(_manifest("9.9.9", action_ids=["fork_bomb"]), ensure_ascii=False),
+        encoding="utf-8")
+    (source / "payload" / "main.py").write_text(bad, encoding="utf-8")
+    (source / "LICENSE").write_text("MIT\n", encoding="utf-8")
+    violations = host._scan_payload_forbidden_apis(source)
+    assert violations, "subprocess import 必须被扫描命中"
+
+    # 受限代码改写断言：subprocess import → PermissionError（fork 被拒）。
+    # 报错文案会引用模块名，故按行匹配真实 import 语句而非全文子串
+    restricted = host._build_restricted_source_from_source(source, "fork_bomb")
+    assert not re.search(r"(?m)^\s*(import\s+subprocess|from\s+subprocess)\b",
+                         restricted), "真实 import 语句必须被改写"
+    assert "PermissionError" in restricted

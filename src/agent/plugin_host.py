@@ -79,77 +79,197 @@ class PluginHostError(RuntimeError):
 # 保留为附加检查层。
 # ---------------------------------------------------------------------------
 
-_JOB_LIMIT_KILL_ON_CLOSE = 0x2000
-_JOB_LIMIT_ACTIVE_PROCESS = 0x8
-_JOB_UILIMIT_DESKTOP = 0x1
-_JOB_UILIMIT_HANDLES = 0x2
-_JOB_UILIMIT_READCLIPBOARD = 0x4
-_JOB_UILIMIT_WRITECLIPBOARD = 0x8
-_JOB_UILIMIT_GLOBALATOMS = 0x40
-_JOB_UILIMIT_CREATEWINDOW = 0x80
+_JOB_LIMIT_KILL_ON_CLOSE = 0x00002000
+_JOB_LIMIT_ACTIVE_PROCESS = 0x00000008
+# winnt.h JOBOBJECT_UIRESTRICTIONSClass 正确映射（TASK-024 三轮整改）：
+_JOB_UILIMIT_HANDLES = 0x00000001
+_JOB_UILIMIT_READCLIPBOARD = 0x00000002
+_JOB_UILIMIT_WRITECLIPBOARD = 0x00000004
+_JOB_UILIMIT_SYSTEMPARAMETERS = 0x00000008
+_JOB_UILIMIT_DISPLAYSETTINGS = 0x00000010
+_JOB_UILIMIT_GLOBALATOMS = 0x00000020
+_JOB_UILIMIT_DESKTOP = 0x00000040
+_JOB_UILIMIT_EXITWINDOWS = 0x00000080
 
 
-def _apply_windows_job_restrictions(process) -> str | None:
-    """把子进程绑入受限 Job Object；成功返回作业句柄（由调用方持有直到
-    子进程退出），失败返回原因字符串（不阻断执行——如实记录降级）。"""
+def query_job_limits(job) -> dict[str, int]:
+    """内核回读 Job 限制（测试断言用）：返回 limit_flags/active_limit/ui。"""
+    import ctypes
+    from ctypes import wintypes as _wt
+
+    class _IO_COUNTERS(ctypes.Structure):
+        _fields_ = [(n, ctypes.c_ulonglong) for n in (
+            "ReadOperationCount", "WriteOperationCount",
+            "OtherOperationCount", "ReadTransferCount",
+            "WriteTransferCount", "OtherTransferCount")]
+
+    class _BASIC(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", ctypes.c_uint32),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", ctypes.c_uint32),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", ctypes.c_uint32),
+            ("Reserved", ctypes.c_uint32),
+        ]
+
+    class _EXTENDED(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _BASIC),
+            ("IoInfo", _IO_COUNTERS),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.QueryInformationJobObject.restype = _wt.BOOL
+    kernel32.QueryInformationJobObject.argtypes = [
+        _wt.HANDLE, ctypes.c_int, ctypes.c_void_p, _wt.DWORD,
+        ctypes.POINTER(_wt.DWORD)]
+    info = _EXTENDED()
+    got = _wt.DWORD(0)
+    ok = kernel32.QueryInformationJobObject(
+        job, 9, ctypes.byref(info), ctypes.sizeof(_EXTENDED), ctypes.byref(got))
+    if not ok:
+        return {}
+    basic = info.BasicLimitInformation
+    # UI 掩码在独立信息类 JobObjectBasicUIRestrictions(=4)，单独回读
+    ui = _wt.DWORD(0)
+    if not kernel32.QueryInformationJobObject(
+            job, 4, ctypes.byref(ui), ctypes.sizeof(ui), ctypes.byref(got)):
+        ui.value = 0
+    return {"limit_flags": basic.LimitFlags,
+            "active_limit": basic.ActiveProcessLimit,
+            "ui": ui.value}
+
+
+def kernel32_close(handle: int) -> None:
+    """关闭 Windows 内核句柄（Job/进程；仅 win32）。"""
     if sys.platform != "win32":
-        return "non-windows（Job Object 不适用；OS 级隔离待平台化交付）"
+        return
+    try:
+        import ctypes
+        ctypes.WinDLL("kernel32").CloseHandle(handle)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _apply_windows_job_restrictions(process) -> tuple[str | None, int | None]:
+    """把子进程绑入受限 Job Object。
+
+    Returns:
+        (note, job_handle)。note=None 表示成功（job_handle 由调用方持有，
+        执行完成后应 CloseHandle——kill-on-close 保证超时路径也终止）；
+        失败返回原因且 job_handle=None（句柄已关闭，无泄漏）。
+
+    结构体按 winnt.h 真实布局定义（x64）：
+      JOBOBJECT_BASIC_LIMIT_INFORMATION = 64 字节（LARGE_INTEGER×2、
+      LimitFlags DWORD、SIZE_T×2、ActiveProcessLimit DWORD、Affinity
+      ULONG_PTR、PriorityClass DWORD、SchedulingClass DWORD，含自然对齐）；
+      JOBOBJECT_EXTENDED_LIMIT_INFORMATION = BASIC(64) + IO_COUNTERS(48)
+      + SIZE_T×4(32) = 144 字节。UI 限制不在该布局里——走独立信息类
+      JobObjectBasicUIRestrictions(=4) 设置/回读（内核回读断言在测试中
+      验证 limit_flags 与 UI 掩码生效）。
+    """
+    if sys.platform != "win32":
+        return "non-windows（Job Object 不适用；OS 级隔离待平台化交付）", None
     try:
         import ctypes
         from ctypes import wintypes as _wt
 
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel32.CreateJobObjectW.restype = _wt.HANDLE
-        job = kernel32.CreateJobObjectW(None, None)
-        if not job:
-            return f"CreateJobObject 失败（error={ctypes.get_last_error()}）"
+        kernel32.CreateJobObjectW.argtypes = [_wt.LPCWSTR, _wt.LPVOID]
+        kernel32.SetInformationJobObject.argtypes = [
+            _wt.HANDLE, ctypes.c_int, ctypes.c_void_p, _wt.DWORD]
+        kernel32.SetInformationJobObject.restype = _wt.BOOL
+        kernel32.AssignProcessToJobObject.argtypes = [_wt.HANDLE, _wt.HANDLE]
+        kernel32.AssignProcessToJobObject.restype = _wt.BOOL
+        kernel32.QueryInformationJobObject.argtypes = [
+            _wt.HANDLE, ctypes.c_int, ctypes.c_void_p, _wt.DWORD,
+            ctypes.POINTER(_wt.DWORD)]
+        kernel32.QueryInformationJobObject.restype = _wt.BOOL
+        kernel32.CloseHandle.argtypes = [_wt.HANDLE]
 
-        class _IOCounters(ctypes.Structure):
-            _fields_ = [(n, ctypes.c_ulonglong) for n in
-                        ("ActiveProcess", "Affinity", "PeakProcess", "PeakAffinity")]
+        class _IO_COUNTERS(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_ulonglong) for n in (
+                "ReadOperationCount", "WriteOperationCount",
+                "OtherOperationCount", "ReadTransferCount",
+                "WriteTransferCount", "OtherTransferCount")]
 
-        class _LimitInfo(ctypes.Structure):
+        class _BASIC_LIMIT_INFO(ctypes.Structure):
             _fields_ = [
-                ("PerProcessUserTimeLimit", _IOCounters),
-                ("PerJobUserTimeLimit", _IOCounters),
+                ("PerProcessUserTimeLimit", ctypes.c_longlong),
+                ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", ctypes.c_uint32),
                 ("MinimumWorkingSetSize", ctypes.c_size_t),
                 ("MaximumWorkingSetSize", ctypes.c_size_t),
                 ("ActiveProcessLimit", ctypes.c_uint32),
-                ("Affinity", ctypes.POINTER(ctypes.c_ulong)),
+                ("Affinity", ctypes.c_size_t),
                 ("PriorityClass", ctypes.c_uint32),
-                ("UIRestrictionsClass", ctypes.c_uint32),
-                ("SecurityLimit", ctypes.c_uint32),
-                ("Reserved", ctypes.c_uint32),
+                ("SchedulingClass", ctypes.c_uint32),
             ]
 
-        class _ExtendedLimit(ctypes.Structure):
+        class _EXTENDED_LIMIT_INFO(ctypes.Structure):
             _fields_ = [
-                ("BasicLimitInformation", _LimitInfo),
-                ("IoInfo", _IOCounters),
+                ("BasicLimitInformation", _BASIC_LIMIT_INFO),
+                ("IoInfo", _IO_COUNTERS),
                 ("ProcessMemoryLimit", ctypes.c_size_t),
                 ("JobMemoryLimit", ctypes.c_size_t),
                 ("PeakProcessMemoryUsed", ctypes.c_size_t),
                 ("PeakJobMemoryUsed", ctypes.c_size_t),
             ]
 
-        limits = _ExtendedLimit()
-        limits.BasicLimitInformation.LimitFlags = (
-            _JOB_LIMIT_KILL_ON_CLOSE | _JOB_LIMIT_ACTIVE_PROCESS)
-        limits.BasicLimitInformation.ActiveProcessLimit = 1  # 阻止插件再启动子进程
-        uir = (_JOB_UILIMIT_DESKTOP | _JOB_UILIMIT_HANDLES
-               | _JOB_UILIMIT_READCLIPBOARD | _JOB_UILIMIT_WRITECLIPBOARD
-               | _JOB_UILIMIT_GLOBALATOMS | _JOB_UILIMIT_CREATEWINDOW)
-        limits.BasicLimitInformation.UIRestrictionsClass = uir
-        kernel32.SetInformationJobObject(
-            job, 9, ctypes.byref(limits), ctypes.sizeof(_ExtendedLimit))  # 9=ExtendedLimitInformation
+        JobObjectExtendedLimitInformation = 9
+        JobObjectBasicUIRestrictions = 4
+
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            return f"CreateJobObject 失败（error={ctypes.get_last_error()}）", None
+
+        limits = _EXTENDED_LIMIT_INFO()
+        basic = limits.BasicLimitInformation
+        # fork 防护由源码改写承担（插件代码 import 全被改写，无法触达
+        # subprocess）；不再设 ActiveProcessLimit——其与 Assign 已运行
+        # 进程的语义冲突会导致 runner 误终止（复审实测 rc=101）
+        basic.LimitFlags = _JOB_LIMIT_KILL_ON_CLOSE
+        if not kernel32.SetInformationJobObject(
+                job, JobObjectExtendedLimitInformation,
+                ctypes.byref(limits), ctypes.sizeof(_EXTENDED_LIMIT_INFO)):
+            err = ctypes.get_last_error()
+            kernel32.CloseHandle(job)
+            return f"SetInformationJobObject 失败（error={err}）", None
+
+        # UI 限制走独立信息类 JobObjectBasicUIRestrictions(=4)：UIR…
+        # 字段不在 BASIC_LIMIT_INFORMATION 布局里，赋值到未定义字段只是
+        # 普通 Python 属性、不进内核（复审根因）。掩码取 CLI 子进程安全
+        # 集合：剪贴板/退出系统/系统参数/显示设置/全局原子禁止；
+        # DESKTOP/HANDLES 不设（CLI 子进程需要继承 stdout 管道句柄并访问
+        # 非交互桌面），管道读写仍受管道闭包约束
+        ui = _wt.DWORD(
+            _JOB_UILIMIT_READCLIPBOARD | _JOB_UILIMIT_WRITECLIPBOARD
+            | _JOB_UILIMIT_GLOBALATOMS | _JOB_UILIMIT_EXITWINDOWS
+            | _JOB_UILIMIT_SYSTEMPARAMETERS | _JOB_UILIMIT_DISPLAYSETTINGS)
+        if not kernel32.SetInformationJobObject(
+                job, JobObjectBasicUIRestrictions,
+                ctypes.byref(ui), ctypes.sizeof(ui)):
+            err = ctypes.get_last_error()
+            kernel32.CloseHandle(job)
+            return f"SetInformationJobObject(UI) 失败（error={err}）", None
 
         handle = int(process._handle)  # subprocess 伪句柄
         if not kernel32.AssignProcessToJobObject(job, handle):
+            err = ctypes.get_last_error()
             kernel32.CloseHandle(job)
-            return f"AssignProcessToJobObject 失败（error={ctypes.get_last_error()}）"
-        return None  # 成功；调用方持有 job（不显式关闭，kill-on-close 随子进程退出回收）
+            return f"AssignProcessToJobObject 失败（error={err}）", None
+        return None, int(job)  # 成功：返回 job 句柄供调用方回读/关闭
     except Exception as exc:  # noqa: BLE001 —— OS 限制失败不阻断，如实降级
-        return f"OS 限制应用异常：{type(exc).__name__}"
+        return f"OS 限制应用异常：{type(exc).__name__}", None
 
 
 class PluginHost:
@@ -546,6 +666,84 @@ class PluginHost:
                 lines.append(line)
         return chr(10).join(lines)
 
+    def _build_restricted_source_from_source(self, source_dir: Path,
+                                             action_id: str) -> str:
+        """源目录版受限代码生成（测试断言用，无需安装）。"""
+        import ast as _ast
+        entry_path = (source_dir / "payload" / "main.py").resolve()
+        if not entry_path.is_file():
+            raise PluginHostError(f"入口文件不存在：{entry_path}")
+        tree = _ast.parse(entry_path.read_text(encoding="utf-8", errors="replace"))
+        _SAFE_MODULES = {"time"}
+        for node in _ast.walk(tree):
+            for field in ("body", "orelse", "finalbody"):
+                block = getattr(node, field, None)
+                if not isinstance(block, list):
+                    continue
+                new_block = []
+                for stmt in block:
+                    if isinstance(stmt, _ast.Import):
+                        name = stmt.names[0].name
+                        if name in _SAFE_MODULES:
+                            new_block.append(_ast.Assign(
+                                targets=[_ast.Name(id=name.split(".")[0],
+                                                   ctx=_ast.Store())],
+                                value=_ast.Subscript(
+                                    value=_ast.Name(id="__restricted_modules__",
+                                                    ctx=_ast.Load()),
+                                    slice=_ast.Constant(value=name),
+                                    ctx=_ast.Load())))
+                        else:
+                            new_block.append(_ast.Raise(
+                                exc=_ast.Call(
+                                    func=_ast.Name(id="PermissionError",
+                                                   ctx=_ast.Load()),
+                                    args=[_ast.Constant(
+                                        value=f"插件 import {name} 被宿主拒绝"
+                                              "（未授权能力）。")],
+                                    keywords=[]),
+                                cause=None))
+                        for extra in stmt.names[1:]:
+                            if extra.name in _SAFE_MODULES:
+                                new_block.append(_ast.Assign(
+                                    targets=[_ast.Name(
+                                        id=extra.asname or extra.name.split(".")[0],
+                                        ctx=_ast.Store())],
+                                    value=_ast.Subscript(
+                                        value=_ast.Name(id="__restricted_modules__",
+                                                        ctx=_ast.Load()),
+                                        slice=_ast.Constant(value=extra.name),
+                                        ctx=_ast.Load())))
+                    elif isinstance(stmt, _ast.ImportFrom):
+                        root = (stmt.module or "").split(".")[0]
+                        if root in _SAFE_MODULES:
+                            for alias in stmt.names:
+                                bound = alias.asname or alias.name
+                                new_block.append(_ast.Assign(
+                                    targets=[_ast.Name(id=bound, ctx=_ast.Store())],
+                                    value=_ast.Attribute(
+                                        value=_ast.Subscript(
+                                            value=_ast.Name(
+                                                id="__restricted_modules__",
+                                                ctx=_ast.Load()),
+                                            slice=_ast.Constant(value=root),
+                                            ctx=_ast.Load()),
+                                        attr=alias.name, ctx=_ast.Load())))
+                        else:
+                            new_block.append(_ast.Raise(
+                                exc=_ast.Call(
+                                    func=_ast.Name(id="PermissionError",
+                                                   ctx=_ast.Load()),
+                                    args=[_ast.Constant(
+                                        value=f"插件 import {stmt.module} 被宿主拒绝"
+                                              "（未授权能力）。")],
+                                    keywords=[]),
+                                cause=None))
+                    else:
+                        new_block.append(stmt)
+                setattr(node, field, new_block)
+        return _ast.unparse(_ast.Module(body=tree.body, type_ignores=[]))
+
     def run_action(self, plugin_id: str, action_id: str, args: dict[str, Any], *,
                    timeout: float | None = None) -> tuple[bool, str]:
         """在独立子进程中执行插件动作；超时/崩溃只终止插件。
@@ -583,7 +781,11 @@ class PluginHost:
             )
         except OSError as exc:
             return False, f"插件进程启动失败：{exc}"
-        restrict_note = _apply_windows_job_restrictions(process)
+        restrict_note, job_handle = _apply_windows_job_restrictions(process)
+        # OS 限制降级/生效均落审计（复核项：降级不得仅 pass）
+        self._audit("job_restrict", plugin_id, version=None,
+                    ok=restrict_note is None, detail=restrict_note)
+        stderr_tail = ""
         try:
             raw, _err = process.communicate(
                 input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -592,18 +794,30 @@ class PluginHost:
             # 超时只终止插件子进程；宿主继续
             process.kill()
             process.wait(timeout=5)
+            if job_handle:
+                kernel32_close(job_handle)
             return False, f"插件执行超时（{timeout or self.runner_timeout:.0f} 秒），已终止。"
         except OSError as exc:
             process.kill()
+            if job_handle:
+                kernel32_close(job_handle)
             return False, f"插件通信失败：{exc}"
+        stderr_tail = (_err or b"")[-400:].decode("utf-8", errors="replace")
         raw = raw[:MAX_OUTPUT_BYTES]
+        if job_handle:
+            kernel32_close(job_handle)
         if restrict_note:
-            # OS 限制失败如实降级：结果仍经受限代码 + 白名单执行
+            # OS 限制失败如实降级：结果仍经受限代码 + 白名单执行，
+            # 降级原因进审计（见上方 job_restrict 记录）
             pass
         try:
             result = json.loads(raw.decode("utf-8", errors="replace") or "{}")
         except ValueError:
-            return False, f"插件返回无效结果（退出码 {process.returncode}）。"
+            return False, (f"插件返回无效结果（退出码 {process.returncode}）。"
+                           f"stderr：{stderr_tail}")
         if not result.get("ok"):
-            return False, str(result.get("error") or "插件执行失败。")
+            error = str(result.get("error") or "插件执行失败。")
+            if stderr_tail:
+                error += f"（stderr：{stderr_tail}）"
+            return False, error
         return True, str(result.get("result", ""))
