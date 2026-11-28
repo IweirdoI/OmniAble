@@ -11,6 +11,8 @@ import { streamChat, applyChatEvent, expireConfirmations } from './chat-stream.j
 import './workbench.css'
 import './plugins.css'
 import { createMemorySync, memoryPanels } from './memory-sync.js'
+import { createCommandCatalog, createAnnouncer } from './command-catalog.js'
+import { createScanController } from './scan-navigation.js'
 import { pluginCatalog, pluginCapabilityLabels, filterPlugins, loadInstalledPluginIds, saveInstalledPluginIds } from './plugin-catalog.js'
 
 // 把模型 markdown 文本安全渲染为 HTML（DOMPurify 消毒防 XSS）。流式场景下由 scheduleRender
@@ -374,10 +376,14 @@ createApp({
 
     const statusText = computed(() => live.value ? '实时 API 已连接' : '演示数据模式')
 
+    // TASK-027：读屏播报受控——同一文本 500ms 内只播报一次，不同文本立即
+    // 播报；toast 视觉反馈不受去重影响。
+    const announcer = createAnnouncer({ dedupeMs: 500 })
     const tell = (message) => {
       toast.value = message
+      const verdict = announcer.announce(message)
       announcement.value = ''
-      nextTick(() => { announcement.value = message })
+      if (verdict.announced) nextTick(() => { announcement.value = message })
       window.clearTimeout(tell.timer)
       tell.timer = window.setTimeout(() => { toast.value = '' }, 2800)
     }
@@ -811,6 +817,7 @@ createApp({
       window.visualViewport?.addEventListener('scroll', onViewportChange)
       window.addEventListener('resize', onViewportChange)
       compactViewport.addEventListener?.('change', onViewportChange)
+      window.addEventListener('keydown', onGlobalKeydown)
       scrollToBottom()
       connect({ quiet: true })
     })
@@ -819,7 +826,155 @@ createApp({
       window.visualViewport?.removeEventListener('scroll', onViewportChange)
       window.removeEventListener('resize', onViewportChange)
       compactViewport.removeEventListener?.('change', onViewportChange)
+      window.removeEventListener('keydown', onGlobalKeydown)
     })
+
+    // ------------------------------------------------------------------
+    // TASK-027：桌面命令层——命令目录、免鼠标命令面板、单开关等价扫描。
+    // 命令只登记既有处理器，不新增并行执行入口（同一动作、同一确认路径）。
+    // ------------------------------------------------------------------
+    const commandCatalog = createCommandCatalog()
+    const paletteOpen = ref(false)
+    const paletteQuery = ref('')
+    const paletteActive = ref(0)
+    const paletteInput = ref(null)
+    let paletteOpener = null
+
+    const focusUserId = async () => {
+      // 用户切换器在顶栏菜单内：先展开菜单再聚焦输入框
+      if (!menuOpen.value) await openMenu()
+      await nextTick()
+      const field = document.getElementById('user-id')
+      if (field) field.focus({ preventScroll: true })
+    }
+    const focusSceneSelect = () => {
+      document.getElementById('scene-select')?.focus({ preventScroll: true })
+    }
+
+    commandCatalog.register([
+      { id: 'user.switch', name: '切换用户', aliases: ['用户', '账号'], keywords: ['user'], help: '展开菜单并聚焦用户 ID 输入框', run: () => focusUserId() },
+      { id: 'chat.new', name: '新建对话', aliases: ['新对话', '新会话'], keywords: ['chat', 'new'], help: '清空当前对话开始新对话', run: () => newChat() },
+      { id: 'chat.send', name: '发送消息', aliases: ['发送'], keywords: ['send'], help: '发送输入框中的内容', enabled: () => !!draft.value.trim(), run: () => sendMessage() },
+      { id: 'chat.stop', name: '停止生成', aliases: ['停止'], keywords: ['stop'], help: '请求停止当前运行', enabled: () => sending.value, run: () => stopMessage() },
+      { id: 'sync.now', name: '同步记忆数据', aliases: ['同步'], keywords: ['sync'], help: '重新拉取统计、偏好与画像', run: () => syncCurrent() },
+      { id: 'app.connect', name: '连接本地 API', aliases: ['连接'], keywords: ['connect', 'api'], help: '在实时与演示模式间切换', run: () => connect() },
+      { id: 'scene.switch', name: '选择场景', aliases: ['场景'], keywords: ['scene'], help: '聚焦场景下拉框', run: () => focusSceneSelect() },
+      { id: 'panel.overview', name: '打开记忆总览', aliases: ['总览'], help: '查看统计与最近活动', run: () => showPanel('overview') },
+      { id: 'panel.ingestion', name: '打开接入面板', aliases: ['接入'], help: '上传文件或录入记忆', run: () => showPanel('ingestion') },
+      { id: 'panel.forget', name: '打开遗忘面板', aliases: ['遗忘', '删除记忆'], help: '按指令删除记忆，可预览后再确认', run: () => showPanel('forget') },
+      { id: 'panel.workspace', name: '打开工作区', aliases: ['工作区', '文件'], help: '查看文件、变更与网页', run: () => openDock('workspace') },
+      { id: 'panel.memory', name: '打开记忆面板', aliases: ['记忆面板'], help: '总览、偏好、召回与遗忘', run: () => openDock('memory') },
+      { id: 'panel.plugins', name: '打开插件', aliases: ['插件'], help: '查看已启用插件', run: () => openDock('plugins') },
+      { id: 'chat.focus', name: '回到对话输入框', aliases: ['输入框', '回到对话'], help: '切回对话界面并聚焦输入框', run: () => openChat() },
+    ])
+
+    const paletteItems = computed(() => commandCatalog.match(paletteQuery.value))
+    const openPalette = async (opener) => {
+      paletteOpener = opener || document.activeElement
+      paletteQuery.value = ''
+      paletteActive.value = 0
+      paletteOpen.value = true
+      if (scanMode.value) toggleScan()
+      await nextTick()
+      paletteInput.value?.focus({ preventScroll: true })
+    }
+    const closePalette = async ({ restore = true } = {}) => {
+      if (!paletteOpen.value) return
+      paletteOpen.value = false
+      const opener = paletteOpener
+      paletteOpener = null
+      await nextTick()
+      if (restore && opener && typeof opener.focus === 'function') {
+        opener.focus({ preventScroll: true })
+      }
+    }
+    const executeCommand = async (command) => {
+      if (!command) return
+      const opener = paletteOpener
+      await closePalette({ restore: false })
+      try {
+        await command.run()
+        await nextTick()
+        // 命令未把焦点放到具体目标时归还原焦点
+        const el = document.activeElement
+        if ((!el || el === document.body) && opener && typeof opener.focus === 'function') {
+          opener.focus({ preventScroll: true })
+        }
+      } catch (error) {
+        tell(`命令执行失败：${error.message}`)
+      }
+    }
+    const onPaletteInput = (event) => {
+      paletteQuery.value = event.target.value
+      paletteActive.value = 0
+    }
+    const onPaletteKeydown = (event) => {
+      const items = paletteItems.value
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        if (items.length) paletteActive.value = (paletteActive.value + 1) % items.length
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        if (items.length) paletteActive.value = (paletteActive.value - 1 + items.length) % items.length
+      } else if (event.key === 'Home') {
+        event.preventDefault()
+        paletteActive.value = 0
+      } else if (event.key === 'End') {
+        event.preventDefault()
+        paletteActive.value = Math.max(0, items.length - 1)
+      } else if (event.key === 'Enter') {
+        event.preventDefault()
+        executeCommand(items[paletteActive.value])
+      } else if (event.key === 'Escape') {
+        event.preventDefault()
+        closePalette()
+      } else if (event.key === 'Tab') {
+        event.preventDefault()
+      }
+    }
+
+    // 单开关等价输入：空格步进、回车激活、Esc 退出；激活文本框时自动退出
+    // 扫描以便正常输入（再按扫描键重新进入）。
+    const scan = createScanController()
+    const scanMode = ref(false)
+    const toggleScan = () => {
+      if (scanMode.value) {
+        scan.stop()
+        scanMode.value = false
+        tell('已退出扫描导航')
+        return
+      }
+      if (paletteOpen.value) closePalette({ restore: false })
+      scan.start()
+      scanMode.value = true
+      const first = scan.step()
+      tell(first ? '扫描导航已开启：空格步进，回车激活，Esc 退出' : '扫描导航已开启，但没有可用目标')
+    }
+    const onGlobalKeydown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey
+          && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        if (paletteOpen.value) closePalette()
+        else openPalette()
+        return
+      }
+      if (scanMode.value) {
+        if (event.key === ' ') {
+          event.preventDefault()
+          scan.step()
+        } else if (event.key === 'Enter') {
+          event.preventDefault()
+          const el = scan.activate()
+          scan.refresh()
+          if (el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) toggleScan()
+        } else if (event.key === 'Escape') {
+          event.preventDefault()
+          toggleScan()
+        }
+        return
+      }
+      if (event.key === 'Escape' && paletteOpen.value) closePalette()
+    }
 
     return {
       surface, openProject, openChat, askFromProject,
@@ -841,6 +996,9 @@ createApp({
       pluginCatalog, pluginCapabilityLabels, installedPlugins, installedPluginCount,
       pluginQuery, pluginFilter, pluginFilters, filteredPlugins, isPluginInstalled,
       activePlugin, openPlugin, backToPlugins, togglePlugin, onPluginUse,
+      paletteOpen, paletteItems, paletteActive, paletteInput, paletteQuery,
+      openPalette, closePalette, executeCommand, onPaletteInput, onPaletteKeydown,
+      scanMode, toggleScan,
     }
   },
   template: `
@@ -906,6 +1064,7 @@ createApp({
           <div class="rail-footer">
             <span class="rail-mode" :class="{ live }"><i aria-hidden="true"></i>{{ live ? '实时数据' : '演示数据' }}</span>
             <small>{{ user }}</small>
+            <button class="text-button rail-commands" type="button" data-testid="command-open" @click="openPalette($event.currentTarget)">命令面板（Ctrl+K）</button>
           </div>
         </nav>
 
@@ -924,6 +1083,7 @@ createApp({
                 </select>
               </label>
               <button class="secondary-button new-chat-button" type="button" :disabled="sending" @click="newChat()">＋ 新对话</button>
+              <button class="ghost-button scan-toggle" type="button" data-testid="scan-toggle" :aria-pressed="scanMode" title="单开关等价导航：空格步进，回车激活" @click="toggleScan">{{ scanMode ? '退出扫描' : '扫描导航' }}</button>
               <button class="ghost-button panel-toggle" type="button" :aria-expanded="sidebarOpen" @click="toggleSidebar($event.currentTarget)">{{ sidebarOpen ? '收起面板' : '打开面板' }}</button>
             </div>
           </header>
@@ -1135,6 +1295,36 @@ createApp({
           </div>
         </aside>
       </main>
+      <div v-if="paletteOpen" class="command-palette-backdrop" @mousedown.prevent="closePalette()">
+        <div class="command-palette" role="dialog" aria-modal="true" aria-label="命令面板" data-testid="command-palette">
+          <input
+            ref="paletteInput"
+            class="command-input"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="command-list"
+            :aria-activedescendant="paletteItems.length ? 'command-opt-' + paletteActive : null"
+            aria-label="搜索命令"
+            autocomplete="off"
+            spellcheck="false"
+            :value="paletteQuery"
+            placeholder="输入命令或别名：上下选择，回车执行，Esc 关闭"
+            data-testid="command-input"
+            @input="onPaletteInput"
+            @keydown="onPaletteKeydown"
+          />
+          <ul id="command-list" class="command-list" role="listbox" aria-label="命令列表">
+            <li v-for="(item, i) in paletteItems" :id="'command-opt-' + i" :key="item.id" role="option"
+                :class="{ active: i === paletteActive }" :aria-selected="i === paletteActive"
+                :data-testid="'command-opt-' + item.id"
+                @mousedown.prevent="executeCommand(item)" @mousemove="paletteActive = i">
+              <b>{{ item.name }}</b><code>{{ item.id }}</code>
+              <small>{{ item.help }}</small>
+            </li>
+          </ul>
+          <p v-if="!paletteItems.length" class="command-empty">没有匹配的命令，换个关键词或别名试试。</p>
+        </div>
+      </div>
       <Transition><div class="toast" aria-hidden="true" v-if="toast">{{ toast }}</div></Transition>
       <p class="sr-only" aria-live="polite">{{ announcement }}</p>
     </div>

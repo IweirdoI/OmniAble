@@ -21,3 +21,4 @@
 - 20261128-131305 Linnea <2312809203@qq.com>: merge PR #76 (TASK-045 outbound review) after #74/#75: union task records, rebuild seals
 - 20261128-132428 Linnea <2312809203@qq.com>: accept TASK-043/044/045 after merging PR #74/#75/#76 and review fixes (bfcd9f3); NVDA and real-device evidence roll up to TASK-035
 - 20261128-144101 Linnea <2312809203@qq.com>: record TASK-024 second review findings: OS job restriction ineffective, keep review
+- 20261128-171315 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: 认领 TASK-027（桌面命令无障碍化）：依赖 021/012 已合入；方案=命令目录模块+免鼠标命令面板+单开关扫描导航+讲述人播报受控；分支 hxf/task-027-desktop-commands
