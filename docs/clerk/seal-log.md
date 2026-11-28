@@ -21,3 +21,4 @@
 - 20261128-131305 Linnea <2312809203@qq.com>: merge PR #76 (TASK-045 outbound review) after #74/#75: union task records, rebuild seals
 - 20261128-132428 Linnea <2312809203@qq.com>: accept TASK-043/044/045 after merging PR #74/#75/#76 and review fixes (bfcd9f3); NVDA and real-device evidence roll up to TASK-035
 - 20261128-144101 Linnea <2312809203@qq.com>: record TASK-024 second review findings: OS job restriction ineffective, keep review
+- 20261128-182556 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: 认领 TASK-042（通用任务入口 P0）：首轮后端契约先行——任务存储/状态机/API/两类样例流同机制，前端入口待 #77/#78 合入后二轮；分支 hxf/task-042-task-entry

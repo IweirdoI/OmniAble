@@ -32,6 +32,8 @@ from src.agent.run_store import RunStore, active_runs
 
 
 from src.agent.scheduler import LocalScheduler, TaskStore as SchedulerTaskStore, default_runner
+from src.agent.task_store import TaskStore, TaskStoreError
+from src.agent.task_runner import TaskRunner, TaskStepError, build_plan
 from src.knowledge.memory_service.milvus_client import MemoryBackendUnavailable
 from src.security.semantic_detector import SemanticDetectionUnavailable
 
@@ -47,6 +49,24 @@ run_store = RunStore(project_root=str(Path(__file__).resolve().parents[1]))
 
 # 本地定时任务（TASK-031 / Issue #39）：任务定义与触发历史持久化
 scheduler_store = SchedulerTaskStore(project_root=str(Path(__file__).resolve().parents[1]))
+
+# 通用任务（TASK-042 / Issue #62，DOC-002 契约）：任务/步骤/草稿持久化与
+# 执行门控；数据位置与状态机见 docs/AGENT_TASKS.md
+task_store = TaskStore(project_root=str(Path(__file__).resolve().parents[1]))
+task_runner = TaskRunner(task_store, run_store)
+
+
+class TaskCreateRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128)
+    kind: str = Field(min_length=1, max_length=64)
+    goal: str = Field(min_length=1, max_length=500)
+    mode: str = Field(pattern="^(assist|step|delegate)$")
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskDraftUpdate(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128)
+    draft: dict[str, Any]
 
 class SessionCreateRequest(BaseModel):
     # 定义在路由注册之前：`from __future__ import annotations` 下 FastAPI 在
@@ -534,6 +554,143 @@ def delete_agent_session(user_id: str, session_id: str) -> dict[str, Any]:
     if not deleted:
         raise HTTPException(status_code=404, detail="session not found")
     return {"user_id": user_id, "session_id": session_id, "deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# 通用任务（TASK-042 / Issue #62）：无需选岗位即可发起；计划/授权范围/实际
+# 结果可见；暂停、接管、补充信息；外发单独确认；unknown 不得自动重发。
+# ---------------------------------------------------------------------------
+
+@app.post("/agent/tasks")
+def create_agent_task(req: TaskCreateRequest) -> dict[str, Any]:
+    """创建任务：按样例模板生成计划（两类流走同一状态机与接管机制）。"""
+    try:
+        plan = build_plan(req.kind, req.payload)
+    except TaskStepError as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
+    try:
+        task = task_store.create_task(
+            req.user_id, kind=req.kind, goal=req.goal, mode=req.mode,
+            steps=plan, draft={"payload": req.payload})
+    except TaskStoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"user_id": req.user_id, "task": task}
+
+
+@app.get("/agent/tasks/{user_id}")
+def list_agent_tasks(
+    user_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    return {"user_id": user_id,
+            **task_store.list_tasks(user_id, offset=offset, limit=limit)}
+
+
+@app.get("/agent/tasks/{user_id}/{task_id}")
+def get_agent_task(user_id: str, task_id: str) -> dict[str, Any]:
+    task = task_store.get_task(user_id, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"user_id": user_id, "task": task}
+
+
+@app.post("/agent/tasks/{user_id}/{task_id}/draft")
+def update_agent_task_draft(user_id: str, task_id: str,
+                            req: TaskDraftUpdate) -> dict[str, Any]:
+    """补充信息/编辑草稿（用户可随时更新，不受状态限制）。"""
+    if req.user_id != user_id:
+        raise HTTPException(status_code=403, detail="用户不匹配")
+    task = task_store.update_draft(user_id, task_id, req.draft)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"user_id": user_id, "task": task}
+
+
+@app.post("/agent/tasks/{user_id}/{task_id}/suspend")
+def suspend_agent_task(user_id: str, task_id: str) -> dict[str, Any]:
+    """暂停（不允许对已终态任务暂停）；恢复 = 显式继续执行步骤。"""
+    try:
+        task = task_store.set_task_status(
+            user_id, task_id, "suspended", detail="用户暂停",
+            expect=("ready", "running", "waiting_user"))
+    except TaskStoreError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"user_id": user_id, "task": task}
+
+
+@app.post("/agent/tasks/{user_id}/{task_id}/resume")
+def resume_agent_task(user_id: str, task_id: str) -> dict[str, Any]:
+    """恢复暂停的任务 → waiting_user（等待用户下一步指示，不自动执行）。"""
+    try:
+        task = task_store.set_task_status(
+            user_id, task_id, "waiting_user", detail="已恢复，等待指示",
+            expect=("suspended",))
+    except TaskStoreError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"user_id": user_id, "task": task}
+
+
+@app.post("/agent/tasks/{user_id}/{task_id}/takeover")
+def takeover_agent_task(user_id: str, task_id: str) -> dict[str, Any]:
+    """接管：协助程度切 assist、转等待用户；终态任务拒绝。"""
+    try:
+        task = task_store.takeover(user_id, task_id)
+    except TaskStoreError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"user_id": user_id, "task": task}
+
+
+@app.post("/agent/tasks/{user_id}/{task_id}/steps/{step_id}/run")
+def run_agent_task_step(user_id: str, task_id: str, step_id: str) -> dict[str, Any]:
+    """显式执行一个步骤（assist 模式返回提示不执行；外发先确认；
+    unknown 先核对；暂停/终态拒绝）。"""
+    try:
+        return {"user_id": user_id,
+                "step": task_runner.run_step(user_id, task_id, step_id)}
+    except TaskStepError as exc:
+        status = 404 if exc.code.endswith("not_found") else 409
+        raise HTTPException(status_code=status, detail={
+            "code": exc.code, "message": exc.message}) from exc
+    except TaskStoreError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/agent/tasks/{user_id}/{task_id}/steps/{step_id}/confirm")
+def confirm_agent_task_step(user_id: str, task_id: str, step_id: str) -> dict[str, Any]:
+    """外发步骤单独确认（绑定参数指纹；内容变化即作废）。"""
+    try:
+        return {"user_id": user_id,
+                "step": task_runner.confirm_external(user_id, task_id, step_id)}
+    except TaskStepError as exc:
+        status = 404 if exc.code.endswith("not_found") else 409
+        raise HTTPException(status_code=status, detail={
+            "code": exc.code, "message": exc.message}) from exc
+
+
+@app.post("/agent/tasks/{user_id}/{task_id}/steps/{step_id}/review")
+def review_agent_task_step(user_id: str, task_id: str, step_id: str) -> dict[str, Any]:
+    """核对结果未知的步骤（回到 pending，可显式重试；不自动重发）。"""
+    try:
+        return {"user_id": user_id,
+                "step": task_runner.review_unknown(user_id, task_id, step_id)}
+    except TaskStepError as exc:
+        status = 404 if exc.code.endswith("not_found") else 409
+        raise HTTPException(status_code=status, detail={
+            "code": exc.code, "message": exc.message}) from exc
+
+
+@app.post("/agent/tasks/{user_id}/recover")
+def recover_agent_tasks(user_id: str) -> dict[str, Any]:
+    """重启恢复：遗留 running 任务 → suspended、未决步骤 → unknown。"""
+    return {"user_id": user_id,
+            "recovered": task_store.passivate_running(user_id)}
 
 
 # CORS：绝不将 allow_origins 设为 "*" 同时 allow_credentials=True（无效且不安全的组合）。
