@@ -32,6 +32,9 @@ from src.agent.run_store import RunStore, active_runs
 
 
 from src.agent.scheduler import LocalScheduler, TaskStore as SchedulerTaskStore, default_runner
+
+
+from src.agent.plugin_host import PluginHost, PluginHostError
 from src.knowledge.memory_service.milvus_client import MemoryBackendUnavailable
 from src.security.semantic_detector import SemanticDetectionUnavailable
 
@@ -47,6 +50,19 @@ run_store = RunStore(project_root=str(Path(__file__).resolve().parents[1]))
 
 # 本地定时任务（TASK-031 / Issue #39）：任务定义与触发历史持久化
 scheduler_store = SchedulerTaskStore(project_root=str(Path(__file__).resolve().parents[1]))
+
+
+# 受限插件宿主（TASK-024 / Issue #32）：安装/启用/停用/升级/回滚与受限执行
+def _load_plugin_trust():
+    from src.plugin_package import TrustStore
+    root = Path(__file__).resolve().parents[1] / 'plugins' / 'trust'
+    try:
+        return TrustStore.from_files(root / 'test-root.json', root / 'revocations.json')
+    except Exception:
+        return None
+
+plugin_host = PluginHost(project_root=str(Path(__file__).resolve().parents[1]),
+                         trust_store=_load_plugin_trust())
 
 class SessionCreateRequest(BaseModel):
     # 定义在路由注册之前：`from __future__ import annotations` 下 FastAPI 在
@@ -486,6 +502,64 @@ def scheduler_task_history(
         raise HTTPException(status_code=404, detail="task not found")
     return {"task_id": task_id,
             "history": scheduler_store.fire_history(user_id, task_id, limit=limit)}
+
+
+# 受限插件宿主（TASK-024 / Issue #32）：安装/启用/停用/升级/回滚（可审计）
+# 与插件动作列表。插件动作经统一动作目录暴露（聊天与桌面同一入口）。
+# ---------------------------------------------------------------------------
+
+class PluginInstallRequest(BaseModel):
+    package_path: str = Field(min_length=1, max_length=1000)
+
+
+@app.post("/agent/plugins/install")
+def install_plugin(req: PluginInstallRequest) -> dict[str, Any]:
+    try:
+        return plugin_host.install(req.package_path)
+    except PluginHostError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/agent/plugins")
+def list_plugins() -> dict[str, Any]:
+    return {"plugins": plugin_host.list_installed()}
+
+
+@app.post("/agent/plugins/{plugin_id}/enable")
+def enable_plugin(plugin_id: str) -> dict[str, Any]:
+    try:
+        return plugin_host.set_enabled(plugin_id, True)
+    except PluginHostError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/agent/plugins/{plugin_id}/disable")
+def disable_plugin(plugin_id: str) -> dict[str, Any]:
+    try:
+        return plugin_host.set_enabled(plugin_id, False)
+    except PluginHostError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/agent/plugins/upgrade")
+def upgrade_plugin(req: PluginInstallRequest) -> dict[str, Any]:
+    try:
+        return plugin_host.upgrade(req.package_path)
+    except PluginHostError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/agent/plugins/{plugin_id}/rollback")
+def rollback_plugin(plugin_id: str) -> dict[str, Any]:
+    try:
+        return plugin_host.rollback(plugin_id)
+    except PluginHostError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/agent/plugins/audit")
+def plugin_audit(limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
+    return {"audit": plugin_host.audit_log(limit=limit)}
 
 
 @app.post("/agent/confirmations/{confirm_id}")
