@@ -22,3 +22,4 @@
 - 20261128-132428 Linnea <2312809203@qq.com>: accept TASK-043/044/045 after merging PR #74/#75/#76 and review fixes (bfcd9f3); NVDA and real-device evidence roll up to TASK-035
 - 20261128-144101 Linnea <2312809203@qq.com>: record TASK-024 second review findings: OS job restriction ineffective, keep review
 - 20261128-153649 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: TASK-024 四轮整改记录：0d89119 修六项根因（结构体 winnt.h 真实布局、UI 限制走 JobObjectBasicUIRestrictions(=4)、返回值检查、去 ActiveProcessLimit、CLI 安全 UI 掩码、降级落审计），补内核回读+fork 拒绝断言，宿主测试 18 项，保持 review
+- 20261128-214218 Linnea <2312809203@qq.com>: merge PR #80 (TASK-049 design) after #73: rebuild seals on cb0fea9 base
