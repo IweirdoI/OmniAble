@@ -20,3 +20,14 @@ test('only sends an acknowledged, confirmed, unsent version', () => {
   assert.equal(canSend({ ...base, draftVersion: 2 }), false)
   assert.equal(canSend({ ...base, sentVersion: 1 }), false)
 })
+
+test('a cancelled version stays blocked until a new confirmation', () => {
+  const base = { confirmedVersion: 1, draftVersion: 1, acknowledged: true, sentVersion: 0, cancelledVersion: 1 }
+  // 取消后同一版本不可再发送（TASK-045 复审修复项）
+  assert.equal(canSend(base), false)
+  // 重新确认同一版本不放行；修改草稿并确认新版本后才生效
+  assert.equal(canSend({ ...base, draftVersion: 2 }), false)
+  assert.equal(canSend({ ...base, draftVersion: 2, confirmedVersion: 2 }), true)
+  // 取消发生在确认任何版本之前时不锁定后续新版本
+  assert.equal(canSend({ ...base, cancelledVersion: 0 }), true)
+})

@@ -11,7 +11,8 @@ export function needsConfirmation(confirmedVersion, draftVersion) {
 
 export function canSend(state) {
   return !needsConfirmation(state.confirmedVersion, state.draftVersion) &&
-    Boolean(state.acknowledged) && Number(state.sentVersion) !== Number(state.confirmedVersion)
+    Boolean(state.acknowledged) && Number(state.sentVersion) !== Number(state.confirmedVersion) &&
+    Number(state.cancelledVersion ?? 0) !== Number(state.confirmedVersion)
 }
 
 export default {
@@ -21,6 +22,7 @@ export default {
     const draftVersion = ref(1)
     const confirmedVersion = ref(0)
     const sentVersion = ref(0)
+    const cancelledVersion = ref(0)
     const acknowledged = ref(false)
     const cancelled = ref(false)
     const speechStopped = ref(false)
@@ -32,6 +34,7 @@ export default {
       draftVersion: draftVersion.value,
       acknowledged: acknowledged.value,
       sentVersion: sentVersion.value,
+      cancelledVersion: cancelledVersion.value,
     }))
 
     function edited() {
@@ -52,6 +55,8 @@ export default {
 
     function cancel() {
       cancelled.value = true
+      // 取消锁定当前已确认版本：不播报也不外发；修改草稿并确认新版本后才生效。
+      cancelledVersion.value = confirmedVersion.value
       speechStopped.value = true
       message.value = '已取消：不播报，也不外发。'
     }
@@ -63,6 +68,10 @@ export default {
       }
       if (needsConfirm.value) {
         message.value = `草稿 v${draftVersion.value} 尚未确认，不能外发。`
+        return
+      }
+      if (Number(cancelledVersion.value) === Number(confirmedVersion.value)) {
+        message.value = '已取消：不播报，也不外发；修改草稿并确认新版本后才会生效。'
         return
       }
       if (!acknowledged.value) {
