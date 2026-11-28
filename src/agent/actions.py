@@ -24,6 +24,7 @@ import pathlib
 import re
 import shlex
 import subprocess
+import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -724,10 +725,37 @@ ACTIONS: tuple[Action, ...] = (
 )
 _ACTION_BY_NAME: dict[str, Action] = {action.name: action for action in ACTIONS}
 
+# 动态注册（TASK-024 插件宿主）：插件动作与内置动作同一目录、同一分发入口。
+# 安装/启用时注册、停用时注销——「停用后动作消失」由目录可见性保证。
+_DYNAMIC_LOCK = threading.Lock()
+_DYNAMIC_ACTIONS: dict[str, Action] = {}
+
+
+def register_action(action: Action) -> None:
+    """注册动态动作（插件）；同名覆盖内置动作被拒绝（保留旧工具名兼容）。"""
+    with _DYNAMIC_LOCK:
+        if action.name in _ACTION_BY_NAME and action.name not in _DYNAMIC_ACTIONS:
+            raise ValueError(f"动作名与内置动作冲突：{action.name}")
+        _DYNAMIC_ACTIONS[action.name] = action
+
+
+def unregister_action(name: str) -> bool:
+    with _DYNAMIC_LOCK:
+        return _DYNAMIC_ACTIONS.pop(name, None) is not None
+
+
+def dynamic_actions() -> tuple[Action, ...]:
+    with _DYNAMIC_LOCK:
+        return tuple(_DYNAMIC_ACTIONS.values())
+
 
 def get_action(name: str) -> Action | None:
-    """按名称取动作；未知动作返回 None。"""
-    return _ACTION_BY_NAME.get(name)
+    """按名称取动作（内置优先，其次动态注册的插件动作）；未知返回 None。"""
+    action = _ACTION_BY_NAME.get(name)
+    if action is not None:
+        return action
+    with _DYNAMIC_LOCK:
+        return _DYNAMIC_ACTIONS.get(name)
 
 
 def actions_available(ctx: ActionContext) -> tuple[Action, ...]:
@@ -737,7 +765,7 @@ def actions_available(ctx: ActionContext) -> tuple[Action, ...]:
     注册模型工具列表时不要求已注入。
     """
     available: list[Action] = []
-    for action in ACTIONS:
+    for action in (*ACTIONS, *dynamic_actions()):
         if action.name == "search_memory":
             if ctx.use_memory and ctx.tools_enabled:
                 available.append(action)
@@ -782,7 +810,7 @@ def dispatch_action(name: str, args: dict, ctx: ActionContext) -> tuple[bool, st
         (ok, content, error_code)。未知动作返回 (False, 提示, "tool_unavailable")；
         参数非法返回 (False, 提示, "invalid_arguments")；不抛异常。
     """
-    action = _ACTION_BY_NAME.get(name)
+    action = get_action(name)  # 内置优先，其次动态注册（插件动作同入口）
     if action is None:
         return False, "不支持的工具：未获允许或当前不可用。", "tool_unavailable"
     # 能力开关统一裁决：目录里可用才允许执行（与模型可注册的集合一致）

@@ -15,8 +15,4 @@
 - 20261125-090718 Linnea <2312809203@qq.com>: Import submitted TASK-020 claim and review from PR #54
 - 20261125-235217 Linnea <2312809203@qq.com>: PR #60: re-seal after verifying all records from both parents
 - 20261125-235822 Linnea <2312809203@qq.com>: PR #58: import original TASK-025 claim only, verified against master and contributor head
-- 20261126-230914 Linnea <2312809203@qq.com>: Preserve TASK-031 and TASK-024 contributor review records from PRs #71 and #73.
-- 20261128-130004 Linnea <2312809203@qq.com>: Preserve master records and TASK-043 contributor review after merging PR #74.
-- 20261128-130832 Linnea <2312809203@qq.com>: merge PR #75 (TASK-044 subtitle correction) after TASK-043/#74: union task records, rebuild seals
-- 20261128-131305 Linnea <2312809203@qq.com>: merge PR #76 (TASK-045 outbound review) after #74/#75: union task records, rebuild seals
-- 20261128-132428 Linnea <2312809203@qq.com>: accept TASK-043/044/045 after merging PR #74/#75/#76 and review fixes (bfcd9f3); NVDA and real-device evidence roll up to TASK-035
+- 20261126-181011 HXFhappiness <204864123+HXFhappiness@users.noreply.github.com>: TASK-031 认领与实现：scheduler.py 本地定时任务（可控时钟/DST/租约/错过/无人确认等待），test_scheduler 10 项，全量 992 passed；PR #71 待审查
