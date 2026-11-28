@@ -767,6 +767,9 @@ createApp({
       draft.value = ''
       agentHistory.value = []
       activeSessionId.value = null
+      // 立即清空会话侧栏并作废在途列表响应：切换用户后旧用户的会话
+      // 不能残留显示（列表刷新排在 loadDashboard 之后，存在秒级窗口）
+      sessionRail.reset()
       messages.value = [greeting()]
       memories.value = []
       events.value = []

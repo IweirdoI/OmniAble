@@ -89,9 +89,11 @@ const switchUser = async (page, next) => {
     assert.notEqual(bPayload.session_id, payload.session_id, '不同用户的会话必须隔离')
     await waitDone(page)
     await switchUser(page, USER_A)
-    await page.waitForFunction(() =>
-      document.querySelectorAll('[data-testid^=session-open-]').length === 1)
-    assert.match(await page.locator('.session-rail').innerText(), /第一条消息/)
+    // 等待条件绑定 A 的会话标题：切换瞬间旧用户的列表必须先被清空
+    await page.waitForFunction(() => {
+      const items = [...document.querySelectorAll('[data-testid^=session-open-]')]
+      return items.length === 1 && /第一条消息/.test(items[0].textContent)
+    })
     assert.ok(!(await page.locator('.chat-stream').innerText()).includes('已根据记忆整理回答'),
       '切回后聊天区为空，不得显示其他用户的对话内容')
     check('sessions and in-chat content stay isolated across users')
